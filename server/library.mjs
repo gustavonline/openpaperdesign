@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import os from 'node:os';
-import { connectionErrors, resolveConnections, isArtboard } from '../runtime/diagram-model.js';
+import { connectionErrors, resolveConnections, isArtboard, PAPER_FORMAT, isPaperFormat } from '../runtime/diagram-model.js';
 
 export const MAX_PAPER_BYTES = 20 * 1024 * 1024;
 export const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -17,7 +17,7 @@ export class PaperError extends Error {
 const fail = (condition, message) => { if (!condition) throw new PaperError(400, message); };
 const finite = value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1e6;
 export function validatePaper(paper) {
-  fail(paper && paper.format === 'osm-canvas' && paper.version === 1, 'Unsupported Paper format');
+  fail(paper && isPaperFormat(paper.format) && paper.version === 1, 'Unsupported Paper format');
   fail(typeof paper.name === 'string' && paper.name.trim().length > 0 && paper.name.length <= 80, 'Paper name needs 1–80 characters');
   fail(Array.isArray(paper.pages) && paper.pages.length >= 1 && paper.pages.length <= 100, 'Invalid Pages');
   const pages = new Set(); let total = 0;
@@ -54,7 +54,7 @@ export function validatePaper(paper) {
     fail(Array.isArray(paper.symbols) && paper.symbols.length <= 100, 'Scratchpad holds at most 100 symbols');
     for (const symbol of paper.symbols) {
       fail(symbol && ID.test(symbol.id) && typeof symbol.name === 'string' && symbol.name.length <= 80 && Array.isArray(symbol.nodes) && symbol.nodes.length <= 1000, 'Invalid Scratchpad symbol');
-      validatePaper({format:'osm-canvas',version:1,name:symbol.name,pages:[{id:'scratchpad',root:[symbol.root],nodes:symbol.nodes}],assets:paper.assets});
+      validatePaper({format:PAPER_FORMAT,version:1,name:symbol.name,pages:[{id:'scratchpad',root:[symbol.root],nodes:symbol.nodes}],assets:paper.assets});
     }
     fail(new Set(paper.symbols.map(s=>s.id)).size === paper.symbols.length, 'Duplicate Scratchpad identity');
   }
@@ -64,7 +64,7 @@ export function blankPaper(name = 'Untitled Paper', width = 1440, height = 900) 
   fail(typeof name === 'string', 'Paper name must be text'); name = name.trim().replace(/\s+/g, ' ');
   fail(name.length > 0 && name.length <= 80 && !/[\x00-\x1f\x7f]/.test(name), 'Paper name needs 1–80 characters');
   fail([width, height].every(n => Number.isInteger(n) && n >= 16 && n <= 10000), 'Artboard sizes must be whole pixels from 16 to 10000');
-  return validatePaper({format:'osm-canvas',version:1,name,pages:[{id:randomBytes(8).toString('hex'),name:'Page 1',next_id:2,root:[1],nodes:[{id:1,name:'Artboard 1',type:'frame',clip:true,rect:{x:0,y:0,w:width,h:height},style:{fills:[{type:'solid',color:'#ffffff'}],stroke:null,stroke_width:1,corner_radius:0,opacity:1},visible:true,locked:false,children:[]}]}],assets:{}});
+  return validatePaper({format:PAPER_FORMAT,version:1,name,pages:[{id:randomBytes(8).toString('hex'),name:'Page 1',next_id:2,root:[1],nodes:[{id:1,name:'Artboard 1',type:'frame',clip:true,rect:{x:0,y:0,w:width,h:height},style:{fills:[{type:'solid',color:'#ffffff'}],stroke:null,stroke_width:1,corner_radius:0,opacity:1},visible:true,locked:false,children:[]}]}],assets:{}});
 }
 async function noLink(target, optional = false) {
   try { const st = await fs.lstat(target); if (st.isSymbolicLink()) throw new PaperError(400, 'Linked paths are not supported'); return st; }
@@ -143,13 +143,13 @@ export class PaperLibrary {
       catch(error){
         if(error.code!=='EEXIST')throw error;let owner;
         try{owner=JSON.parse(await fs.readFile(path.join(lock,'owner.json'),'utf8'));}catch{}
-        let alive=true;if(owner?.format==='osm-paper-lock'&&owner.host===HOST&&Number.isInteger(owner.pid)){try{process.kill(owner.pid,0);}catch(e){if(e.code==='ESRCH')alive=false;}}
+        let alive=true;if(['paper-lock','osm-paper-lock'].includes(owner?.format)&&owner.host===HOST&&Number.isInteger(owner.pid)){try{process.kill(owner.pid,0);}catch(e){if(e.code==='ESRCH')alive=false;}}
         if(!alive){await fs.rm(lock,{recursive:true,force:true});continue;}
         if(Date.now()-started>=1500)throw new PaperError(423,'Paper is busy in another writer; retry');
         await new Promise(resolve=>setTimeout(resolve,25));
       }
     }
-    try { await writeExclusive(path.join(lock,'owner.json'),JSON.stringify({format:'osm-paper-lock',host:HOST,pid:process.pid})); return await action(); }
+    try { await writeExclusive(path.join(lock,'owner.json'),JSON.stringify({format:'paper-lock',host:HOST,pid:process.pid})); return await action(); }
     finally { await fs.rm(lock,{recursive:true,force:true}); }
   }
   async atomic(folder, name, bytes, previous, authorize = () => {}) {

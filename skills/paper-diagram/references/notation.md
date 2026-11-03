@@ -17,4 +17,4 @@ Keep source IDs in a code/native-model handoff when present. Note the source and
 
 For dense layouts, preserve manual placements and split the view before introducing a new layout engine. Check geometric bounds, label space and line paths in the actual render. A line passing through an unrelated service/table is a readability defect even when both endpoint IDs are valid.
 
-References: [C4 notation](https://c4model.com/diagrams/notation), [C4 containers](https://c4model.com/diagrams/container), and the inspected [architecture/layout methods](../../osm-paper/references/methods.md).
+References: [C4 notation](https://c4model.com/diagrams/notation), [C4 containers](https://c4model.com/diagrams/container), and the inspected [architecture/layout methods](../../paper/references/methods.md).

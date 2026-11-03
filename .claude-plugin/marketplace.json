@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "osm-paper",
+      "name": "openpaperdesign",
       "source": "./",
       "description": "Lightweight design and diagram Papers, browser Home and MCP tools."
     }

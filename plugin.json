@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "osm-paper",
-  "version": "0.5.0-preview.2",
-  "description": "Lightweight design and diagram Papers, a local Home, browser editing and MCP tools. Node.js only.",
+  "name": "openpaperdesign",
+  "version": "0.6.0-preview.1",
+  "description": "Design, diagram and share editable Papers with your AI agent.",
   "author": {
     "name": "Gustav Online",
     "url": "https://github.com/gustavonline"
@@ -22,7 +22,7 @@
       "interface": {
         "displayName": "OpenPaperDesign",
         "shortDescription": "Design and diagram Papers",
-        "longDescription": "A lightweight file-based design workspace. Home lists personal Papers and explicitly opened projects; the browser editor includes drawing, inspection, diagram symbols, exports and optional shared presence. Node.js 22+; no runtime install, database or cloud account.",
+        "longDescription": "Create layouts, graphics and architecture diagrams in an editable canvas. Home brings together personal Papers, project libraries and server controls. Inspect, comment, export or invite another person or agent.",
         "developerName": "Gustav Online",
         "category": "Design",
         "logo": "./assets/logo.svg",

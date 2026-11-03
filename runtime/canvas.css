@@ -62,10 +62,10 @@ body.rail-standalone:not(.mesurer-ready) #rail,body.mesurer-ready.mesurer-minimi
    4px apart in a 4px-padded group (as a native ToolbarGroup), 20px glyphs at the native 1px line (0.8 of
    the 16-unit grid), the native ink and control radius; hover and the current tool use the editor's own
    tints (as every native tool button below). */
-.osm-design-slot{display:flex;align-items:center;justify-content:center;padding:4px 0}
-.osm-design-slot[data-vertical=true]{padding:4px 0}
+.paper-design-slot{display:flex;align-items:center;justify-content:center;padding:4px 0}
+.paper-design-slot[data-vertical=true]{padding:4px 0}
 body.mesurer-docked #rail{position:static;transform:none;padding:0;gap:4px;border:0;background:none;box-shadow:none}
-.osm-design-slot[data-vertical=false] #rail{flex-direction:row}
+.paper-design-slot[data-vertical=false] #rail{flex-direction:row}
 body.mesurer-docked #rail .ibtn{width:32px;height:32px;border-radius:var(--msr-radius-control,5px);color:var(--msr-color-ink-900,var(--text));background:transparent}
 body.mesurer-docked #rail .ibtn .icon{width:20px;height:20px;stroke-width:.8}
 body.mesurer-docked #rail .ibtn:hover{background:var(--hover)}
@@ -107,19 +107,19 @@ body.mesurer-docked #rail .ibtn:focus-visible{outline:1px solid var(--msr-color-
 #mesurer-root [role=menu] [role^=menuitem]:hover{background:var(--hover);color:var(--text)}
 #mesurer-root [role=menu] [role^=menuitem][aria-checked=true]{background:var(--selected);color:var(--accent-ink)}
 /* Edit is the first segment of the native mode switch (Edit | Inspect). */
-.osm-toolbar-grip{display:flex;align-items:center;justify-content:center;flex:0 0 10px;color:var(--msr-color-ink-500);cursor:grab}
-.osm-toolbar-grip:hover{color:var(--msr-color-ink-700)}
-.mesurer-toolbar-motion[data-orientation=vertical] .osm-toolbar-grip svg{transform:rotate(90deg)}
-.osm-design-mode{display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--msr-color-ink-700,currentColor)}
-.osm-design-mode[aria-pressed=true]{color:var(--msr-color-ink-900,currentColor)}
-.osm-design-mode:not([aria-pressed=true]):hover{background:color-mix(in srgb,var(--msr-color-ink-200,currentColor) 50%,transparent)}
-.osm-design-mode svg{display:block}
-.osm-design-mode:focus-visible{outline:1px solid var(--msr-color-ink-500,currentColor);outline-offset:1px}
+.paper-toolbar-grip{display:flex;align-items:center;justify-content:center;flex:0 0 10px;color:var(--msr-color-ink-500);cursor:grab}
+.paper-toolbar-grip:hover{color:var(--msr-color-ink-700)}
+.mesurer-toolbar-motion[data-orientation=vertical] .paper-toolbar-grip svg{transform:rotate(90deg)}
+.paper-design-mode{display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--msr-color-ink-700,currentColor)}
+.paper-design-mode[aria-pressed=true]{color:var(--msr-color-ink-900,currentColor)}
+.paper-design-mode:not([aria-pressed=true]):hover{background:color-mix(in srgb,var(--msr-color-ink-200,currentColor) 50%,transparent)}
+.paper-design-mode svg{display:block}
+.paper-design-mode:focus-visible{outline:1px solid var(--msr-color-ink-500,currentColor);outline-offset:1px}
 /* The native pill marks the current mode and slides with its native transition: one 30px step per 28px
    segment and 2px gap (build.mjs guards the native step), Edit first. */
-#mesurer-root .mesurer-toolbar-tool-switch:has(.osm-design-mode) .mesurer-toolbar-tool-switch-pill{transform:translate(0)}
-#mesurer-root .mesurer-toolbar-tool-switch:has(.osm-design-mode)[data-value=inspect] .mesurer-toolbar-tool-switch-pill{transform:translate(30px)}
-#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-switch:has(.osm-design-mode)[data-value=inspect] .mesurer-toolbar-tool-switch-pill{transform:translateY(30px)}
+#mesurer-root .mesurer-toolbar-tool-switch:has(.paper-design-mode) .mesurer-toolbar-tool-switch-pill{transform:translate(0)}
+#mesurer-root .mesurer-toolbar-tool-switch:has(.paper-design-mode)[data-value=inspect] .mesurer-toolbar-tool-switch-pill{transform:translate(30px)}
+#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-switch:has(.paper-design-mode)[data-value=inspect] .mesurer-toolbar-tool-switch-pill{transform:translateY(30px)}
 /* Let native overlay, toolbar and popovers use their individual z-indexes. Editor chrome stays above
    the inspection overlay, native popovers above chrome. Their containing block remains the viewport.
    The bar's surface is the side panels' own token. */
@@ -279,11 +279,11 @@ body.inspecting #stage{cursor:crosshair}
 .share-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.share-actions button{padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--field);color:var(--text);font:inherit;font-size:12px}#share-primary{background:var(--text);color:var(--surface);border-color:transparent}
 #sharing-dialog textarea{width:100%;height:100px;margin-top:12px;font-size:11px}.share-stop{padding:0;margin-top:16px;border:0;background:transparent;color:var(--text-2);font-size:12px;text-decoration:underline}
 body.shared-paper [aria-label="Clear feedback…"],body.read-only [data-mesurer-comment-ui]{display:none!important}
-body.read-only .osm-design-mode{opacity:.4;cursor:default}
+body.read-only .paper-design-mode{opacity:.4;cursor:default}
 
 .access-badge{font-size:10px;white-space:nowrap;color:var(--text-2);padding:0 4px}body.read-only #home{display:none}
 
-body.read-only .osm-design-mode{pointer-events:none}body.read-only #rail [data-tool]:not([data-tool=select]):not([data-tool=hand]){opacity:.4;pointer-events:none}
+body.read-only .paper-design-mode{pointer-events:none}body.read-only #rail [data-tool]:not([data-tool=select]):not([data-tool=hand]){opacity:.4;pointer-events:none}
 
 .artboard.free-root{background:transparent;box-shadow:none}.free-root>.board-label{display:none}
 .board-resizers{position:absolute;inset:0;pointer-events:none;display:none;outline:calc(1px / var(--zoom)) solid var(--accent)}

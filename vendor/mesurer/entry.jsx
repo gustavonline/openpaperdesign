@@ -8,7 +8,7 @@ import { Mesurer, createLocalStoragePersistence } from 'mesurer';
 // interface, native snapshot schema, unchanged); otherwise it stays browser-local under `persistKey`.
 // A saved toolbar position, dock and orientation are respected; only when none is saved yet does the
 // toolbar start snapped to the bottom centre.
-const LEGACY_PERSIST_KEY = 'osm-linkedin-mesurer-v2', SETTINGS_KEY = 'mesurer-settings';
+const LEGACY_PERSIST_KEY = 'paper-inspection', SETTINGS_KEY = 'mesurer-settings';
 let root;
 const VIEW_FIELDS = ['enabled', 'minimized', 'xrayVisible', 'toolMode', 'rulersVisible', 'guideOrientation'];
 const PAGE_VIEW_FIELDS = ['selectedGuideIds', 'selectedArrowIds', 'selectedPenStrokeIds', 'selectedTextIds', 'activeMeasurement', 'heldDistances'];
@@ -88,7 +88,7 @@ function DesignMode({ host, api, design }) {
   }, [owner, enabled, inspecting]);
   // Its pill (native) marks the current mode.
   return (
-    <button type="button" className="osm-design-mode" disabled={host.readOnly} aria-pressed={design} aria-label="Edit: change the artwork"
+    <button type="button" className="paper-design-mode" disabled={host.readOnly} aria-pressed={design} aria-label="Edit: change the artwork"
       title="Edit" onClick={() => host.enterDesign()}><FrameIcon /></button>
   );
 }
@@ -98,7 +98,7 @@ function DesignMode({ host, api, design }) {
 function DesignTools({ host, vertical }) {
   const ref = useRef(null);
   useLayoutEffect(() => { host.dock(ref.current); return () => host.undock(); }, []);
-  return <div ref={ref} className="osm-design-slot" data-vertical={vertical ? 'true' : 'false'} />;
+  return <div ref={ref} className="paper-design-slot" data-vertical={vertical ? 'true' : 'false'} />;
 }
 
 export function openMesurer(container, host) {
@@ -135,10 +135,10 @@ export function openMesurer(container, host) {
     return {
       design,
       readOnly: !!host.readOnly,
-      handle: <span className="osm-toolbar-grip" title="Drag to move" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><circle cx="3" cy="2" r=".8"/><circle cx="7" cy="2" r=".8"/><circle cx="3" cy="5" r=".8"/><circle cx="7" cy="5" r=".8"/><circle cx="3" cy="8" r=".8"/><circle cx="7" cy="8" r=".8"/></svg></span>,
-      mode: <DesignMode key="osm-design-mode" host={host} api={api} design={design} />,
+      handle: <span className="paper-toolbar-grip" title="Drag to move" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><circle cx="3" cy="2" r=".8"/><circle cx="7" cy="2" r=".8"/><circle cx="3" cy="5" r=".8"/><circle cx="7" cy="5" r=".8"/><circle cx="3" cy="8" r=".8"/><circle cx="7" cy="8" r=".8"/></svg></span>,
+      mode: <DesignMode key="paper-design-mode" host={host} api={api} design={design} />,
       // A minimised toolbar shows no tools; the host rail then stands alone on the canvas.
-      tools: api.minimized ? null : <DesignTools key="osm-design-tools" host={host} vertical={api.vertical} />,
+      tools: api.minimized ? null : <DesignTools key="paper-design-tools" host={host} vertical={api.vertical} />,
     };
   }, { bounds: host.bounds });
   root.render(<Mesurer portalTarget={container} persistKey={persistKey} persistence={persistence} shortcutsEnabled

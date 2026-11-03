@@ -19,7 +19,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RUNTIME = path.resolve(HERE,'../runtime');
 const PLUGIN = path.resolve(HERE,'..');
 const ICONS=await Promise.all(['icon.svg','icon-dark.svg'].map(async(file,i)=>({src:`data:image/svg+xml;base64,${(await fs.readFile(path.join(PLUGIN,'assets',file))).toString('base64')}`,mimeType:'image/svg+xml',theme:i?'dark':'light'})));
-const SERVER_INFO={name:'osm-paper',title:'OpenPaperDesign',version:VERSION,icons:ICONS};
+const SERVER_INFO={name:'openpaperdesign',title:'OpenPaperDesign',version:VERSION,icons:ICONS};
 const inside = (root,target) => target===root || target.startsWith(root+path.sep);
 const client = req => /^[a-zA-Z0-9_-]{1,80}$/.test(req.headers['x-paper-client']||'') ? req.headers['x-paper-client'] : '';
 function paperId(url) {
@@ -37,9 +37,10 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
   const real=await projectWorkspace(workspace);
   const library=await PaperLibrary.open(real),streams=new Set();let heartbeat,watcher,registration;
   await rememberWorkspace(real);
+  let closingPromise,app;
   const homeApps=new Map(),home=createHome(async root=>{
     if(root===real)return {library,url:`http://127.0.0.1:${server.address().port}`};
-    const previous=homeApps.get(root);if(previous&&!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance)homeApps.delete(root);
+    const previous=homeApps.get(root);if(previous&&(previous.closed||!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance))homeApps.delete(root);
     if(!homeApps.has(root))homeApps.set(root,await connectWorkspace(root));return homeApps.get(root);
   });
   const presence=createPresence({publish:data=>emit('presence',data)});
@@ -56,7 +57,12 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       if(pathname==='/api/events'&&req.method==='GET'){
         res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});res.write(': connected\n\n');res.paperId=url.searchParams.getAll('paper').length===1&&ID.test(url.searchParams.get('paper'))?url.searchParams.get('paper'):null;streams.add(res);if(res.paperId)res.write(`event: presence-snapshot\ndata: ${JSON.stringify(presence.snapshot(res.paperId))}\n\n`);req.on('close',()=>streams.delete(res));return;
       }
-      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OSM Paper',version:VERSION,instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss()});
+      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
+      if(pathname==='/api/server/stop'&&req.method==='POST'){
+        const args=JSON.parse(await readBody(req,1024));
+        if(args?.instance!==registration?.instance)throw new PaperError(409,'The server changed. Refresh Home before stopping it.');
+        json(res,200,{stopping:true});setImmediate(()=>app.close().catch(error=>process.stderr.write(`Paper shutdown: ${error.message}\n`)));return;
+      }
       if(pathname==='/api/access'&&req.method==='GET')return json(res,200,{role:'owner',shared:false});
       if(pathname==='/api/home'){
         if(req.method==='GET')return json(res,200,await home());
@@ -120,7 +126,8 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
     });
     watcher.on('error',error=>{process.stderr.write(`File watching stopped: ${error.message}. API updates still notify open browsers.\n`);watcher.close();});
   }catch(error){process.stderr.write(`File watching unavailable: ${error.message}. API updates still notify open browsers.\n`);}
-  return {library,server,sharing,presence,url:`http://127.0.0.1:${server.address().port}`,async close(){for(const app of homeApps.values())await app.close();presence.close();clearInterval(heartbeat);watcher?.close();for(const t of timers.values())clearTimeout(t);for(const res of streams)res.end();streams.clear();await sharing.close();await new Promise(resolve=>server.close(resolve));await registration.close();}};
+  app={library,server,sharing,presence,url:`http://127.0.0.1:${server.address().port}`,get closed(){return !!closingPromise;},close(){return closingPromise??=(async()=>{for(const child of homeApps.values())await child.close();presence.close();clearInterval(heartbeat);watcher?.close();for(const t of timers.values())clearTimeout(t);for(const res of streams)res.end();streams.clear();await sharing.close();await new Promise(resolve=>server.close(resolve));await registration.close();})();}};
+  return app;
 }
 
 async function connectWorkspace(root,agentClient){
@@ -132,7 +139,7 @@ async function connectWorkspace(root,agentClient){
 
 const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false}});
 export const TOOLS=[
-  {...tool('paper_home','Open Home: personal Papers and explicitly opened projects. No arguments lists them; create/open use a returned workspaceId.',{action:{type:'string',enum:['list','create','open']},workspaceId:string,paperId:string,name:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/ui':{entrypoints:[{type:'global'}]}}},
+  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop']},workspaceId:string,paperId:string,name:string,instance:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/ui':{entrypoints:[{type:'global'}]}}},
   tool('paper_open','Open a Paper workspace. Omit workspace for the personal library; select an absolute project folder for project-local Papers.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
   tool('paper_list','List saved Papers in the opened workspace.',{}),
   tool('paper_create','Create a blank saved Paper; return its id, files and editor URL.',{name:string,width:{type:'integer',minimum:16,maximum:10000},height:{type:'integer',minimum:16,maximum:10000}}),
@@ -147,7 +154,7 @@ export const TOOLS=[
 export async function serveStdio() {
   const apps=new Map(),agentClient=randomBytes(16).toString('hex');let active=null;
   const getApp=async root=>{
-    const previous=apps.get(root);if(previous&&!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance)apps.delete(root);
+    const previous=apps.get(root);if(previous&&(previous.closed||!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance))apps.delete(root);
     if(!apps.has(root))apps.set(root,await connectWorkspace(root,agentClient));return apps.get(root);
   };
   const home=createHome(getApp);
@@ -157,7 +164,7 @@ export async function serveStdio() {
     if(name==='paper_open'){
       const root=await projectWorkspace(args.workspace===undefined?await personalWorkspace():args.workspace);
       await rememberWorkspace(root);active=await getApp(root);
-      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.5.0-preview.2'};
+      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.6.0-preview.1'};
     }
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
     if(name==='paper_list')return {papers:await active.library.list()};

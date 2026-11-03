@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><script>try{const theme=localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='osm-paper:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>All Papers — Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=874de546739b">
+<html lang="en"><head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>All Papers — Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=6708a0274217">
 <style>
 /* One grid for both columns: the 40px title row (--bar-h), then the 30px control row (--control-h) after a
    12px gap (--gap), so the Projects row and the search field share a centre line, as do the mark and title. */
@@ -53,6 +53,11 @@ body{padding:var(--safe-top,0) var(--safe-right,0) var(--safe-bottom,0) var(--sa
 .side{top:var(--safe-top,0);bottom:var(--safe-bottom,0);left:var(--safe-left,0)}
 main{top:var(--safe-top,0);right:var(--safe-right,0);bottom:var(--safe-bottom,0);left:calc(200px + var(--safe-left,0px))}
 @media(max-width:759px){main{left:var(--safe-left,0)}#workspace-filter{display:block}.tools{flex-wrap:wrap;height:auto}.search{min-width:80px}}
+.home-actions{display:flex;align-items:center;gap:8px}.server-control{height:var(--control-h);padding:0 10px;border:1px solid var(--edge-strong);border-radius:6px;background:transparent;color:var(--text-2)}
+#servers-dialog{width:min(440px,calc(100vw - 32px));max-height:80vh;overflow:auto;padding:20px;border:1px solid var(--edge-strong);border-radius:12px;background:var(--popover);color:var(--text);box-shadow:var(--shadow)}
+#servers-dialog::backdrop{background:rgb(0 0 0/.35)}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.dialog-head h2{margin:0;font-size:15px;font-weight:600}.dialog-help{margin:12px 0;color:var(--text-2);font-size:12px}
+.server-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:60px;border-top:1px solid var(--line)}.server-name{font-weight:500}.server-status{margin-top:2px;color:var(--text-2);font-size:11px}.server-stop{height:26px;padding:0 10px;border:1px solid var(--edge-strong);border-radius:5px;background:transparent;color:var(--text)}.server-stop:hover{color:var(--danger);border-color:currentColor}.server-stop:disabled{opacity:.5}
+#server-message{margin:12px 0 0;font-size:12px;color:var(--text-2)}
 </style></head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -68,7 +73,7 @@ main{top:var(--safe-top,0);right:var(--safe-right,0);bottom:var(--safe-bottom,0)
   <div class="store" id="storage" title="Each Paper is an ordinary folder of files on this device">Saved on this device</div>
 </aside>
 <main>
-  <header class="bar"><h1>All Papers</h1><button class="primary" id="new-paper" type="button" title="Create a blank Paper and open it">New Paper</button></header>
+  <header class="bar"><h1>All Papers</h1><div class="home-actions"><button class="server-control" id="servers" type="button" aria-haspopup="dialog">Servers</button><button class="primary" id="new-paper" type="button" title="Create a blank Paper and open it">New Paper</button></div></header>
   <div class="content">
     <p class="problem" id="problem" role="alert" hidden></p>
     <div class="tools">
@@ -81,5 +86,10 @@ main{top:var(--safe-top,0);right:var(--safe-right,0);bottom:var(--safe-bottom,0)
     <p id="none" class="empty" hidden>No Papers match your search. Press Escape to clear it.</p>
   </div>
 </main>
-<script type="module" src="home.js?v=b8da040c3f0e"></script>
+<dialog id="servers-dialog" aria-labelledby="servers-title">
+  <div class="dialog-head"><h2 id="servers-title">Servers</h2><button id="servers-close" class="ibtn" type="button" aria-label="Close servers">✕</button></div>
+  <p class="dialog-help">Known Paper collections on this device. Stopping a server closes its connections and shared links. Saved Papers stay on disk.</p>
+  <div id="server-list"></div><p id="server-message" role="status" hidden></p>
+</dialog>
+<script type="module" src="home.js?v=3b62d1611bff"></script>
 </body></html>

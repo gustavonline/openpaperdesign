@@ -1,5 +1,7 @@
 // Plain layer operations shared by the browser and the file server. No parallel graph or runtime.
 export const clone = value => structuredClone(value);
+export const PAPER_FORMAT='openpaperdesign';
+export const isPaperFormat=value=>value===PAPER_FORMAT||value==='osm-canvas';
 // A page can contain both exportable artboards and ordinary free canvas layers.
 export const isArtboard = node => node.type === 'frame' && !node.diagram && node.canvas !== true;
 export function moveLayer(node,dx,dy){node.rect.x+=dx;node.rect.y+=dy;if(node.type==='stroke')node.points=node.points?.map(p=>({...p,x:p.x+dx,y:p.y+dy}));}

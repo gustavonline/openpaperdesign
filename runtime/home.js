@@ -1,6 +1,6 @@
 const embedded=document.documentElement.dataset.mcp==='true';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),create=document.getElementById('new-paper');
-let selected='all',projects=[],cards=[],busy=false;
+let selected='all',projects=[],cards=[],busy=false,disconnected=false;
 
 // The small MCP Apps transport is only used by the sidebar resource. The browser uses HTTP.
 const pending=new Map();let sequence=0,ready=Promise.resolve();
@@ -23,7 +23,7 @@ if(embedded){
     else if(message.method==='ping'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
     else if(message.method==='ui/resource-teardown'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
   });
-  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.5.0-preview.2'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
+  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.6.0-preview.1'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
     hostContext(result.hostContext);
     if(!result.hostCapabilities?.serverTools)throw new Error('This host cannot open Paper Home. Ask your agent to open it in the browser.');
     parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');
@@ -71,7 +71,7 @@ function render(data){
   }
   document.getElementById('storage').title=`Personal Papers: ${data.storageRoot}. Project Papers stay in their project’s Paper folder.`;filter();
 }
-async function load(){if(busy)return;problem.hidden=true;try{render(await request());}catch(error){fail(error);}}
+async function load(){if(busy||disconnected)return;problem.hidden=true;try{render(await request());}catch(error){fail(error);}}
 create.addEventListener('click',async()=>{
   if(busy)return;busy=true;create.disabled=true;create.textContent='Creating…';problem.hidden=true;
   try{const made=await request({action:'create',workspaceId:selected==='all'?'personal':selected});await navigate(made.url);}catch(error){fail(error);}finally{busy=false;create.disabled=false;create.textContent='New Paper';if(embedded)load();}
@@ -79,9 +79,38 @@ create.addEventListener('click',async()=>{
 document.getElementById('all-papers').addEventListener('click',()=>choose('all'));
 document.getElementById('workspace-filter').addEventListener('change',event=>choose(event.target.value));
 q.addEventListener('input',filter);q.addEventListener('keydown',event=>{if(event.key==='Escape'){q.value='';filter();}});
-const key='osm-canvas:home:layout';
+const key='paper:home:layout';
 function layout(mode){list.className=mode;for(const value of ['list','grid'])document.getElementById(`as-${value}`).setAttribute('aria-pressed',String(value===mode));try{localStorage.setItem(key,mode);}catch{}}
 for(const mode of ['list','grid'])document.getElementById(`as-${mode}`).addEventListener('click',()=>layout(mode));
 let saved;try{saved=localStorage.getItem(key);}catch{}layout(saved==='list'?'list':'grid');
 load();addEventListener('focus',load);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
-setInterval(()=>{if(!document.hidden)load();},15000);
+setInterval(()=>{if(!document.hidden&&!disconnected)load();},15000);
+
+const serversDialog=document.getElementById('servers-dialog'),serverMessage=document.getElementById('server-message');
+function renderServers(){
+  const area=document.getElementById('server-list');area.replaceChildren();
+  for(const project of projects){
+    const server=project.server,row=document.createElement('div'),info=document.createElement('div'),name=document.createElement('div'),status=document.createElement('div');row.className='server-row';name.className='server-name';status.className='server-status';name.textContent=project.name;
+    status.textContent=server?.state==='running'?`Running${server.sharingCount?` · ${plural(server.sharingCount,'shared Paper')}`:''}`:server?.state==='unavailable'?'Unavailable':project.unavailable?'Folder unavailable':'Stopped';
+    if(server?.message)status.title=server.message;info.append(name,status);row.append(info);
+    if(server?.state==='running'){
+      const stop=document.createElement('button');stop.className='server-stop';stop.type='button';stop.textContent='Stop server';stop.disabled=!server.canStop;stop.title=server.canStop?`Stop ${project.name}`:'Stop this older server from its terminal';
+      stop.addEventListener('click',async()=>{
+        if(busy)return;busy=true;stop.disabled=true;stop.textContent='Stopping…';serverMessage.hidden=true;
+        try{
+          const result=await request({action:'stop',workspaceId:project.id,instance:server.instance});
+          disconnected=!embedded&&result.url===location.origin;
+          if(disconnected){
+            for(const p of projects)if(p.server?.url===result.url)p.server={state:'stopped'};
+            create.disabled=true;serverMessage.textContent='Server stopped. Reopen Home through the plugin to start it again.';problem.textContent='Server stopped. Your Papers are saved. Reopen Home through the plugin to continue.';problem.hidden=false;
+          }else{render(await request());serverMessage.textContent='Server stopped. Your Papers are saved.';}
+          renderServers();serverMessage.hidden=false;
+        }catch(error){serverMessage.textContent=error.message;serverMessage.hidden=false;stop.disabled=false;stop.textContent='Stop server';}
+        finally{busy=false;}
+      });row.append(stop);
+    }
+    area.append(row);
+  }
+}
+document.getElementById('servers').addEventListener('click',async()=>{if(!disconnected)await load();renderServers();serversDialog.showModal();});
+document.getElementById('servers-close').addEventListener('click',()=>serversDialog.close());

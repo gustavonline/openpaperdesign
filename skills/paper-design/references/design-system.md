@@ -31,4 +31,4 @@ For an existing codebase, prefer its semantic tokens and real primitive APIs. In
 
 Compare the rendered result with the governing decisions. Check the intended scope changed and sibling directions/reference originals did not. Validate the requested export and actual font/image load. Report observations, omissions and unverified states; do not turn a style inventory into a claim of an implemented design system.
 
-Method sources and pinned checkpoints: [provenance](../../osm-paper/references/methods.md).
+Method sources and pinned checkpoints: [provenance](../../paper/references/methods.md).

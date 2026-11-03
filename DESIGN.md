@@ -1,4 +1,4 @@
-# OSM Paper editor
+# OpenPaperDesign editor
 
 ## Purpose and scope
 

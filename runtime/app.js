@@ -1,7 +1,7 @@
 import {setupPresence} from './presence.js?v=3a51591568af';
 import { setupSharing } from './sharing.js?v=052a5c2d717a';
-import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard } from './diagram-model.js?v=1575ed8e28dd';
-import { setupLibrary } from './diagram-ui.js?v=499eaae2279e';
+import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
+import { setupLibrary } from './diagram-ui.js?v=257300bbee91';
 const $ = selector => document.querySelector(selector);
 const stage = $('#stage'), world = $('#world'), body = document.body, form = $('#properties'), tree = $('#layer-tree');
 // Which Paper this page edits, read once from the URL (`?paper=<id>`, exactly once; the server refuses an
@@ -27,7 +27,7 @@ const assetUrl = path => paperBase + path;
 // This tab, so its own change events can be told from another tab's or an agent's.
 const clientId = (access.clientPrefix || '') + (crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
 const clientHeaders = { 'X-Paper-Client': clientId };
-const LIMIT = 1e6, VIEW_KEY = scoped('osm:linkedin:view:2'), PANEL_KEY = scoped('osm:linkedin:panels:1'), ROW_CAP = 200;
+const LIMIT = 1e6, VIEW_KEY = scoped('paper:view:2'), PANEL_KEY = scoped('paper:panels:1'), ROW_CAP = 200;
 let scene, revision, selected = null, gesture, frameRequest, saveTimer, viewTimer, toastTimer, textEdit, fieldBefore;
 // `inspection`: Mesurer owns input (any native tool, menu or utility; artwork editing pauses).
 // `inspectMode`: the mode shown is Inspect. A utility or menu opened from Edit pauses editing but keeps Edit shown.
@@ -37,7 +37,7 @@ const entries = new Map(), nodes = new Map(), dom = new Map(), boards = new Map(
 let presenceUI,libraryUI, connectFrom = null, refreshingConnections = false;
 const connectionCache = new WeakMap();
 const history = [], future = [], expanded = new Set(), shownChildren = new Map();
-let camera = { x: 40, y: 80, z: .4 }, pageId = '65414bc094022367', views = {}, viewReady = false;
+let camera = { x: 40, y: 80, z: .4 }, pageId = null, views = {}, viewReady = false;
 const finite = x => Number.isFinite(x) && Math.abs(x) <= LIMIT;
 const bound = (n, min = -LIMIT, max = LIMIT) => Math.max(min, Math.min(max, n));
 const copy = value => structuredClone(value);
@@ -62,7 +62,7 @@ function redraw() {
 }
 // Canvas view (per project, this browser only): None / Dots / Grid as a CSS background that follows the
 // camera, plus an optional canvas colour. Never part of the scene, its artwork or exports.
-const CANVAS_KEY = scoped('osm:linkedin:canvas-view:1');
+const CANVAS_KEY = scoped('paper:canvas-view:1');
 let canvasView = { pattern: 'none', color: null };
 function paintBackground() {
   stage.style.backgroundColor = canvasView.color || '';
@@ -460,7 +460,7 @@ async function recoverPaper() {
 // toolbar mounts and written behind it: the native workspace snapshot, unchanged, revision-checked like the
 // document. Identical snapshots are not re-sent. Until a save succeeds the latest snapshot is also kept in
 // this browser as a backup; a conflict or failure stays visible with a download, and nothing is overwritten.
-const FEEDBACK_BACKUP = `osm-paper-${paperId}-feedback-backup`;
+const FEEDBACK_BACKUP = `openpaperdesign-${paperId}-feedback-backup`;
 const feedback = { workspace: null, revision: null, last: 'null', pendingBytes: null, saving: null, timer: 0, error: null, conflict: false };
 const keepBackup = bytes => { try { bytes === null ? localStorage.removeItem(FEEDBACK_BACKUP) : localStorage.setItem(FEEDBACK_BACKUP, bytes); } catch { /* The visible status still says what is unsaved. */ } };
 async function loadFeedback() {
@@ -1030,7 +1030,7 @@ rail.addEventListener('click', e => {
       b.innerHTML = `<svg class="icon"><use href="#i-${icon}"/></svg><span>${label}</span><kbd>${key}</kbd>`; return b;
     }));
     const home = chev.closest('.mesurer-root') || body; if (flyout.parentElement !== home) home.append(flyout);
-    const r = chev.getBoundingClientRect(), vertical = rail.closest('.osm-design-slot')?.dataset.vertical !== 'false';
+    const r = chev.getBoundingClientRect(), vertical = rail.closest('.paper-design-slot')?.dataset.vertical !== 'false';
     toggleMenu(flyout, chev, e.detail === 0, (w, h) => vertical ? { x: r.left > innerWidth / 2 ? r.left - w - 6 : r.right + 6, y: r.top - 4 }
       : { x: r.left - 8, y: r.top > innerHeight / 2 ? r.top - h - 6 : r.bottom + 6 });
     return;
@@ -1194,11 +1194,11 @@ const mesurerHost = {
   theme(value) {
     if (value === 'light' || value === 'dark') document.documentElement.dataset.theme = value;
     else delete document.documentElement.dataset.theme;
-    try { localStorage.setItem('osm-paper:theme', value); } catch { /* Personal preference is optional. */ }
+    try { localStorage.setItem('openpaperdesign:theme', value); } catch { /* Personal preference is optional. */ }
   },
   startInDesign: true,
   // Toolbar settings stay in this browser; this Paper's notes are its feedback file (see `feedback`).
-  persistKey: `osm-paper-${paperId}-mesurer`,
+  persistKey: `openpaperdesign-${paperId}-mesurer`,
   // Native docking resolves within the free canvas between the side panels. One rectangle for every edge and
   // orientation, decided from the bar's horizontal size and frozen by the native hook for a whole drag (no
   // drop previews; the bar lands where it snaps): if the horizontal bar fits centred between the floating
@@ -1286,7 +1286,7 @@ function loadMesurer(inspect = false) {
   if (mesurer) { if (inspect) mesurer.inspect(); return Promise.resolve(); }
   if (loading) return loading;
   mesurerHost.startInDesign = !inspect;
-  loading = import('./mesurer.js?v=d97c6cd94af5').then(library => {
+  loading = import('./mesurer.js?v=59e4ec992c1b').then(library => {
     mesurerLib = library; migrateFeedback(); library.openMesurer($('#mesurer-root'), mesurerHost);
     mesurer = { inspect: () => mesurerHost.api?.inspect(), pause: () => mesurerHost.api?.pause() };
   }).catch(error => { body.classList.add('rail-standalone'); message(`Inspect is unavailable: ${error.message}`); })
@@ -1294,16 +1294,14 @@ function loadMesurer(inspect = false) {
   return loading;
 }
 function toggleInspect() { if (!mesurer) return loadMesurer(true); inspection ? setTool('select') : mesurer.inspect(); }
-// Notes an earlier version kept only in this browser move into the Paper's feedback file once, and only
-// while that file has none: this Paper's own old key, or (for the imported LinkedIn Paper, recognised by its
-// source fingerprint) the original shared key. The browser copy is left as it was.
-const LINKEDIN_SOURCE = 'ee4f1d4284fd39ff3357746e8c7a240f0c1ab6b71b6abd6a2e585740f40d799d', MIGRATED = `osm-paper-${paperId}-feedback-migrated`;
+// Import this Paper's own earlier browser feedback when its saved feedback file is empty.
+const MIGRATED = `openpaperdesign-${paperId}-feedback-migrated`;
 function migrateFeedback() {
   if (feedback.revision === null || feedback.pendingBytes !== null) return;
   try { if (localStorage.getItem(MIGRATED)) return; } catch { return; }
   const done = () => { try { localStorage.setItem(MIGRATED, '1'); } catch { /* Migration is optional. */ } };
   if (feedback.workspace !== null) { done(); return; }
-  const local = mesurerLib.readLocalWorkspace(`osm-paper-${paperId}-mesurer`) ?? (scene.sourceFingerprint === LINKEDIN_SOURCE ? mesurerLib.readLocalWorkspace('osm-linkedin-mesurer-v2') : null);
+  const local = mesurerLib.readLocalWorkspace(`openpaperdesign-${paperId}-mesurer`) ?? mesurerLib.readLocalWorkspace(`osm-paper-${paperId}-mesurer`);
   if (!local) { done(); return; }
   queueFeedback(mesurerLib.sharedWorkspace(local));
   flushFeedback().then(ok => { if (ok) done(); });
@@ -1324,7 +1322,7 @@ async function remotePaper(force = false,actor = null) {
     const response = await fetch(sceneUrl, { cache: 'no-store' }); if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const loaded = await response.json(), next = loaded.paper;
     if (loaded.revision === revision && !force) return true;
-    if (next?.format !== 'osm-canvas' || next.version !== 1 || !Array.isArray(next.pages) || !next.pages.length) throw new Error('unknown format');
+    if (!isPaperFormat(next?.format) || next.version !== 1 || !Array.isArray(next.pages) || !next.pages.length) throw new Error('unknown format');
     if (!quiet()) { conflict = true; updateSaveState(); return; }
     const keep = selected;
     const previous=scene;scene = next; revision = loaded.revision; lastSaved = JSON.stringify(scene); history.length = 0; future.length = 0;
@@ -1387,7 +1385,7 @@ async function start() {
   const response = await fetch(sceneUrl, { cache: 'no-store' });
   if (!response.ok) throw new Error(response.status === 404 ? 'This Paper doesn’t exist.' : `This Paper couldn’t be opened (${response.status}).`);
   const loaded = await response.json(); scene = loaded.paper; revision = loaded.revision;
-  if (scene?.format !== 'osm-canvas' || scene.version !== 1 || !Array.isArray(scene.pages) || !scene.pages.length) throw new Error('Unknown canvas format.');
+  if (!isPaperFormat(scene?.format) || scene.version !== 1 || !Array.isArray(scene.pages) || !scene.pages.length) throw new Error('Unknown canvas format.');
   lastSaved = JSON.stringify(scene);
   libraryUI=setupLibrary({getScene:()=>scene,getSelection:()=>nodes.get(selected),canEdit:()=>canEdit,insert:insertTemplate,message,assetUrl,paperQuery,clientHeaders,
     saveSymbols(next){const before=copy(scene.symbols||[]);scene.symbols=next;pushHistory({kind:'symbols',before,after:copy(next)});},

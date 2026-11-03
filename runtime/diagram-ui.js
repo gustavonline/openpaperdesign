@@ -1,5 +1,5 @@
 import {DIAGRAM_FAMILIES,makeSymbol,symbolPreview} from './diagram-library.js?v=e55bd274695a';
-import {captureSymbol} from './diagram-model.js?v=1575ed8e28dd';
+import {captureSymbol} from './diagram-model.js?v=49ba16a33b90';
 // Library is a view over ordinary layers. Scratchpad is part of the same Paper JSON.
 export function setupLibrary(host) {
   const $=s=>document.querySelector(s),families=$('#symbol-families'),saved=$('#saved-symbols'),search=$('#symbol-search'),scratch=$('#scratchpad');

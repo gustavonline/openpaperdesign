@@ -58,8 +58,8 @@ export function createSharing({library,runtime,presence,publicUrl,port=0,now=Dat
     );
     if(grant.role==='edit')tools.push(schema('paper_activity','Show your current activity and optional work area. Empty status clears it.',{status:{type:'string',maxLength:120},pageId:{type:'string'},nodeId:{type:'integer'},rect:{type:'object',properties:{x:{type:'number'},y:{type:'number'},w:{type:'number'},h:{type:'number'}},required:['x','y','w','h'],additionalProperties:false}},['status']));
     let result;
-    if(request.method==='initialize')result={protocolVersion:VERSIONS.includes(request.params?.protocolVersion)?request.params.protocolVersion:'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'osm-paper-shared',version:'0.5.0-preview.2'}};
-    else if(request.method==='server/discover')result={supportedVersions:['2026-07-28'],capabilities:{tools:{}},serverInfo:{name:'osm-paper-shared',version:'0.5.0-preview.2'}};
+    if(request.method==='initialize')result={protocolVersion:VERSIONS.includes(request.params?.protocolVersion)?request.params.protocolVersion:'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'openpaperdesign-shared',version:'0.6.0-preview.1'}};
+    else if(request.method==='server/discover')result={supportedVersions:['2026-07-28'],capabilities:{tools:{}},serverInfo:{name:'openpaperdesign-shared',version:'0.6.0-preview.1'}};
     else if(request.method==='ping')result={};
     else if(request.method==='tools/list')result={tools};
     else if(request.method==='tools/call'){
@@ -78,7 +78,7 @@ export function createSharing({library,runtime,presence,publicUrl,port=0,now=Dat
         result={content:[{type:'text',text:JSON.stringify(name==='paper_activity'?value:{...value,agent:finished||peer})}]};
       }catch(error){soft(()=>presence?.restore(grant.paperId,grant.id,who));result={isError:true,content:[{type:'text',text:error.status?error.message:'The operation failed; saved files were kept'}]};}
     }else return json(res,200,{jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Method not found'}});
-    json(res,200,{jsonrpc:'2.0',id:request.id,result:complete(request,result,{name:'osm-paper-shared',version:'0.5.0-preview.2'},protocol)});
+    json(res,200,{jsonrpc:'2.0',id:request.id,result:complete(request,result,{name:'openpaperdesign-shared',version:'0.6.0-preview.1'},protocol)});
   }
   async function handle(req,res) {
     res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cache-Control','no-store');res.setHeader('X-Frame-Options','DENY');
@@ -141,6 +141,7 @@ export function createSharing({library,runtime,presence,publicUrl,port=0,now=Dat
   return {
     notify,
     status,
+    get count(){return [...grants.values()].filter(valid).length;},
     async create(id,role){if(!['view','edit'].includes(role))throw new PaperError(400,'Choose view or edit access');await library.folder(id);await start();revoke(id);const grant={id:randomBytes(6).toString('hex'),paperId:id,role,token:key(),expiresAt:now()+DAYS,writes:[]};grants.set(id,grant);byHash.set(digest(grant.token),grant);return status(id);},
     async stop(id){await library.folder(id);revoke(id);return status(id);},
     async close(){clearInterval(timer);for(const id of grants.keys())revoke(id);sessions.clear();if(server){await new Promise(resolve=>server.close(resolve));server=null;}},

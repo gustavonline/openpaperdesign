@@ -1,8 +1,8 @@
 {
-  "name": "osm-paper",
+  "name": "openpaperdesign",
   "displayName": "OpenPaperDesign",
-  "version": "0.5.0-preview.2",
-  "description": "Project-local design and diagram Papers with bundled methods, browser editing, inspection, file storage and agent MCP tools.",
+  "version": "0.6.0-preview.1",
+  "description": "Design, diagram and share editable Papers with your AI agent.",
   "author": {
     "name": "Gustav Online"
   },

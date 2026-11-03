@@ -3,8 +3,9 @@ import path from 'node:path';
 import os from 'node:os';
 import {createHash, randomBytes} from 'node:crypto';
 import {PaperLibrary, PaperError, ID} from './library.mjs';
+import {inspectWorkspace,stopWorkspace} from './workspace.mjs';
 
-export const HOME_URI='ui://osm-paper/home';
+export const HOME_URI='ui://openpaperdesign/home';
 export const HOME_MIME='text/html;profile=mcp-app';
 export function dataHome(){
   if(process.env.PAPER_HOME){if(!path.isAbsolute(process.env.PAPER_HOME))throw new Error('PAPER_HOME must be an absolute folder');return process.env.PAPER_HOME;}
@@ -33,7 +34,7 @@ async function workspaces(){
 }
 export function createHome(open){
   return async(args={})=>{
-    if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['action','workspaceId','paperId','name'].includes(k)))throw new PaperError(400,'Invalid Home request');
+    if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['action','workspaceId','paperId','name','instance'].includes(k)))throw new PaperError(400,'Invalid Home request');
     const action=args.action||'list',roots=await workspaces();
     if(action==='list'){
       const projects=[],papers=[];let previewBudget=1024*1024;
@@ -41,7 +42,10 @@ export function createHome(open){
         try{
           if(entry.id!=='personal')await fs.access(path.join(entry.root,'Paper'));
           const library=await PaperLibrary.open(entry.root),found=await library.list();
-          projects.push({id:entry.id,name:entry.name,count:found.length});
+          let server;
+          try{const live=await inspectWorkspace(entry.root);server=live?{state:'running',...live}:{state:'stopped'};}
+          catch(error){server={state:'unavailable',message:error.message};}
+          projects.push({id:entry.id,name:entry.name,count:found.length,server});
           for(const paper of found.slice(0,200)){
             let thumbnail=null;
             if(paper.thumbnail&&previewBudget>0){
@@ -56,6 +60,7 @@ export function createHome(open){
       return {projects,papers,storageRoot:path.join(roots[0].root,'Paper')};
     }
     const entry=roots.find(p=>p.id===(args.workspaceId||'personal'));if(!entry)throw new PaperError(404,'Unknown project');
+    if(action==='stop')return stopWorkspace(entry.root,args.instance);
     if(!['open','create'].includes(action))throw new PaperError(400,'Unknown Home action');
     const app=await open(entry.root);
     if(action==='create'){const made=await app.library.create({name:args.name||'Untitled Paper'});return {url:`${app.url}/?paper=${made.id}`,workspace:entry.root,...made};}

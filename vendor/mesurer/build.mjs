@@ -1,4 +1,4 @@
-// Builds the sample's Mesurer bundle. Sample-only compatibility patch on Mesurer 0.2.7's native toolbar,
+// Rebuilds the embedded Mesurer bundle. Compatibility patch on Mesurer 0.2.7's native toolbar,
 // through an optional `toolbarExtra` hook:
 // - Two modes, Edit and Inspect. The host's Edit segment leads the native switch (its pill moves over it);
 //   the native Annotate segment and drawing tools are not offered (saved notes still show). The host's
