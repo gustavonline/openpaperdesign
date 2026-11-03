@@ -2,7 +2,7 @@
 name: paper-diagram
 description: Create, revise or review editable architecture, process, data and infrastructure diagrams in Paper. Use for C4, UML-style structure, BPMN-style workflows, ER models, Kubernetes topology, flowcharts and source-backed system explanations.
 metadata:
-  version: "0.6.0-preview.2"
+  version: "0.6.0-preview.3"
 ---
 
 # Diagram in Paper

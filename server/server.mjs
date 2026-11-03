@@ -137,7 +137,7 @@ async function connectWorkspace(root,agentClient){
   return {url:opened.url,instance:opened.instance,library:await PaperLibrary.open(root),presence:proxy,close:async()=>proxy?.close()};
 }
 
-const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false}});
+const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:['paper_list','paper_read','paper_read_feedback'].includes(name),destructiveHint:false,openWorldHint:false}});
 export const TOOLS=[
   {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop']},workspaceId:string,paperId:string,name:string,instance:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/ui':{entrypoints:[{type:'global'}]}}},
   tool('paper_open','Open a Paper workspace. Omit workspace for the personal library; select an absolute project folder for project-local Papers.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
@@ -164,7 +164,7 @@ export async function serveStdio() {
     if(name==='paper_open'){
       const root=await projectWorkspace(args.workspace===undefined?await personalWorkspace():args.workspace);
       await rememberWorkspace(root);active=await getApp(root);
-      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.6.0-preview.2'};
+      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.6.0-preview.3'};
     }
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
     if(name==='paper_list')return {papers:await active.library.list()};

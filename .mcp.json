@@ -1,9 +1,12 @@
 {
   "mcpServers": {
-    "paper": {
+    "openpaperdesign_workspace": {
       "type": "stdio",
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/server/server.mjs", "--stdio"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/server/server.mjs",
+        "--stdio"
+      ],
       "cwd": "${CLAUDE_PLUGIN_ROOT}"
     }
   }
