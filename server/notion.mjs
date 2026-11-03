@@ -1,0 +1,280 @@
+import path from 'node:path';
+import {promises as fs} from 'node:fs';
+import {createHash, randomBytes} from 'node:crypto';
+import {PaperError, ID, revision} from './library.mjs';
+import {exportBundle, importBundle, readBundle, MAX_BUNDLE_BYTES} from './bundle.mjs';
+import {NotionClient, NOTION_ORIGIN, request, json, officialURL, privateDirectory, readPrivate, writePrivate, withPrivateLock, tokens} from './notion-client.mjs';
+
+const MiB=1024*1024, hex=bytes=>createHash('sha256').update(bytes).digest('hex');
+const fail=(status,message)=>{throw new PaperError(status,message);};
+const uuid=value=>typeof value==='string'&&/^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.test(value);
+function pageId(value) {
+  if(uuid(value))return value;
+  let u;try{u=new URL(value);}catch{fail(400,'Choose a Notion page ID or page URL');}
+  if(u.protocol!=='https:'||!['notion.so','www.notion.so','notion.com','www.notion.com'].includes(u.hostname)||u.username||u.password||u.port)fail(400,'Choose an official Notion page URL');
+  const id=u.pathname.match(/([a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\/?$/i)?.[1];
+  if(!id)fail(400,'The Notion URL has no page identity');return id;
+}
+const pageURL=id=>`https://www.notion.so/${pageId(id).replace(/-/g,'')}`;
+const account=a=>a?.workspaceId||a?.client_id;
+function previewFiles(preview) {
+  if(preview===undefined)return [];
+  if(!preview||typeof preview!=='object'||Array.isArray(preview)||Object.keys(preview).some(k=>!['html','pngBase64'].includes(k)))fail(400,'Preview accepts only html and pngBase64');
+  const out=[];
+  if(preview.html!==undefined) {
+    if(typeof preview.html!=='string'||Buffer.byteLength(preview.html)>20*MiB)fail(400,'HTML preview must fit within 20 MiB');
+    // Inspect resource-bearing markup/CSS; artwork text and inline script data are not dependencies.
+    const resources=preview.html.replace(/<script\b([^>]*)>[\s\S]*?<\/script\s*>/gi,(_match,attrs)=>`<script${attrs}></script>`).replace(/(<style\b[^>]*>[\s\S]*?<\/style\s*>)|>[^<]*</gi,(match,style)=>style||'><');
+    if(/<link\b|@import\b|\bsrcset\s*=/i.test(resources)||/\b(?:src|poster)\s*=\s*["'](?!data:|#)[^"']+/i.test(resources)||/url\(\s*["']?(?!data:|#)[^\s)"']/i.test(resources))fail(400,'Supply a self-contained HTML preview with images, styles and fonts inline');
+    out.push({filename:'OpenPaperDesign.preview.html',type:'text/html',bytes:Buffer.from(preview.html),tag:'embed'});
+  }
+  if(preview.pngBase64!==undefined) {
+    const value=preview.pngBase64;
+    if(typeof value!=='string'||value.length>Math.ceil(20*MiB/3)*4||!/^[A-Za-z0-9+/]+={0,2}$/.test(value))fail(400,'Supply a PNG preview as base64 (20 MiB total preview limit)');
+    const bytes=Buffer.from(value,'base64');
+    if(bytes.toString('base64').replace(/=+$/,'')!==value.replace(/=+$/,'')||!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))fail(400,'PNG preview has invalid base64 or PNG bytes');
+    out.push({filename:'OpenPaperDesign.preview.png',type:'image/png',bytes,tag:'image'});
+  }
+  if(out.reduce((n,f)=>n+f.bytes.length,0)>20*MiB)fail(400,'Combined previews must fit within 20 MiB');
+  return out;
+}
+function content(result) {
+  if(result.truncated||result.unknown_block_count||result.unknown_block_ids?.length||result.metadata?.truncated)fail(409,'Notion returned an incomplete page. Open a smaller dedicated Paper page; no replacement was made');
+  const text=result.text??result.content??result.markdown;
+  if(typeof text!=='string')fail(502,'Notion page content was not available in a supported format');return text;
+}
+function managed(result) {
+  const text=content(result),starts=[...text.matchAll(/OpenPaperDesign managed start: ([a-f0-9]{32})/g)];
+  if(starts.length!==1)fail(422,'This page has no unique OpenPaperDesign archive. Choose a page saved by OpenPaperDesign');
+  const start=starts[0],end=`OpenPaperDesign managed end: ${start[1]}`;
+  if(text.split(end).length!==2)fail(422,'The OpenPaperDesign managed section is incomplete or duplicated');
+  const last=text.indexOf(end,start.index);let section=text.slice(start.index,last+end.length);
+  const containers=[...text.slice(0,start.index).matchAll(/<toggle\b[^>]*>\s*Paper preview and files/g)],outer=containers.at(-1)?.index;
+  if(outer!==undefined){const tags=/<\/?toggle\b[^>]*>/g;tags.lastIndex=outer;let depth=0,tag;while((tag=tags.exec(text))){depth+=tag[0].startsWith('</')?-1:1;if(depth===0){section=text.slice(outer,tags.lastIndex);break;}}if(depth!==0)fail(422,'The Paper container is incomplete');}
+  const revisions=[...section.matchAll(/OpenPaperDesign archive SHA256: ([a-f0-9]{64})/g)];
+  if(last<start.index||revisions.length!==1)fail(422,'This page has no valid OpenPaperDesign archive revision');
+  const remoteRevision=revisions[0][1],filename=`OpenPaperDesign.${remoteRevision}.paper.zip`;
+  const files=[...section.matchAll(/<file\b([^>]*?)(?:\/>|>([\s\S]*?)<\/file>)/g)].filter(m=>m[0].includes(filename));
+  if(files.length!==1)fail(422,'The OpenPaperDesign ZIP attachment is missing or ambiguous');
+  const reference=files[0][1].match(/\bsource="(notion-file-block:\/\/[^"\s<>]+)"/)?.[1];
+  if(!reference)fail(422,'The Paper archive has no stable Notion file reference. Re-fetch it after the upload completes');
+  return {section,managedId:start[1],remoteRevision,filename,reference,managedHash:hex(section),savedAt:section.match(/OpenPaperDesign saved at: ([0-9TZ:.+-]+)/)?.[1]};
+}
+function markup(managedId,remoteRevision,savedAt,files) {
+  return ['<toggle>Paper preview and files',
+    ...files.map(f=>f.tag==='embed'?`<embed source="${f.source}" />`:`<${f.tag} source="${f.source}">${f.filename}</${f.tag}>`),
+    '<toggle>Details',`OpenPaperDesign managed start: ${managedId}`,
+    'OpenPaperDesign — manual snapshot. This section is managed by OpenPaperDesign.',
+    `OpenPaperDesign archive SHA256: ${remoteRevision}`,`OpenPaperDesign saved at: ${savedAt}`,
+    `OpenPaperDesign managed end: ${managedId}`,'</toggle>','</toggle>'].join('\n\n').replace(/\n\n<\/toggle>/g,'\n</toggle>');
+}
+
+// Synchronous construction; all disk/network work is lazy and promise-based.
+export function createNotion({library,configDir,origin}) {
+  let client,folder,setup,closed=false;
+  const pending=new Map(),inflight=new Set(),workspace=hex(library.workspace).slice(0,32);
+  function currentOrigin() {
+    let u;try{u=new URL(typeof origin==='function'?origin():origin);}catch{fail(500,'Notion needs the running workspace origin');}
+    if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||!u.port||u.username||u.password||u.pathname!=='/'||u.search||u.hash)fail(500,'Notion callback needs the actual http://127.0.0.1:port workspace origin');
+    return u.origin;
+  }
+  async function ready() {
+    if(closed)fail(410,'This Notion connection service has closed');
+    if(!setup)setup=(async()=>{
+      folder=await privateDirectory(configDir);
+      if(folder===library.root||folder.startsWith(library.root+path.sep))fail(500,'Notion credentials must be stored outside Papers');
+      client=new NotionClient(folder);
+    })().catch(e=>{setup=null;throw e;});
+    await setup;
+  }
+  const linkFile=id=>path.join(folder,`notion-paper-${workspace}-${id}.json`);
+  async function linked(id) {if(!ID.test(id||''))fail(400,'Invalid Paper identity');await library.folder(id);return readPrivate(linkFile(id),true);}
+  async function authenticated() {await client.access();return client.auth();}
+  async function fetchPage(id) {return client.call('fetch',{id:pageId(id)});}
+  async function remoteForSave(id) {
+    try{return managed(await fetchPage(id));}
+    catch(e){if(e.status===422)fail(409,'The remote Paper snapshot changed or is incomplete. Open it to compare; local and remote versions were preserved');throw e;}
+  }
+  async function completed(key,args) {
+    let out=await client.call(key,args);
+    let task=out.async_task||(out.object==='async_task'?out:null);
+    if(task) {
+      if(typeof task.id!=='string')fail(502,'Notion returned an invalid async task');
+      const taskId=task.id;
+      for(let i=0;i<20;i++) {
+        await new Promise(resolve=>setTimeout(resolve,Math.min(3000,Math.max(200,Number(task.poll_after_seconds||1)*1000))));
+        task=await client.call('get-async-task',{task_id:taskId});task=task.async_task||task;
+        if(task.status==='succeeded'){out=task.result;break;}
+        if(task.status==='failed')fail(502,'Notion page write failed. Inspect the page before retrying; no save success was recorded');
+      }
+      if(task.status!=='succeeded')fail(504,'Notion write is still pending. Inspect the remote page before retrying; no save success was recorded');
+    }
+    if(!out||out.warnings?.length)fail(502,'Notion reported an incomplete or adjusted page write. Inspect the page before retrying; no save success was recorded');
+    return out;
+  }
+  async function upload(file) {
+    if(file.bytes.length>20*MiB)fail(413,'Notion MCP supports files up to 20 MiB. Reduce this Paper or preview; local bundle export supports 50 MiB');
+    const prepared=await client.call('create-file-upload',{filename:file.filename,content_type:file.type});
+    const url=officialURL(prepared.upload_url,true),headers=prepared.upload_headers;
+    if(!headers||typeof headers!=='object'||Array.isArray(headers)||Object.entries(headers).some(([k,v])=>!/^[-a-zA-Z0-9]+$/.test(k)||typeof v!=='string'||/[\r\n]/.test(v)||['host','cookie','content-length','transfer-encoding','connection','proxy-authorization'].includes(k.toLowerCase())))fail(502,'Notion returned unsupported upload headers');
+    if(prepared.form_field&&prepared.form_field!=='file'||prepared.file_field&&prepared.file_field!=='file')fail(502,'Notion returned an unsupported multipart field');
+    const form=new FormData();form.append('file',new Blob([file.bytes],{type:file.type}),file.filename);
+    // Only the upload's returned headers are forwarded, never our MCP bearer token.
+    const response=await request(url,{method:'POST',headers,body:form,max:MiB,media:true,signal:client.abort.signal});
+    const uploaded=json(response.body);
+    if(uploaded.status&&uploaded.status!=='uploaded')fail(502,'Notion did not confirm that the file upload completed');
+    const id=uploaded.file_upload_id||uploaded.id||uploaded.file_upload?.id||prepared.file_upload_id||prepared.id;
+    if(!uuid(id))fail(502,'Notion did not return a completed upload identity');
+    const attachment=await client.call('create-attachment',{source_file_id:id});
+    let source=attachment.markdown_source;
+    if(typeof source==='string'&&source.startsWith('<'))source=source.match(/\bsource="([^"\s<>]+)"/)?.[1];
+    if(!source)source=attachment.suggested_markdown?.match(/\bsource="([^"\s<>]+)"/)?.[1];
+    if(typeof source!=='string'||!/^file-upload:\/\/[a-f0-9-]{32,36}$/i.test(source))fail(502,'Notion did not confirm an attachable uploaded file source');
+    return {...file,source};
+  }
+  async function record(id,value) {await writePrivate(linkFile(id),value);}
+  async function guardedWrite(id,previous,next,key,args){
+    await client.schema(key);await client.access();
+    await record(id,next);
+    try{return await completed(key,args);}
+    catch(error){if(error.definiteNoWrite){if(previous)await record(id,previous);else await fs.rm(linkFile(id),{force:true});}throw error;}
+  }
+  function sameRemote(remote,state) {
+    if(remote.remoteRevision!==state.link.remoteRevision||state.managedHash&&remote.managedHash!==state.managedHash)fail(409,'This Notion Paper changed since your last save. Open it as a new local Paper to compare; local and remote versions were preserved');
+  }
+  const methods={
+    async status(paperId) {
+      await ready();const a=await client.auth();
+      const connected=Boolean(a?.access_token&&!a.reconnect&&!a.refreshing&&(!a.expiresAt||a.expiresAt>Date.now()||a.refresh_token));
+      const result={connected,...(connected&&a.name?{name:a.name}:{})};
+      if(paperId) {
+        const state=await linked(paperId);
+        if(state?.link) {
+          result.link=state.link;
+          result.changed=revision(await exportBundle(library,paperId))!==state.link.localRevision;
+        }
+        if(state?.pending){result.needsReview=true;const reviewId=state.pending.pageId||state.link?.pageId||state.pending.parentId;if(uuid(reviewId))result.reviewUrl=pageURL(reviewId);}
+      }
+      return result;
+    },
+    async connect() {
+      await ready();const now=Date.now();for(const [state,p] of pending)if(p.expires<=now)pending.delete(state);
+      if(pending.size>=8)fail(429,'Too many pending Notion connections. Complete one or wait ten minutes');
+      const state=randomBytes(32).toString('base64url'),verifier=randomBytes(32).toString('base64url');
+      const redirect=`${currentOrigin()}/api/notion/callback`;
+      const p={verifier,redirect,expires:now+600000};pending.set(state,p);
+      try {
+        const resource=json((await request(`${NOTION_ORIGIN}/.well-known/oauth-protected-resource`,{max:128*1024,signal:client.abort.signal})).body);
+        if(resource.resource!==NOTION_ORIGIN||!resource.authorization_servers?.includes(NOTION_ORIGIN))fail(502,'Notion protected resource metadata does not match the official issuer');
+        const metadata=json((await request(`${NOTION_ORIGIN}/.well-known/oauth-authorization-server`,{max:128*1024,signal:client.abort.signal})).body);
+        if(metadata.issuer!==NOTION_ORIGIN||!metadata.code_challenge_methods_supported?.includes('S256')||!metadata.token_endpoint_auth_methods_supported?.includes('none'))fail(502,'Notion OAuth metadata is incompatible. Update OpenPaperDesign');
+        for(const [key,suffix] of [['authorization_endpoint','/authorize'],['token_endpoint','/token'],['registration_endpoint','/register']])if(officialURL(metadata[key]).href!==NOTION_ORIGIN+suffix)fail(502,'Notion OAuth endpoint changed. Update OpenPaperDesign');
+        const registration=json((await request(metadata.registration_endpoint,{method:'POST',headers:{'content-type':'application/json',accept:'application/json'},body:JSON.stringify({client_name:'OpenPaperDesign',client_uri:'https://github.com/gustavonline/openpaperdesign',redirect_uris:[redirect],grant_types:['authorization_code','refresh_token'],response_types:['code'],token_endpoint_auth_method:'none',scope:'default'}),max:128*1024,signal:client.abort.signal})).body);
+        if(typeof registration.client_id!=='string'||!registration.client_id||registration.client_id.length>2000||registration.token_endpoint_auth_method&&registration.token_endpoint_auth_method!=='none')fail(502,'Notion registration did not return a public OAuth client');
+        p.clientId=registration.client_id;p.issuerRequired=metadata.authorization_response_iss_parameter_supported===true;
+        const url=new URL(metadata.authorization_endpoint);url.search=new URLSearchParams({response_type:'code',client_id:p.clientId,redirect_uri:redirect,scope:'default',resource:NOTION_ORIGIN,state,code_challenge:Buffer.from(createHash('sha256').update(verifier).digest()).toString('base64url'),code_challenge_method:'S256',prompt:'consent'}).toString();
+        return {url:url.href};
+      } catch(e){pending.delete(state);throw e;}
+    },
+    async callback(value) {
+      await ready();let url;try{url=new URL(value);}catch{fail(400,'Invalid Notion callback URL');}
+      const states=url.searchParams.getAll('state'),p=states.length===1?pending.get(states[0]):null;
+      if(p)pending.delete(states[0]);
+      if(!p||p.expires<Date.now()||!p.clientId)fail(400,'Notion connection expired or was already used. Start Connect again');
+      if(inflight.size)fail(423,'A Paper is saving to Notion. Complete the save, then Connect again');
+      if(url.origin!==currentOrigin()||url.origin!==new URL(p.redirect).origin||url.pathname!=='/api/notion/callback'||url.hash)fail(400,'Notion callback origin does not match this workspace');
+      const issuers=url.searchParams.getAll('iss');
+      if(issuers.length>1||p.issuerRequired&&issuers.length!==1||issuers.length&&issuers[0]!==NOTION_ORIGIN)fail(400,'Notion callback issuer does not match the official server');
+      if(url.searchParams.has('error'))fail(401,'Notion connection was not authorized. Start Connect again when ready');
+      const codes=url.searchParams.getAll('code');if(codes.length!==1||!codes[0]||codes[0].length>16000)fail(400,'Notion callback has no valid authorization code. Connect again');
+      await withPrivateLock(folder,'notion-auth',async()=>{
+        const value=json((await request(`${NOTION_ORIGIN}/token`,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',accept:'application/json'},body:new URLSearchParams({grant_type:'authorization_code',code:codes[0],client_id:p.clientId,redirect_uri:p.redirect,code_verifier:p.verifier,resource:NOTION_ORIGIN}),max:128*1024,signal:client.abort.signal})).body);
+        await client.store(tokens(value,{client_id:p.clientId}));
+      });
+      client.tools=null;client.session=null;client.boundClientId=null;pending.clear();return {connected:true};
+    },
+    async disconnect() {
+      await ready();if(inflight.size)fail(423,'A Paper is saving to Notion. Complete the save before disconnecting');pending.clear();await withPrivateLock(folder,'notion-auth',()=>fs.rm(client.file,{force:true}));
+      client.close();client=new NotionClient(folder);return {connected:false};
+    },
+    async pages({query='',cursor}={}) {
+      await ready();if(typeof query!=='string'||query.length>500||cursor!==undefined&&(typeof cursor!=='string'||cursor.length>4096))fail(400,'Invalid Notion page search');
+      await client.ready();
+      if(cursor!==undefined&&!query.trim()&&!client.tools.has('list-recent-pages'))fail(400,'Enter a page title before using a search cursor');
+      if(!query.trim()&&!client.tools.has('list-recent-pages'))return {pages:[],needsQuery:true};
+      const key=query.trim()?'search':'list-recent-pages',rawSchema=await client.schema(key),schema=rawSchema.properties?.data||rawSchema,props=schema.properties||{};
+      if(cursor!==undefined&&!props.cursor&&!props.start_cursor)fail(400,'This Notion search does not support pagination cursors. Refine the page title');
+      const args=query.trim()?{query}:{};
+      if(props.query_type)args.query_type='internal';if(props.page_size)args.page_size=50;if(props.limit)args.limit=50;
+      if(cursor!==undefined)args[props.cursor?'cursor':'start_cursor']=cursor;
+      const result=await client.call(key,args),rows=result.results??result.pages;
+      if(!Array.isArray(rows))fail(502,'Notion search returned an unsupported result format');
+      const pages=[];
+      for(const item of rows.slice(0,50)) {
+        const type=item.type||item.object;if(type&&type!=='page')continue;
+        if(!uuid(item.id)||typeof item.title!=='string'||query&& !item.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()))continue;
+        pages.push({id:item.id,title:item.title,url:pageURL(item.id)});
+      }
+      const next=result.next_cursor||result.nextCursor;
+      return {pages,...(typeof next==='string'&&next.length<=4096?{cursor:next}:{})};
+    },
+    async save(paperId,args={}) {
+      await ready();if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['parentId','preview','newCopy'].includes(k))||args.newCopy!==undefined&&typeof args.newCopy!=='boolean')fail(400,'Save accepts parentId, preview and newCopy');
+      const previews=previewFiles(args.preview);if(!ID.test(paperId||''))fail(400,'Invalid Paper identity');
+      if(inflight.has(paperId))fail(423,'This Paper is already saving to Notion');inflight.add(paperId);
+      try{return await withPrivateLock(folder,`notion-save-${workspace}-${paperId}`,async()=>{
+        const a=await authenticated(),existing=await linked(paperId),state=args.newCopy?null:existing;
+        if(args.newCopy&&!args.parentId)fail(400,'Choose a parent page for the separate copy');
+        if(existing?.link&&args.parentId&&!args.newCopy)fail(400,'Use Save elsewhere or newCopy:true to create a separate Notion page');
+        if(state?.pending){const reviewId=state.pending.pageId||state.link?.pageId||state.pending.parentId;fail(409,`A previous Notion write is unverified. Inspect ${uuid(reviewId)?pageURL(reviewId):'the Notion page'} and Open the saved snapshot as a new Paper before saving again; a duplicate page was not created`);}
+        if(!state?.link&&!args.parentId)fail(400,'Choose a parent Notion page for the first save');
+        const parent=args.parentId?pageId(args.parentId):null;
+        let remote;if(state?.link){remote=await remoteForSave(state.link.pageId);sameRemote(remote,state);}
+        const bytes=await exportBundle(library,paperId);
+        if(bytes.length>20*MiB)fail(413,'This Paper bundle exceeds the 20 MiB Notion MCP upload limit. Reduce its assets; local export supports 50 MiB');
+        const localRevision=revision(bytes),remoteRevision=hex(bytes),savedAt=new Date().toISOString();
+        // Name comes from the exported snapshot, never a later local edit.
+        const snapshot=await readBundle(bytes);
+        const files=[];
+        files.push(await upload({filename:`OpenPaperDesign.${remoteRevision}.paper.zip`,type:'application/zip',bytes,tag:'file'}));
+        for(const preview of previews)files.push(await upload(preview));
+        const managedId=remote?.managedId||randomBytes(16).toString('hex'),section=markup(managedId,remoteRevision,savedAt,files);
+        let id=state?.link?.pageId;
+        if(id) {
+          const fresh=await remoteForSave(id);sameRemote(fresh,state);
+          if(fresh.section!==remote.section)fail(409,'The remote managed section changed during upload. Open it to compare; no replacement was made');
+          await guardedWrite(paperId,existing,{...existing,pending:{kind:'update',at:savedAt}},'update-page',{page_id:id,command:'update_content',content_updates:[{old_str:fresh.section,new_str:section}],allow_async:false});
+        } else {
+          const created=await guardedWrite(paperId,existing,{...existing,account:account(a),pending:{kind:'create',at:savedAt,parentId:parent}},'create-pages',{parent:{page_id:parent},pages:[{properties:{title:snapshot.paper.name},content:section}],allow_async:false});
+          id=created.pages?.length===1?created.pages[0].id:null;
+          if(!uuid(id))fail(502,'Notion did not confirm the new page identity. Inspect the chosen parent before retrying; no save success was recorded');
+          await record(paperId,{...existing,account:account(a),pending:{kind:'verify',at:savedAt,pageId:id,url:pageURL(id)}});
+        }
+        const confirmed=managed(await fetchPage(id));
+        if(confirmed.managedId!==managedId||confirmed.remoteRevision!==remoteRevision||files.some(f=>!confirmed.section.includes(f.filename)&&f.tag!=='embed')||files.some(f=>f.tag==='embed')&&!/<embed\b/.test(confirmed.section))fail(502,'Notion did not retain the complete managed snapshot. Inspect the page; no save success was recorded');
+        const link={pageId:id,url:pageURL(id),savedAt,localRevision,remoteRevision};
+        await record(paperId,{account:account(a),link,managedHash:confirmed.managedHash});
+        return {saved:true,link,changed:revision(await exportBundle(library,paperId))!==localRevision};
+      });}finally{inflight.delete(paperId);}
+    },
+    async open({pageId:input}={}) {
+      await ready();const a=await authenticated(),id=pageId(input),remote=managed(await fetchPage(id));
+      const resolved=await client.call('get-file-download-urls',{references:[remote.reference]});
+      const matches=resolved.files?.filter(f=>f.reference===remote.reference);
+      if(matches?.length!==1||typeof matches[0].url!=='string')fail(404,'Notion could not resolve this Paper archive. Check page access and try Open again');
+      const downloaded=await request(matches[0].url,{media:true,redirects:3,max:MAX_BUNDLE_BYTES,signal:client.abort.signal});
+      if(hex(downloaded.body)!==remote.remoteRevision)fail(409,'The Notion archive does not match its saved revision. Nothing was imported; restore a complete OpenPaperDesign snapshot');
+      const imported=await importBundle(library,downloaded.body);
+      try {
+        const localRevision=revision(await exportBundle(library,imported.id));
+        await record(imported.id,{account:account(a),link:{pageId:id,url:pageURL(id),savedAt:remote.savedAt||new Date().toISOString(),localRevision,remoteRevision:remote.remoteRevision},managedHash:remote.managedHash});
+      }catch{fail(500,`Paper imported as ${imported.id}, but its private Notion link could not be stored. The imported Paper is safe; check dataHome permissions`);}
+      return {id:imported.id,name:imported.name,href:imported.href};
+    },
+    close(){closed=true;pending.clear();client?.close();}
+  };
+  // Public errors never include fetch exceptions, OAuth codes, tokens or remote response bodies.
+  return Object.fromEntries(Object.entries(methods).map(([name,method])=>[name,name==='close'?method:async(...args)=>{
+    try{return await method(...args);}catch(e){if(e instanceof PaperError)throw e;throw new PaperError(500,'Notion operation could not complete. Check local storage permissions; remote writes may be incomplete and were not retried');}
+  }]));
+}

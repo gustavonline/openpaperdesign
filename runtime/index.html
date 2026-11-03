@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=6708a0274217"><link rel="stylesheet" href="canvas.css?v=aba6c1a4b4e5"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=1d0c11db519b"><link rel="stylesheet" href="canvas.css?v=e9a64b908a70"><link rel="stylesheet" href="notion.css?v=1ae5727e73d0"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -79,6 +79,8 @@
   <button type="button" role="menuitem" data-action="home">All Papers</button>
   <button type="button" role="menuitem" data-action="new">New Paper</button>
   <button type="button" role="menuitem" data-action="rename">Rename Paper…</button>
+  <button type="button" role="menuitem" data-action="open-notion" class="owner-only">Open from Notion…</button>
+  <button type="button" role="menuitem" data-action="import" class="owner-only">Open Paper file…</button>
   <hr>
   <button type="button" role="menuitem" data-action="undo" id="undo" disabled>Undo<kbd>⌘Z</kbd></button>
   <button type="button" role="menuitem" data-action="redo" id="redo" disabled>Redo<kbd>⇧⌘Z</kbd></button>
@@ -88,12 +90,37 @@
   <button type="button" role="menuitemradio" data-pattern="dots" aria-checked="false">Dots</button>
   <button type="button" role="menuitemradio" data-pattern="grid" aria-checked="false">Grid</button>
   <hr>
+  <button type="button" role="menuitemcheckbox" id="snap-objects" aria-checked="true">Snap to objects</button>
+  <button type="button" role="menuitemcheckbox" id="snap-grid" aria-checked="false">Snap to grid<kbd>8 px</kbd></button>
+  <hr>
   <div class="menu-row"><label for="canvas-color">Canvas colour</label><input type="color" id="canvas-color"><button type="button" id="canvas-color-reset" class="reset">Reset</button></div>
   <hr>
   <button type="button" role="menuitem" data-zoom="fit">Zoom to fit<kbd>⇧1</kbd></button>
 </div>
+<div id="edit-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Edit selection" hidden>
+  <button type="button" role="menuitem" data-edit="copy">Copy<kbd>⌘C</kbd></button>
+  <button type="button" role="menuitem" data-edit="cut">Cut<kbd>⌘X</kbd></button>
+  <button type="button" role="menuitem" data-edit="paste">Paste<kbd>⌘V</kbd></button>
+  <button type="button" role="menuitem" data-edit="duplicate">Duplicate<kbd>⌘D</kbd></button>
+  <hr>
+  <button type="button" role="menuitem" data-edit="group">Group<kbd>⌘G</kbd></button>
+  <button type="button" role="menuitem" data-edit="ungroup">Ungroup<kbd>⇧⌘G</kbd></button>
+  <button type="button" role="menuitem" data-edit="front">Bring to front<kbd>]</kbd></button>
+  <button type="button" role="menuitem" data-edit="back">Send to back<kbd>[</kbd></button>
+  <hr>
+  <button type="button" role="menuitem" data-edit="copy-style">Copy style<kbd>⌥⌘C</kbd></button>
+  <button type="button" role="menuitem" data-edit="paste-style">Paste style<kbd>⌥⌘V</kbd></button>
+  <button type="button" role="menuitem" data-edit="link">Copy link</button>
+  <button type="button" role="menuitem" data-edit="delete">Delete</button>
+</div>
 
 <aside id="right-panel" data-canvas-chrome aria-label="Properties">
+  <div id="multi-selection" hidden>
+    <section><h3 id="selection-count"></h3><div class="row"><button class="btn" type="button" data-edit="group">Group</button><button class="btn" type="button" data-edit="duplicate">Duplicate</button></div></section>
+    <section><h3>Align</h3><div class="arrange-grid"><button class="btn" type="button" data-arrange="left">Left</button><button class="btn" type="button" data-arrange="center">Centre</button><button class="btn" type="button" data-arrange="right">Right</button><button class="btn" type="button" data-arrange="top">Top</button><button class="btn" type="button" data-arrange="middle">Middle</button><button class="btn" type="button" data-arrange="bottom">Bottom</button></div></section>
+    <section><h3>Distribute spacing</h3><div class="row"><button class="btn" type="button" data-arrange="distribute-x">Horizontal</button><button class="btn" type="button" data-arrange="distribute-y">Vertical</button></div><p class="note">Select three or more layers.</p></section>
+    <section><div class="row"><button class="btn" type="button" data-edit="front">Bring to front</button><button class="btn" type="button" data-edit="back">Send to back</button></div><p class="note">Shift-click to add or remove layers. Shift-drag empty space to select an area.</p></section>
+  </div>
   <div id="doc-view">
     <section><h3>Page</h3><dl><dt>Name</dt><dd id="doc-page"></dd><dt>Content</dt><dd id="doc-count"></dd></dl></section>
     <section><h3>View</h3><div class="row"><button class="btn" type="button" data-zoom="fit">Zoom to fit</button><button class="btn" type="button" data-zoom="100">100%</button></div><p class="note">Your view only: camera and canvas background (right-click the canvas) stay in this browser, not in the project.</p></section>
@@ -111,11 +138,16 @@
       <textarea class="field" name="text" rows="3" aria-label="Text content"></textarea>
       <div class="pair"><label class="num"><span>Size</span><input class="field" type="number" name="font_size" min="1" max="500" step="any"></label>
       <select class="field" name="weight" aria-label="Font weight"><option value="400">Inter Regular</option><option value="700">Inter Bold</option></select></div>
+      <div class="pair"><label class="num"><span>Line</span><input class="field" type="number" name="line_height" min="0.1" max="10" step="0.1" aria-label="Line height"></label><label class="num"><span>Track</span><input class="field" type="number" name="letter_spacing" min="-100" max="100" step="0.1" aria-label="Letter spacing"></label></div>
+      <div class="pair"><select class="field" name="align" aria-label="Text alignment"><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option><option value="justify">Justify</option></select><label class="check"><input type="checkbox" name="italic"> Italic</label></div>
     </section>
+    <section><h3>Appearance</h3><div class="pair"><label class="num"><span>%</span><input class="field" type="number" name="opacity" min="0" max="100" step="1" aria-label="Opacity"></label><label class="num" id="corner-radius-field"><span>Radius</span><input class="field" type="number" name="corner_radius" min="0" step="1" aria-label="Corner radius"></label><label class="num"><span>°</span><input class="field" type="number" name="rotation" min="-360" max="360" step="1" aria-label="Rotation"></label></div></section>
+    <section id="stroke-section"><div class="row"><label class="check"><input type="checkbox" name="stroke_enabled"> Stroke</label></div><div class="pair"><input type="color" name="stroke_color" aria-label="Stroke colour"><label class="num"><span>Width</span><input class="field" type="number" name="stroke_width" min="0.1" max="100" step="0.5" aria-label="Stroke width"></label></div></section>
     <section><h3>Layer</h3><div class="row">
       <label class="check"><input type="checkbox" name="visible"> Visible</label>
       <label class="check"><input type="checkbox" name="locked"> Locked</label>
     </div></section>
+    <section><div class="row"><button type="button" class="btn" data-edit="duplicate">Duplicate</button><button type="button" class="btn" data-edit="ungroup">Ungroup</button><button type="button" class="btn" data-edit="link">Copy link</button></div></section>
     <section id="symbol-actions" hidden><div class="row"><button type="button" class="btn" id="connect-symbol">Connect to…</button><button type="button" class="btn" id="save-symbol">Save to Scratchpad</button><button type="button" class="btn" id="edit-connection-label" hidden>Edit label</button></div><p class="note" id="connect-hint" hidden>Click another symbol to connect. Escape cancels.</p></section>
   </form>
 </aside>
@@ -127,13 +159,18 @@
 <!-- Exports of the artwork as it is rendered (no editor chrome), and the whole Paper as its file. -->
 <div id="export-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Share and export" hidden>
   <button type="button" role="menuitem" id="open-sharing">Share this Paper…</button>
+  <button type="button" role="menuitem" id="save-notion" class="owner-only"><span id="notion-share-icon" aria-hidden="true"></span><span>Save to Notion…</span></button>
+  <button type="button" role="menuitem" id="copy-paper-link">Copy link</button>
   <hr class="owner-only">
   <div class="menu-label" id="export-target"></div>
   <button type="button" role="menuitem" data-export="png">PNG image<kbd id="export-size"></kbd></button>
   <button type="button" role="menuitem" data-export="html">HTML file<kbd>fonts + images inside</kbd></button>
   <hr>
   <button type="button" role="menuitem" data-export="json">Paper file<kbd>.json · all pages</kbd></button>
+  <button type="button" role="menuitem" data-export="bundle" class="owner-only">Paper with assets<kbd>.paper.zip</kbd></button>
+  <button type="button" role="menuitem" data-export="preview">Paper preview<kbd>.html · all pages</kbd></button>
 </div>
+<input id="paper-import" type="file" accept=".zip,.json" hidden>
 <dialog id="sharing-dialog" data-canvas-chrome aria-labelledby="sharing-title">
   <header><h2 id="sharing-title">Share Paper</h2><button type="button" class="ibtn" data-close-sharing aria-label="Close sharing"><svg class="icon"><use href="#i-close"/></svg></button></header>
   <p id="share-state" role="status">Only you have access</p><p id="share-detail" class="note"></p>
@@ -165,5 +202,5 @@
 <div id="toast" data-canvas-chrome role="status" hidden></div>
 <dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is copied into this Paper. If the site blocks access, download the image and drop it here.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="mesurer-root"></div>
-<script type="module" src="app.js?v=cd442307847d"></script>
+<script type="module" src="app.js?v=53cd139b5ae8"></script>
 </body></html>

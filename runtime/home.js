@@ -23,7 +23,7 @@ if(embedded){
     else if(message.method==='ping'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
     else if(message.method==='ui/resource-teardown'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
   });
-  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.6.0-preview.4'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
+  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.7.0-preview.1'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
     hostContext(result.hostContext);
     if(!result.hostCapabilities?.serverTools)throw new Error('This host cannot open Paper Home. Ask your agent to open it in the browser.');
     parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');
@@ -85,6 +85,26 @@ for(const mode of ['list','grid'])document.getElementById(`as-${mode}`).addEvent
 let saved;try{saved=localStorage.getItem(key);}catch{}layout(saved==='list'?'list':'grid');
 load();addEventListener('focus',load);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
 setInterval(()=>{if(!document.hidden&&!disconnected)load();},15000);
+
+let notionHome;
+const openMenu=document.getElementById('home-open-menu'),openButton=document.getElementById('open-paper');
+openButton.addEventListener('click',()=>{if(openMenu.matches(':popover-open'))openMenu.hidePopover();else{openMenu.showPopover();const r=openButton.getBoundingClientRect();Object.assign(openMenu.style,{top:`${r.bottom+6}px`,left:`${Math.max(8,Math.min(innerWidth-openMenu.offsetWidth-8,r.right-openMenu.offsetWidth))}px`});openButton.setAttribute('aria-expanded','true');openMenu.querySelector('button').focus();}});
+openMenu.addEventListener('toggle',event=>openButton.setAttribute('aria-expanded',String(event.newState==='open')));
+async function openFromNotion(){
+  openMenu.hidePopover();
+  try{if(embedded){const target=await request({action:'open',workspaceId:selected==='all'?'personal':selected});return navigate(target.url+'#notion');}
+    if(!notionHome){const module=await import('./notion-ui.js?v=a9283f37987a');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
+    await notionHome.open();
+  }catch(error){fail(error);}
+}
+document.getElementById('open-notion').addEventListener('click',openFromNotion);
+document.getElementById('open-file').addEventListener('click',async()=>{openMenu.hidePopover();try{if(embedded){const target=await request({action:'open',workspaceId:selected==='all'?'personal':selected});return navigate(target.url);}document.getElementById('home-paper-import').click();}catch(error){fail(error);}});
+document.getElementById('home-paper-import').addEventListener('change',async event=>{
+  const file=event.target.files?.[0];event.target.value='';if(!file||busy)return;
+  busy=true;problem.hidden=true;
+  try{if(file.size>50*1024*1024)throw new Error('Paper files must fit within 50 MB.');const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':file.name.endsWith('.json')?'application/json':'application/zip'},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'The Paper could not be opened.');location.assign(result.href);}catch(error){fail(error);}finally{busy=false;}
+});
+if(!embedded&&location.hash==='#notion'){history.replaceState(null,'',location.pathname);openFromNotion();}
 
 const serversDialog=document.getElementById('servers-dialog'),serverMessage=document.getElementById('server-message');
 function renderServers(){

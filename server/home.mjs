@@ -73,6 +73,6 @@ export async function homeResource(runtime){
   // A single inline resource shares the browser Home, without localhost fetches or nested frames.
   css=css.replace(/@font-face\{[^}]*\}/g,'');
   const script=await fs.readFile(path.join(runtime,'home.js'),'utf8');
-  html=html.replace('<html lang="en">','<html lang="en" data-mcp="true">').replace(/<link rel="stylesheet" href="chrome\.css[^\"]*">/,`<style>${css}</style>`).replace(/<script type="module" src="home\.js[^\"]*"><\/script>/,()=>`<script type="module">${script}</script>`);
+  html=html.replace('<html lang="en">','<html lang="en" data-mcp="true">').replace(/<link rel="stylesheet" href="chrome\.css[^\"]*">/,`<style>${css}</style>`).replace(/<link rel="stylesheet" href="notion\.css[^\"]*">/,'').replace(/<script type="module" src="home\.js[^\"]*"><\/script>/,()=>`<script type="module">${script}</script>`);
   return {uri:HOME_URI,mimeType:HOME_MIME,text:html,_meta:{ui:{csp:{connectDomains:[],resourceDomains:[]},prefersBorder:false},'openai/ui':{preferredDisplayMode:'fullscreen',availableDisplayModes:['fullscreen']}}};
 }

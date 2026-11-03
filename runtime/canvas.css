@@ -302,3 +302,10 @@ body.read-only .paper-design-mode{pointer-events:none}body.read-only #rail [data
 .presence-box>span{position:absolute;left:-1.5px;bottom:calc(100% + 3px);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:4px 4px 4px 0;padding:3px 6px;background:var(--peer);color:white;font:10px/14px Inter,system-ui,sans-serif}
 .presence-cursor{position:absolute;left:0;top:0;will-change:transform;transition:transform .1s linear}.presence-cursor svg{fill:var(--peer);stroke:var(--surface);stroke-width:1.2;display:block}.presence-cursor span{position:absolute;left:11px;top:14px;white-space:nowrap;border-radius:4px;padding:2px 5px;background:var(--peer);color:white;font:10px/14px Inter,system-ui,sans-serif}
 @media(prefers-reduced-motion:reduce){.presence-cursor{transition:none}}
+
+.arrange-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.arrange-grid .btn{padding:0 5px;min-width:0}
+#multi-selection .row{flex-wrap:wrap}#multi-selection h3{font-variant-numeric:tabular-nums}
+.selection-marquee{position:absolute;z-index:30;border:1px solid var(--accent-ink);background:color-mix(in srgb,var(--accent) 7%,transparent);pointer-events:none}
+.snap-guide{position:absolute;z-index:29;pointer-events:none;background:var(--accent-ink);opacity:.7}.snap-guide.x{top:0;bottom:0;width:1px}.snap-guide.y{left:0;right:0;height:1px}
+#notion-share-icon{display:flex;align-items:center;flex:0 0 16px}#notion-share-icon svg{width:16px;height:16px}
+#properties input[type=color]{width:100%;height:30px;border:1px solid var(--line);border-radius:5px;background:var(--field);padding:3px}

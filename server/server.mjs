@@ -9,11 +9,13 @@ import { promises as fs, watch } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
-import { PaperLibrary, PaperError, ID, MAX_PAPER_BYTES, imageBytes } from './library.mjs';
+import { PaperLibrary, PaperError, ID, MAX_PAPER_BYTES, imageBytes,validatePaper } from './library.mjs';
+import {exportBundle,importBundle,MAX_BUNDLE_BYTES} from './bundle.mjs';
+import {createNotion} from './notion.mjs';
 import { json, readBody, staticFile } from './http.mjs';
 import { createSharing } from './sharing.mjs';
 import { complete, protocolError } from './mcp.mjs';
-import {createHome, homeResource, HOME_URI, HOME_MIME, personalWorkspace, rememberWorkspace} from './home.mjs';
+import {createHome, homeResource, HOME_URI, HOME_MIME, personalWorkspace, rememberWorkspace,dataHome} from './home.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RUNTIME = path.resolve(HERE,'../runtime');
@@ -32,6 +34,14 @@ async function projectWorkspace(workspace){
   const real=await fs.realpath(workspace),plugin=await fs.realpath(PLUGIN);
   if(inside(plugin,real))throw new PaperError(400,'Choose a workspace outside the plugin installation');return real;
 }
+async function importPaper(library,bytes,type){
+  if(type!=='application/json')return importBundle(library,bytes);
+  if(bytes.length>MAX_PAPER_BYTES)throw new PaperError(413,'Paper JSON is too large');
+  const paper=validatePaper(JSON.parse(bytes));
+  if(Object.keys(paper.assets).length||paper.pages.some(p=>p.nodes.some(n=>n.style?.fills?.some(f=>f.type==='image'))))throw new PaperError(400,'This JSON references separate images. Open a .paper.zip with its assets instead.');
+  const made=await library.create({name:paper.name});
+  try{const current=await library.read(made.id);await library.save(made.id,Buffer.from(JSON.stringify(paper)),current.revision);return made;}catch(error){await fs.rm(made.path,{recursive:true,force:true});throw error;}
+}
 export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sharePort=0}={}) {
   await checkRuntime(runtime);
   const real=await projectWorkspace(workspace);
@@ -45,6 +55,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
   });
   const presence=createPresence({publish:data=>emit('presence',data)});
   const sharing=createSharing({library,runtime,presence,publicUrl:shareUrl,port:sharePort});
+  const notion=createNotion({library,configDir:dataHome(),origin:()=>`http://127.0.0.1:${server.address().port}`});
   const emit=(event,data)=>{const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
   library.onChange=emit;
   const server=http.createServer(async(req,res)=>{
@@ -64,6 +75,26 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         json(res,200,{stopping:true});setImmediate(()=>app.close().catch(error=>process.stderr.write(`Paper shutdown: ${error.message}\n`)));return;
       }
       if(pathname==='/api/access'&&req.method==='GET')return json(res,200,{role:'owner',shared:false});
+      if(pathname==='/api/bundle'&&req.method==='GET'){
+        const id=paperId(url),bytes=await exportBundle(library,id);res.writeHead(200,{'Content-Type':'application/zip','Content-Length':bytes.length,'Content-Disposition':`attachment; filename="${id}.paper.zip"`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(bytes);return;
+      }
+      if(pathname==='/api/import'&&req.method==='POST'){
+        if(url.search)throw new PaperError(400,'Unexpected import query');return json(res,201,await importPaper(library,await readBody(req,MAX_BUNDLE_BYTES),req.headers['content-type']));
+      }
+      if(pathname.startsWith('/api/notion/')){
+        if(pathname==='/api/notion/callback'&&req.method==='GET'){
+          await notion.callback(url);const nonce=randomBytes(16).toString('hex');
+          res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'`});
+          res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Notion connected</title><style>body{font:15px/1.5 system-ui;max-width:440px;margin:12vh auto;padding:24px;color:#232321;background:#fafaf8}a{color:inherit}</style><h1>Notion connected</h1><p>You can return to Paper. This window can be closed.</p><a href="/home.html">Open Paper Home</a><script nonce="${nonce}">history.replaceState(null,'','/home.html#notion-connected');window.close()</script></html>`);return;
+        }
+        if(pathname==='/api/notion/status'&&req.method==='GET')return json(res,200,await notion.status(url.search?paperId(url):undefined));
+        if(pathname==='/api/notion/connect'&&req.method==='POST'){if(url.search)throw new PaperError(400,'Unexpected connection query');await readBody(req,1024);return json(res,200,await notion.connect());}
+        if(pathname==='/api/notion/connection'&&req.method==='DELETE')return json(res,200,await notion.disconnect());
+        if(pathname==='/api/notion/pages'&&req.method==='POST')return json(res,200,await notion.pages(JSON.parse(await readBody(req,8192))));
+        if(pathname==='/api/notion/save'&&req.method==='POST'){const result=await notion.save(paperId(url),JSON.parse(await readBody(req,28*1024*1024)));return json(res,200,{...result.link,...result});}
+        if(pathname==='/api/notion/open'&&req.method==='POST')return json(res,201,await notion.open(JSON.parse(await readBody(req,2048))));
+        throw new PaperError(404,'Unknown Notion action');
+      }
       if(pathname==='/api/home'){
         if(req.method==='GET')return json(res,200,await home());
         if(req.method==='POST')return json(res,200,await home(JSON.parse(await readBody(req,2048))));
@@ -126,7 +157,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
     });
     watcher.on('error',error=>{process.stderr.write(`File watching stopped: ${error.message}. API updates still notify open browsers.\n`);watcher.close();});
   }catch(error){process.stderr.write(`File watching unavailable: ${error.message}. API updates still notify open browsers.\n`);}
-  app={library,server,sharing,presence,url:`http://127.0.0.1:${server.address().port}`,get closed(){return !!closingPromise;},close(){return closingPromise??=(async()=>{for(const child of homeApps.values())await child.close();presence.close();clearInterval(heartbeat);watcher?.close();for(const t of timers.values())clearTimeout(t);for(const res of streams)res.end();streams.clear();await sharing.close();await new Promise(resolve=>server.close(resolve));await registration.close();})();}};
+  app={library,server,sharing,presence,notion,url:`http://127.0.0.1:${server.address().port}`,get closed(){return !!closingPromise;},close(){return closingPromise??=(async()=>{for(const child of homeApps.values())await child.close();notion.close();presence.close();clearInterval(heartbeat);watcher?.close();for(const t of timers.values())clearTimeout(t);for(const res of streams)res.end();streams.clear();await sharing.close();await new Promise(resolve=>server.close(resolve));await registration.close();})();}};
   return app;
 }
 
@@ -150,6 +181,8 @@ export const TOOLS=[
   tool('paper_add_asset','Copy a PNG/JPEG/WebP into this Paper. Supply base64 or a workspace sourceFile; then add returned asset/path to paper.assets and save the Paper.',{paperId:string,base64:string,sourceFile:string},['paperId']),
   tool('paper_activity','Show your current activity and optional work area. Empty status clears it. Temporary, not saved artwork.',{paperId:string,status:{type:'string',maxLength:120},pageId:string,nodeId:{type:'integer'},rect:{type:'object',properties:{x:{type:'number'},y:{type:'number'},w:{type:'number'},h:{type:'number'}},required:['x','y','w','h'],additionalProperties:false}},['paperId','status']),
   tool('paper_write_note','Update DESIGN.md or CONTEXT.md with its read revision.',{paperId:string,file:{type:'string',enum:['DESIGN.md','CONTEXT.md']},revision:string,text:string},['paperId','file','revision','text']),
+  tool('paper_package','Export a complete portable .paper.zip or import one as a new Paper. Files must be inside the selected workspace. Export never replaces an existing file.',{action:{type:'string',enum:['export','import']},paperId:string,file:string},['action','file']),
+  {...tool('paper_notion','Connect the official Notion account, list accessible pages, save/update a Paper, or open a cloud snapshot as a new local Paper. Login completes in the browser. Save is explicit; remote changes are never silently overwritten.',{action:{type:'string',enum:['status','connect','disconnect','pages','save','open']},paperId:string,parentId:string,pageId:string,query:string,cursor:string,newCopy:{type:'boolean'}},['action']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true}},
 ];
 export async function serveStdio() {
   const apps=new Map(),agentClient=randomBytes(16).toString('hex');let active=null;
@@ -164,9 +197,22 @@ export async function serveStdio() {
     if(name==='paper_open'){
       const root=await projectWorkspace(args.workspace===undefined?await personalWorkspace():args.workspace);
       await rememberWorkspace(root);active=await getApp(root);
-      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.6.0-preview.4'};
+      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:VERSION};
     }
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
+    if(name==='paper_package'){
+      if(!['export','import'].includes(args.action)||typeof args.file!=='string'||!path.isAbsolute(args.file))throw new PaperError(400,'Choose export/import and an absolute workspace file');
+      if(args.action==='import'){const source=await fs.realpath(args.file);if(!inside(active.library.workspace,source)||(await fs.stat(source)).size>MAX_BUNDLE_BYTES)throw new PaperError(400,'Choose a Paper file within this workspace and 50 MB');return importBundle(active.library,await fs.readFile(source));}
+      const directory=await fs.realpath(path.dirname(args.file));if(!inside(active.library.workspace,directory)||!args.file.endsWith('.paper.zip'))throw new PaperError(400,'Choose a .paper.zip destination within this workspace');
+      const bytes=await exportBundle(active.library,args.paperId);await fs.writeFile(path.join(directory,path.basename(args.file)),bytes,{flag:'wx',mode:0o600});return {file:args.file,bytes:bytes.length};
+    }
+    if(name==='paper_notion'){
+      const route={status:['GET','status'],connect:['POST','connect'],disconnect:['DELETE','connection'],pages:['POST','pages'],save:['POST','save'],open:['POST','open']}[args.action];if(!route)throw new PaperError(400,'Unknown Notion action');
+      if(args.paperId&&!ID.test(args.paperId))throw new PaperError(400,'Invalid Paper identity');
+      const query=['save','status'].includes(args.action)&&args.paperId?`?paper=${encodeURIComponent(args.paperId)}`:'';
+      const body=args.action==='pages'?Object.fromEntries(['query','cursor'].filter(k=>args[k]!==undefined).map(k=>[k,args[k]])):args.action==='save'?{...(args.parentId?{parentId:args.parentId}:{}),...(args.newCopy!==undefined?{newCopy:args.newCopy}:{})}:args.action==='open'?{pageId:args.pageId}:{};
+      const response=await fetch(`${active.url}/api/notion/${route[1]}${query}`,{method:route[0],headers:{Origin:active.url,'Content-Type':'application/json'},...(route[0]==='POST'?{body:JSON.stringify(body)}:{})});const result=await response.json();if(!response.ok)throw new PaperError(response.status,result.error||'Notion request failed');return result;
+    }
     if(name==='paper_list')return {papers:await active.library.list()};
     if(name==='paper_create'){const made=await active.library.create(args);return {...made,url:`${active.url}/?paper=${made.id}`};}
     if(name==='paper_read'){

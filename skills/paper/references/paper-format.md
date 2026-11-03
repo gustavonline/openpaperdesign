@@ -30,7 +30,9 @@ Complete text and image examples (append IDs to the chosen parent's children, or
  visible:true,locked:false,style:{fills:[{type:'image',asset:'uploaded-asset-key',mode:'fit'}],opacity:1}}
 ```
 
-Text uses the bundled Inter 400/700. Supported text fields: `font_size`, `align` (left/center/right), `text_style.bold`, `italic`, numeric `line_height` multiplier and pixel `letter_spacing`. Its solid fill supplies text colour. The DOM wraps within its width: inspect actual line breaks/scrollHeight after fonts load, then size the text box. Do not invent font-family support, token bindings or component constraints.
+Text uses the bundled Inter 400/700. Supported text fields: `font_size`, `align` (left/center/right/justify), `text_style.bold`, `italic`, numeric `line_height` multiplier and pixel `letter_spacing`. Its solid fill supplies text colour. The DOM wraps within its width: inspect actual line breaks/scrollHeight after fonts load, then size the text box. Do not invent font-family support, token bindings or component constraints.
+
+The browser exposes these text fields and shared opacity, corner radius, stroke and layer rotation. `runtime/editing-model.js` provides selection-root normalization, subtree capture/paste with fresh IDs and internal binding remapping, grouping/ungrouping, alignment and spacing distribution. Groups are ordinary `frame` layers with `canvas:true`; their children use native parent-local coordinates. Grouping requires siblings in the same container. Copy/paste carries referenced images, and external connector bindings detach. These are the same records agents edit through paper_read/paper_save.
 
 Strokes have parent-local `points:[{x,y,p?},…]`, `width`, optional `closed:true`; the closed path may have a solid fill. Its bounding rect encloses those points. `moveLayer` moves both the stroke rect and points together. Connector points are local to the connector rect instead, with optional `end_head:'arrow'`; bound geometry is derived from endpoint IDs. A real text child with `connectionLabel:true` follows the line. Labels and connectors keep their own IDs. The server derives bound geometry and validates the result on save.
 

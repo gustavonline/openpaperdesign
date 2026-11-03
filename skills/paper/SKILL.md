@@ -1,8 +1,8 @@
 ---
 name: paper
-description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the current project. Use for Home, Paper storage, workspace setup and server controls.
+description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the project and cloud snapshots in Notion. Use for Home, Paper files, Notion save/open, workspace setup and server controls.
 metadata:
-  version: "0.6.0-preview.4"
+  version: "0.7.0-preview.1"
 ---
 
 # Paper
@@ -33,6 +33,10 @@ For visual composition and design systems use [Design](../paper-design/SKILL.md)
 
 ## Share and manage servers
 
-Share exports the selected artboard/free root to PNG or HTML, and the document to Paper JSON. Assets travel with the Paper folder. Read [sharing](references/sharing.md) before configuring invitations, another agent or external hosting. Clean views receive live saves; conflicting edits are retained for reconciliation.
+Share exports selected artwork to PNG or HTML, the layer records to JSON, or the complete editable Paper to `.paper.zip`. `paper_package` exports/imports a ZIP within the active workspace; import allocates a new Paper identity. The archive includes referenced images, guides and feedback; history and connection credentials stay local.
+
+For Notion use the existing Share/Home UI or `paper_notion`: status, connect, pages, save, open and disconnect. Read the [Notion workflow](references/notion.md) for authentication, destination selection and cloud conflicts. The UI operates directly; it does not ask the person to prompt an agent for each save. Cloud open creates a local copy; explicit saves update its linked page. Prefer an existing matching Paper/page before creating a duplicate. The person controls account consent and publishing. Never copy connection credentials into a Paper or notes.
+
+Read [sharing](references/sharing.md) before configuring invitations, another agent or external hosting. Clean views receive live saves; conflicting edits are retained for reconciliation. A saved Notion snapshot and interactive preview do not turn Notion into the live editing server.
 
 `paper_home {}` also reports servers for the known collections. To stop one when requested, use `action:"stop"`, its `workspaceId` and current server `instance`. Stopping closes that server's browser connections and invitations; it preserves files. Use the listed identity, not a process-name search or blanket kill. Reopen with `paper_open` when needed. Browser Home offers the same operation under Servers.

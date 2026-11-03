@@ -19,6 +19,8 @@ Launch `node <plugin-root>/server/server.mjs --stdio`. Keep stdin open while the
 | `paper_read_feedback` | `paperId`; returns `workspace` (object or null) and an independent revision. |
 | `paper_save_feedback` | `paperId`, feedback `revision`, complete `workspace` object or null. At most 5 MB; preserve unrelated comments. |
 | `paper_add_asset` | `paperId`, exactly one of standard `base64` or absolute in-workspace `sourceFile`. PNG/JPEG/WebP, at most 5 MB. Returns `{asset,path}`. |
+| `paper_package` | `action: export/import`, absolute in-workspace `file`; export also takes `paperId`. Complete `.paper.zip`, up to 50 MiB. Export refuses an existing destination; import creates a new Paper. |
+| `paper_notion` | `action: status/connect/disconnect/pages/save/open`, optional `paperId`, `parentId`, `pageId`, title `query`, returned `cursor`. Separate save requires `newCopy:true` and parentId. Direct official Notion connection; conflicts preserve both versions. |
 
 For complete text/image node examples and ownership/coordinate rules, read the [native layer format](paper-format.md).
 
@@ -48,6 +50,22 @@ After adding an image set `paper.assets[result.asset] = result.path`; use that a
 | `/`, `/home.html`, `/?paper=<id>` | GET, HEAD | Complete dashboard/editor; same bundled UI in every workspace. |
 
 There is no HTTP note-write endpoint. Use the owner note MCP tool or ordinary project file tools. Unknown API routes fail; missing/duplicate/foreign Paper IDs never fall back to another Paper.
+
+Owner transfer/cloud routes use the same loopback Host and write-Origin checks:
+
+| Route | Method | Result |
+| --- | --- | --- |
+| `/api/bundle?paper=<id>` | GET | Complete `.paper.zip`, referenced assets and notes included. |
+| `/api/import` | POST | Binary ZIP; `Content-Type: application/json` also accepts asset-free Paper JSON. New local identity; no overwrite. |
+| `/api/notion/status[?paper=<id>]` | GET | Stored connection, optional linked page, changed/unverified state. |
+| `/api/notion/connect` | POST | Official Notion sign-in URL. |
+| `/api/notion/callback` | GET | Single-use PKCE/state callback for this loopback origin. |
+| `/api/notion/connection` | DELETE | Disconnect locally. |
+| `/api/notion/pages` | POST | `{query?,cursor?}` → accessible page titles/IDs and optional next cursor. |
+| `/api/notion/save?paper=<id>` | POST | `{parentId?,newCopy?,preview?:{html?,pngBase64?}}` → saved link and local-changed state. newCopy is explicit separate-page creation. |
+| `/api/notion/open` | POST | `{pageId}` → new local Paper and href from a checked cloud archive. |
+
+Notion routes, archive import/export and credentials are owner-only. See [Notion](notion.md) for storage and conflict semantics. Page/layer deep links use `#page=<id>&node=<id>`; they change the browser view, not the saved artwork.
 
 Example using values returned by `paper_open` / `paper_create`:
 

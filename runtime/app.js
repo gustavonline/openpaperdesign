@@ -2,6 +2,8 @@ import {setupPresence} from './presence.js?v=3a51591568af';
 import { setupSharing } from './sharing.js?v=052a5c2d717a';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=257300bbee91';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers} from './editing-model.js?v=1d0049e52e98';
+import {setupNotion,notionIcon} from './notion-ui.js?v=a9283f37987a';
 const $ = selector => document.querySelector(selector);
 const stage = $('#stage'), world = $('#world'), body = document.body, form = $('#properties'), tree = $('#layer-tree');
 // Which Paper this page edits, read once from the URL (`?paper=<id>`, exactly once; the server refuses an
@@ -23,12 +25,16 @@ if (access.shared) { const badge = document.createElement('span'); badge.classNa
 if (access.shared) { for (const item of document.querySelectorAll('[data-action="home"],[data-action="new"],.owner-only')) item.hidden = true; }
 if (!canEdit) { for (const field of form.querySelectorAll('input,textarea,select')) field.disabled = true; $('[data-action="rename"]').disabled = true; $('#title-text').disabled = true; }
 setupSharing({paperId,access,closeMenu,onCancel:()=>{if(mesurerHost.stableMode==='edit')setTool('select');else mesurerHost.api?.resetInspect();}});
+const notionUI=setupNotion({paperId,access,beforeSave:async()=>{commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your local changes before continuing.');},preview:paperPreview,onOpen:async href=>{if(!await flushSave()||!await flushFeedback())throw new Error('Save your current Paper before opening another.');leaving=true;location.assign(href);},message});
+$('#notion-share-icon').innerHTML=notionIcon;
+$('#save-notion').addEventListener('click',()=>{closeMenu();notionUI.save();});
 const assetUrl = path => paperBase + path;
 // This tab, so its own change events can be told from another tab's or an agent's.
 const clientId = (access.clientPrefix || '') + (crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
 const clientHeaders = { 'X-Paper-Client': clientId };
 const LIMIT = 1e6, VIEW_KEY = scoped('paper:view:2'), PANEL_KEY = scoped('paper:panels:1'), ROW_CAP = 200;
 let scene, revision, selected = null, gesture, frameRequest, saveTimer, viewTimer, toastTimer, textEdit, fieldBefore;
+const selection = new Set();
 // `inspection`: Mesurer owns input (any native tool, menu or utility; artwork editing pauses).
 // `inspectMode`: the mode shown is Inspect. A utility or menu opened from Edit pauses editing but keeps Edit shown.
 let inspection = false, inspectMode = false, spaceHeld = false, mode = 'select', leaving = false;
@@ -63,7 +69,7 @@ function redraw() {
 // Canvas view (per project, this browser only): None / Dots / Grid as a CSS background that follows the
 // camera, plus an optional canvas colour. Never part of the scene, its artwork or exports.
 const CANVAS_KEY = scoped('paper:canvas-view:1');
-let canvasView = { pattern: 'none', color: null };
+let canvasView = { pattern: 'none', color: null, snap: false, objects: true };
 function paintBackground() {
   stage.style.backgroundColor = canvasView.color || '';
   if (canvasView.pattern === 'none') { stage.style.backgroundImage = ''; return; }
@@ -112,8 +118,8 @@ function screenRect(key) {
   return r && r.width + r.height > 0 ? { r, s } : null;
 }
 function fitSelection() {
-  const m = selected && screenRect(selected); if (!m) return fitAll();
-  fit([{ x: (m.r.left - m.s.left - camera.x) / camera.z, y: (m.r.top - m.s.top - camera.y) / camera.z, w: m.r.width / camera.z, h: m.r.height / camera.z }], 2);
+  const boxes=[...selection].map(screenRect).filter(Boolean);if(!boxes.length)return fitAll();
+  fit(boxes.map(({r,s})=>({x:(r.left-s.left-camera.x)/camera.z,y:(r.top-s.top-camera.y)/camera.z,w:r.width/camera.z,h:r.height/camera.z})),2);
 }
 function revealOnCanvas(key) {
   const m = screenRect(key); if (!m) return;
@@ -136,6 +142,7 @@ function styleNode(node, element) {
   } else {
     element.style.backgroundColor = isVector(node) ? 'transparent' : node.style?.fills?.find(f => f.type === 'solid')?.color || 'transparent';
   }
+  element.style.overflow=node.type==='frame'&&node.clip?'hidden':'';
   updateVector(node, element);
   const children = element.querySelector(':scope > .symbol-content');
   if (children && node.diagram) Object.assign(children.style,{width:`${node.diagram.width}px`,height:`${node.diagram.height}px`,transform:`scale(${node.rect.w/node.diagram.width},${node.rect.h/node.diagram.height})`});
@@ -146,6 +153,7 @@ function updateVector(node, element) {
   path.setAttribute('d', points.map((p, i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' ') + (node.closed ? ' Z' : ''));
   path.setAttribute('fill', node.closed ? node.style?.fills?.find(f=>f.type==='solid')?.color || 'none' : 'none');
   path.setAttribute('stroke', node.style?.stroke || '#222222'); element.querySelector('marker path')?.setAttribute('fill', node.style?.stroke || '#222222');
+  path.setAttribute('stroke-width',node.width??node.style?.stroke_width??2);
   element.querySelector('svg').setAttribute('viewBox', `0 0 ${Math.max(.1, node.rect.w)} ${Math.max(.1, node.rect.h)}`);
 }
 function makeNode(page, node, parentElement, boardKey) {
@@ -186,9 +194,9 @@ function paint(key) {
   const b = boards.get(key), node = b.node, o = b.offset;
   b.viewRect = { ...node.rect, x: node.rect.x + o.x, y: node.rect.y + o.y };
   Object.assign(b.wrapper.style, { width: `${node.rect.w}px`, height: `${node.rect.h}px`, transform: `translate(${b.viewRect.x}px,${b.viewRect.y}px)` });
-  b.wrapper.classList.toggle('board-selected',selected===key&&!node.locked);
+  b.wrapper.classList.toggle('board-selected',selection.has(key)&&!node.locked&&selection.size===1);
   b.name.textContent = node.name; b.name.title = node.name; b.name.setAttribute('aria-label', `Select board ${node.name}`);
-  if (b.artboard) Object.assign(b.content.style, { backgroundColor: node.style?.fills?.find(f => f.type === 'solid')?.color || 'transparent', overflow: node.clip ? 'hidden' : 'visible', visibility: node.visible === false ? 'hidden' : '', opacity: String(node.style?.opacity ?? 1) });
+  if (b.artboard) {styleNode({...node,rect:{...node.rect,x:0,y:0},rotation:0},b.content);Object.assign(b.content.style,{overflow:node.clip?'hidden':'visible',visibility:node.visible===false?'hidden':''});}
   else {const shown={...node,rect:{...node.rect,x:0,y:0}};if(node.type==='stroke')shown.points=node.points.map(p=>({...p,x:p.x-node.rect.x,y:p.y-node.rect.y}));styleNode(shown,dom.get(key));}
 }
 function refreshConnections(page) {
@@ -239,11 +247,11 @@ function renderPages() {
   }));
 }
 function kindIcon(n) { return n.type === 'frame' ? 'frame' : n.type === 'text' ? 'text' : n.type === 'ellipse' ? 'ellipse' : n.type === 'connector' ? 'arrow' : n.type === 'stroke' ? 'pencil' : imageFill(n) ? 'image' : 'rect'; }
-function kindName(n) { return n.diagram ? 'Symbol' : imageFill(n) && n.type === 'rect' ? 'Image' : ({ text: 'Text', rect: 'Rectangle', ellipse: 'Ellipse', frame: 'Frame', stroke: 'Pencil', connector: 'Arrow' })[n.type] || n.type; }
+function kindName(n) { return n.diagram ? 'Symbol' : n.type==='frame'&&n.canvas===true?'Group':imageFill(n) && n.type === 'rect' ? 'Image' : ({ text: 'Text', rect: 'Rectangle', ellipse: 'Ellipse', frame: 'Frame', stroke: 'Pencil', connector: 'Arrow' })[n.type] || n.type; }
 function treeRow(page, n, depth, hasKids) {
   const key = keyOf(page, n.id), row = document.createElement('div');
   row.className = `tree-row${n.visible === false ? ' off' : ''}`; row.setAttribute('role', 'treeitem'); row.dataset.key = key; row.tabIndex = -1;
-  row.style.setProperty('--d', depth); row.setAttribute('aria-level', depth + 1); row.setAttribute('aria-selected', String(key === selected));
+  row.style.setProperty('--d', depth); row.setAttribute('aria-level', depth + 1); row.setAttribute('aria-selected', String(selection.has(key)));
   if (hasKids) row.setAttribute('aria-expanded', String(expanded.has(key)));
   row.innerHTML = `${hasKids ? '<button type="button" class="tw" tabindex="-1" aria-label="Expand or collapse"><svg class="icon"><use href="#i-chevron"/></svg></button>' : '<span class="tw"></span>'}<svg class="icon kind"><use href="#i-${kindIcon(n)}"/></svg><span class="label"></span><button type="button" class="ibtn act lock${n.locked ? ' on' : ''}" tabindex="-1" aria-label="${n.locked ? 'Unlock' : 'Lock'}" title="${n.locked ? 'Unlock' : 'Lock'}"><svg class="icon"><use href="#i-${n.locked ? 'lock' : 'unlock'}"/></svg></button><button type="button" class="ibtn act vis${n.visible === false ? ' on' : ''}" tabindex="-1" aria-label="${n.visible === false ? 'Show' : 'Hide'}" title="${n.visible === false ? 'Show' : 'Hide'}"><svg class="icon"><use href="#i-${n.visible === false ? 'eye-off' : 'eye'}"/></svg></button>`;
   row.querySelector('.label').textContent = n.name || kindName(n); row.title = n.name || '';
@@ -289,14 +297,18 @@ function revealInTree(key) {
   tree.querySelector(`[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' });
 }
 
-function selectNode(key, { reveal = false } = {}) {
-  if (selected) { dom.get(selected)?.classList.remove('selected'); boards.get(selected)?.name.setAttribute('aria-pressed', 'false'); boards.get(selected)?.wrapper.classList.remove('board-selected'); }
-  selected = key && nodes.has(key) ? key : null;
-  if (selected) { dom.get(selected)?.classList.add('selected'); boards.get(selected)?.name.setAttribute('aria-pressed', 'true'); if(!nodes.get(selected).node.locked)boards.get(selected)?.wrapper.classList.add('board-selected'); if (reveal) revealOnCanvas(selected); }
+function selectMany(keys, {reveal=false,primary=null}={}) {
+  for(const key of selection){dom.get(key)?.classList.remove('selected');boards.get(key)?.name.setAttribute('aria-pressed','false');boards.get(key)?.wrapper.classList.remove('board-selected');}
+  const valid=keys.filter(key=>nodes.has(key)),page=nodes.get(primary||valid.at(-1))?.page;
+  selection.clear();for(const key of valid)if(nodes.get(key).page===page)selection.add(key);
+  selected=selection.has(primary)?primary:[...selection].at(-1)||null;
+  for(const key of selection){dom.get(key)?.classList.add('selected');boards.get(key)?.name.setAttribute('aria-pressed','true');if(selection.size===1&&!nodes.get(key).node.locked)boards.get(key)?.wrapper.classList.add('board-selected');}
+  if(selected&&reveal)revealOnCanvas(selected);
   populateInspector();
   libraryUI?.selectionChanged();presenceUI?.changed();
   if (selected && body.classList.contains('left-open') && !$('#layer-search').value) revealInTree(selected); else renderTree();
 }
+function selectNode(key,{reveal=false,add=false}={}){const keys=add?[...selection]:[];if(key&&nodes.has(key)){const i=keys.indexOf(key);if(add&&i>=0)keys.splice(i,1);else keys.push(key);}selectMany(keys,{reveal,primary:key});}
 function populateDoc() {
   const pages = visiblePages(), layers = pages.reduce((n, p) => n + p.nodes.length, 0), roots = pages.reduce((n, p) => n + p.nodes.filter(node => p.root.includes(node.id) && isArtboard(node)).length, 0);
   $('#doc-view h3').textContent = pageId === 'all' ? 'All pages' : 'Page';
@@ -304,6 +316,8 @@ function populateDoc() {
   $('#doc-count').textContent = `${layers.toLocaleString('en')} ${layers === 1 ? 'layer' : 'layers'} · ${roots} ${roots === 1 ? 'artboard' : 'artboards'}`;
 }
 function populateInspector() {
+  $('#multi-selection').hidden=selection.size<2;
+  if(selection.size>1){form.hidden=true;$('#doc-view').hidden=true;$('#selection-count').textContent=`${selection.size} layers`;for(const button of $('#multi-selection').querySelectorAll('button'))button.disabled=!canEdit||(selection.size<3&&button.dataset.arrange?.startsWith('distribute'));return;}
   if (!selected) { form.hidden = true; $('#doc-view').hidden = false; populateDoc(); return; }
   form.hidden = false; $('#doc-view').hidden = true;
   const { node, root } = nodes.get(selected), f = form.elements, set = (name, value) => { if (document.activeElement !== f[name]) f[name].value = value; };
@@ -314,17 +328,23 @@ function populateInspector() {
   $('#fill-section').hidden=!!node.diagram;
   for(const name of ['x','y','w','h'])f[name].disabled=!canEdit||!!node.bindings||(node.connectionLabel&&['x','y'].includes(name));
   $('#fill-section h3').textContent = vector ? 'Stroke' : 'Fill'; set('color', color);
-  if (/^#[0-9a-f]{6}$/i.test(color)) f['color-picker'].value = color;
+  f['color-picker'].value=/^#[0-9a-f]{6}$/i.test(color)?color:'#ffffff';f.color.placeholder=color?'#rrggbb':'None';
   const image = imageFill(node); $('#fill-note').hidden = !image; if (image) $('#fill-note').textContent = `Image fill: ${scene.assets?.[image.asset] || image.asset}`;
   $('#text-section').hidden = node.type !== 'text';
-  if (node.type === 'text') { set('text', node.text || ''); set('font_size', node.font_size || 14); f.weight.value = node.text_style?.bold ? '700' : '400'; }
+  if (node.type === 'text') { set('text', node.text || ''); set('font_size', node.font_size || 14); f.weight.value = node.text_style?.bold ? '700' : '400';set('align',node.align||'left');set('line_height',node.text_style?.line_height??1.2);set('letter_spacing',node.text_style?.letter_spacing??0);f.italic.checked=!!node.text_style?.italic; }
+  set('opacity',Math.round((node.style?.opacity??1)*100));set('corner_radius',node.style?.corner_radius??0);set('rotation',node.rotation??0);
+  set('stroke_width',isVector(node)?node.width??node.style?.stroke_width??2:node.style?.stroke_width??1);
+  set('stroke_color',/^#[0-9a-f]{6}$/i.test(node.style?.stroke||'')?node.style.stroke:'#222222');f.stroke_enabled.checked=!!node.style?.stroke;
+  f.stroke_enabled.disabled=!canEdit||isVector(node);f.rotation.disabled=!canEdit||!!root;
+  $('#corner-radius-field').hidden=!['rect','frame'].includes(node.type);$('#stroke-section').hidden=!!node.diagram;
+  form.querySelector('[data-edit="ungroup"]').disabled=!canEdit||node.type!=='frame'||node.canvas!==true||!!node.diagram||!!node.locked;
   f.visible.checked = node.visible !== false; f.locked.checked = node.locked === true;
   if (!canEdit) for (const field of form.querySelectorAll('input,textarea,select')) field.disabled = true;
 }
 
 // History. Structural records keep exact page.nodes indices and the sibling position for undo.
 function updateHistory() { $('#undo').disabled = !history.length; $('#redo').disabled = !future.length; if (leftTab === 'design') renderDesign(); }
-function pushHistory(action) { history.push(action); if (history.length > 200) history.shift(); future.length = 0; updateHistory(); queueSave(); }
+function pushHistory(action) { Object.defineProperty(action,'_bytes',{value:JSON.stringify(action).length,writable:true,configurable:true});history.push(action);let bytes=history.reduce((sum,item)=>sum+(item._bytes||0),0);while(history.length>1&&(history.length>200||bytes>32*1024*1024))bytes-=history.shift()._bytes||0;future.length = 0; updateHistory(); queueSave(); }
 function record(key, before, after) { if (JSON.stringify(before) !== JSON.stringify(after)) pushHistory({ key, before, after }); }
 function subtree(map, id) { const n = map.get(id); return n ? [id, ...(n.children || []).flatMap(c => subtree(map, c))] : []; }
 function detach(key) {
@@ -358,6 +378,12 @@ function applyNode(key, snapshot) {
   Object.keys(entry.node).forEach(k => delete entry.node[k]); Object.assign(entry.node, copy(snapshot)); paint(key);
 }
 function applyHistory(action, reverse) {
+  if(action.kind==='page-edit'){
+    const page=scene.pages.find(p=>p.id===action.pageId),map=new Map(page.nodes.map(n=>[n.id,n]));
+    for(const change of action.changes){const node=reverse?change.before:change.after;if(node)map.set(change.id,copy(node));else map.delete(change.id);}
+    page.nodes=(reverse?action.orderBefore:action.orderAfter).map(id=>map.get(id));page.root=copy(reverse?action.rootBefore:action.rootAfter);page.next_id=reverse?action.nextBefore:action.nextAfter;
+    buildScene();selectMany((reverse?action.selectionBefore:action.selectionAfter).filter(key=>nodes.has(key)));return;
+  }
   if (!action.kind) { applyNode(action.key, reverse ? action.before : action.after); populateInspector(); renderTree(); return; }
   if(action.kind==='nodes'){for(const change of action.changes)applyNode(change.key,reverse?change.before:change.after);populateInspector();renderTree();return;}
   if (action.kind === 'name') { scene.name = reverse ? action.before : action.after; showTitle(); return; }
@@ -369,10 +395,83 @@ function applyHistory(action, reverse) {
 function undo() { commitFields(); stopTextEdit(); const a = history.pop(); if (!a) return; applyHistory(a, true); future.push(a); updateHistory(); queueSave(); }
 function redo() { commitFields(); stopTextEdit(); const a = future.pop(); if (!a) return; applyHistory(a, false); history.push(a); updateHistory(); queueSave(); }
 function removeSelected() {
-  const entry = nodes.get(selected); if (!entry || entry.node.locked) return;
-  if (entry.root) { message('Boards can’t be deleted here. Hide it instead, or delete its layers.'); return; }
-  const key = selected, rec = detach(key); pushHistory({ kind: 'remove', key, rec }); selectNode(null);
+  const page=nodes.get(selected)?.page;if(!page)return;
+  pageChange(page,()=>{const map=entries.get(page.id),remove=new Set();for(const id of selectedRoots())if(!map.get(id).locked)for(const child of subtree(map,id))remove.add(child);
+    page.nodes=page.nodes.filter(n=>!remove.has(n.id));page.root=page.root.filter(id=>!remove.has(id));for(const node of page.nodes){if(node.children)node.children=node.children.filter(id=>!remove.has(id));if(node.bindings&&[node.bindings.start,node.bindings.end].some(id=>remove.has(id)))delete node.bindings;}return [];});
 }
+
+function selectedRoots(){const page=nodes.get(selected)?.page;return page?selectionRoots(page,[...selection].map(key=>nodes.get(key).node.id)):[];}
+// Structural edits keep only changed nodes and ordering in history, rather than a full Paper snapshot.
+function pageChange(page,change){
+  if(!canEdit)return;
+  commitFields();stopTextEdit();const before=copy(page),selectionBefore=[...selection];
+  try{
+    const result=change();resolveConnections(page);const old=new Map(before.nodes.map(n=>[n.id,n])),now=new Map(page.nodes.map(n=>[n.id,n])),changes=[];
+    for(const id of new Set([...old.keys(),...now.keys()]))if(JSON.stringify(old.get(id))!==JSON.stringify(now.get(id)))changes.push({id,before:old.get(id)||null,after:copy(now.get(id)||null)});
+    if(!changes.length&&JSON.stringify(before.root)===JSON.stringify(page.root))return;
+    const selectionAfter=(result||[]).map(id=>keyOf(page,id));
+    const action={kind:'page-edit',pageId:page.id,changes,orderBefore:before.nodes.map(n=>n.id),orderAfter:page.nodes.map(n=>n.id),rootBefore:before.root,rootAfter:copy(page.root),nextBefore:before.next_id,nextAfter:page.next_id,selectionBefore,selectionAfter};
+    buildScene();selectMany(selectionAfter);pushHistory(action);return result;
+  }catch(error){Object.keys(page).forEach(key=>delete page[key]);Object.assign(page,before);buildScene();selectMany(selectionBefore);message(error.message);}
+}
+function duplicateSelection(offset=16){const entry=nodes.get(selected);if(!entry)return;return pageChange(entry.page,()=>pasteLayers(entry.page,captureLayers(entry.page,selectedRoots()),{samePage:true,offset}));}
+let layerClipboard=null,styleClipboard=null;
+async function copiedLayers(){
+  const entry=nodes.get(selected);if(!entry)return null;
+  const payload={...captureLayers(entry.page,selectedRoots()),paperId,pageId:entry.page.id,assets:{},assetCredits:{}};
+  const refs=new Set(payload.nodes.flatMap(n=>(n.style?.fills||[]).filter(f=>f.type==='image').map(f=>f.asset)));
+  let size=0;for(const id of refs){const name=scene.assets[id];if(!/^assets\/[a-zA-Z0-9_.-]+$/.test(name||''))throw new Error('An image asset is unavailable.');const value=await dataUrl(assetUrl(name));size+=value.length;if(size>28*1024*1024)throw new Error('The selection is too large for the clipboard. Export the Paper with assets instead.');payload.assets[id]=value;if(scene.assetCredits?.[id])payload.assetCredits[id]=copy(scene.assetCredits[id]);}
+  return payload;
+}
+async function copySelection(cut=false){
+  if(!selected)return;layerClipboard=null;commitFields();stopTextEdit();const keep=[...selection];
+  try{const payloadPromise=copiedLayers().then(value=>{layerClipboard=value;return value;});
+    if(navigator.clipboard?.write&&window.ClipboardItem)await navigator.clipboard.write([new ClipboardItem({'text/plain':payloadPromise.then(value=>new Blob([JSON.stringify(value)],{type:'text/plain'}))})]);
+    else {const value=await payloadPromise;await navigator.clipboard.writeText(JSON.stringify(value));}
+    await payloadPromise;if(cut&&canEdit&&keep.join('|')===[...selection].join('|'))removeSelected();message(cut?'Cut layers':'Copied layers');
+  }catch(error){message(layerClipboard?'Copied in this Paper. System clipboard is unavailable.':`Copy failed: ${error.message}`);}
+}
+async function pasteSelection(){
+  if(!canEdit)return;
+  try{
+    let text;try{text=await navigator.clipboard.readText();}catch{if(!layerClipboard)throw new Error('Clipboard access is unavailable. Copy layers in this Paper first.');}
+    const payload=text?JSON.parse(text):copy(layerClipboard);if(payload?.format!=='openpaperdesign-layers')throw new Error('Copy Paper layers before pasting.');
+    if(Object.keys(payload.assets||{}).length>500||payload.nodes?.length>50000)throw new Error('The copied selection is too large.');
+    const targetPage=nodes.get(selected)?.page||visiblePages()[0],local=payload.paperId===paperId&&payload.pageId===targetPage.id,assetMap=new Map();
+    for(const [id,value] of Object.entries(payload.assets||{})){
+      if(local&&scene.assets[id])continue;
+      if(typeof value!=='string'||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(value)||value.length>7*1024*1024)throw new Error('Invalid copied image.');
+      const response=await fetch(`/api/assets${paperQuery}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:Uint8Array.from(atob(value.split(',')[1]),c=>c.charCodeAt(0))});const asset=await response.json();if(!response.ok)throw new Error(asset.error||'Image could not be pasted.');scene.assets[asset.asset]=asset.path;assetMap.set(id,asset.asset);if(payload.assetCredits?.[id]){scene.assetCredits||={};scene.assetCredits[asset.asset]=payload.assetCredits[id];}
+    }
+    for(const node of payload.nodes||[])for(const fill of node.style?.fills||[])if(fill.type==='image'){fill.asset=assetMap.get(fill.asset)||fill.asset;if(!scene.assets[fill.asset])throw new Error('An image is missing from the clipboard.');}
+    pageChange(targetPage,()=>pasteLayers(targetPage,payload,{samePage:local}));setTool('select');
+  }catch(error){message(`Paste failed: ${error instanceof SyntaxError?'The clipboard does not contain Paper layers.':error.message}`);}
+}
+function editCommand(action){
+  const entry=nodes.get(selected),page=entry?.page;
+  if(action==='copy')return copySelection();if(action==='link')return copyLink();if(action==='paste')return pasteSelection();
+  if(!canEdit||!page)return;
+  if(action==='cut')return copySelection(true);if(action==='duplicate')return duplicateSelection();if(action==='delete')return removeSelected();
+  if(action==='copy-style'){styleClipboard={style:copy(entry.node.style||{}),font_size:entry.node.font_size,text_style:copy(entry.node.text_style||{}),align:entry.node.align};message('Copied style');return;}
+  if(action==='paste-style'){if(!styleClipboard){message('Copy a style first.');return;}return pageChange(page,()=>{for(const id of selectedRoots()){const node=entries.get(page.id).get(id);if(node.locked)continue;node.style=copy(styleClipboard.style);if(node.type==='text'){node.text_style=copy(styleClipboard.text_style);if(styleClipboard.font_size)node.font_size=styleClipboard.font_size;if(styleClipboard.align)node.align=styleClipboard.align;}}return selectedRoots();});}
+  if(action==='group')return pageChange(page,()=>[groupLayers(page,selectedRoots())]);
+  if(action==='ungroup')return pageChange(page,()=>ungroupLayers(page,selectedRoots()));
+  if(action==='front'||action==='back')return pageChange(page,()=>{const ids=selectedRoots(),parents=new Set(ids.map(id=>entries.get(page.id).get(id).parent??null));for(const parent of parents){const node=entries.get(page.id).get(parent),siblings=node?node.children:page.root,move=siblings.filter(id=>ids.includes(id)),rest=siblings.filter(id=>!ids.includes(id));if(node)node.children=action==='front'?[...rest,...move]:[...move,...rest];else page.root=action==='front'?[...rest,...move]:[...move,...rest];}return ids;});
+}
+async function copyLink(){
+  const url=new URL(location.href),entry=nodes.get(selected),page=entry?.page.id||(pageId==='all'?null:pageId),hash=new URLSearchParams();
+  if(page)hash.set('page',page);if(entry)hash.set('node',entry.node.id);url.hash=hash.toString();
+  try{await navigator.clipboard.writeText(url.href);message(entry?'Copied link to layer':page?'Copied link to page':'Copied Paper link');}catch{message('Clipboard access is unavailable. Copy the address from your browser.');}
+}
+function openDeepLink(){
+  const hash=new URLSearchParams(location.hash.slice(1));if(!hash.size)return false;
+  if([...hash.keys()].some(key=>!['page','node'].includes(key))||hash.getAll('page').length!==1||hash.getAll('node').length>1)return false;
+  const page=scene.pages.find(p=>p.id===hash.get('page'));if(!page)return false;
+  pageId=page.id;layoutBoards();renderPages();const id=hash.get('node'),key=id&&/^\d+$/.test(id)?keyOf(page,Number(id)):null;
+  selectNode(nodes.has(key)?key:null);if(selected)fitSelection();else fitAll();return true;
+}
+addEventListener('hashchange',()=>{if(scene){commitFields();stopTextEdit();finishGesture();openDeepLink();}});
+document.addEventListener('click',event=>{const edit=event.target.closest('[data-edit]'),arrange=event.target.closest('[data-arrange]');if(edit){closeMenu();editCommand(edit.dataset.edit);}else if(arrange){const page=nodes.get(selected)?.page;if(page)pageChange(page,()=>arrangeLayers(page,selectedRoots(),arrange.dataset.arrange));}});
 
 // Durable save: revision-checked PUT to the Paper's file. The status says only what is true: silent on a
 // clean open; Edited / Saving… while a change is pending or in flight; Saved for a moment, then gone.
@@ -526,6 +625,15 @@ function applyField(node, target) {
   else if (field === 'text') node.text = value;
   else if (field === 'font_size') { const v = Number(value); if (!finite(v) || v < 1 || v > 500) return false; node.font_size = v; }
   else if (field === 'weight') node.text_style = { ...(node.text_style || {}), bold: value === '700' };
+  else if(field==='align'){if(!['left','center','right','justify'].includes(value))return false;node.align=value;}
+  else if(field==='italic')node.text_style={...(node.text_style||{}),italic:target.checked};
+  else if(field==='line_height'||field==='letter_spacing'){const v=Number(value);if(value===''||!Number.isFinite(v)||(field==='line_height'?(v<.1||v>10):(v< -100||v>100)))return false;node.text_style={...(node.text_style||{}),[field]:v};}
+  else if(['opacity','corner_radius','stroke_width','rotation'].includes(field)){
+    const v=Number(value);if(value===''||!Number.isFinite(v)||(field==='opacity'?(v<0||v>100):field==='rotation'?(v< -360||v>360):field==='stroke_width'?(v<.1||v>100):(v<0||v>1e6)))return false;
+    node.style||={};if(field==='rotation')node.rotation=v;else node.style[field]=field==='opacity'?v/100:v;if(field==='stroke_width'&&isVector(node))node.width=v;
+  }
+  else if(field==='stroke_color'){if(!/^#[0-9a-f]{6}$/i.test(value))return false;node.style||={};node.style.stroke=value;}
+  else if(field==='stroke_enabled'){node.style||={};node.style.stroke=target.checked?form.elements.stroke_color.value:null;}
   else if (field === 'visible') node.visible = target.checked;
   else if (field === 'locked') node.locked = target.checked;
   else if (field === 'color' || field === 'color-picker') { if (!/^#[0-9a-f]{6}$/i.test(value)) return false; setColor(node, value.toLowerCase()); }
@@ -536,7 +644,7 @@ form.addEventListener('submit', e => e.preventDefault());
 let cancelling = false, liveEdit = false;
 form.addEventListener('focusin', () => { liveEdit = false; if (selected) fieldBefore = { key: selected, node: copy(nodes.get(selected).node) }; });
 form.addEventListener('input', e => {
-  if (!selected || !['text', 'color', 'color-picker', 'x', 'y', 'w', 'h', 'font_size'].includes(e.target.name)) return;
+  if (!canEdit||!selected || !['text', 'color', 'color-picker', 'x', 'y', 'w', 'h', 'font_size','line_height','letter_spacing','opacity','corner_radius','rotation','stroke_width','stroke_color'].includes(e.target.name)) return;
   const { node } = nodes.get(selected); if (applyField(node, e.target)) { liveEdit = true; paint(selected); queueSave(); }
 });
 // Escape restores the value from when the field was focused: no history step; the file is re-saved
@@ -550,7 +658,7 @@ function cancelField(target) {
 }
 form.addEventListener('keydown', e => { if (e.key === 'Escape' && editable(e.target)) { e.preventDefault(); e.stopPropagation(); cancelField(e.target); } });
 form.addEventListener('change', e => {
-  if (!selected || cancelling) return;
+  if (!canEdit||!selected || cancelling) return;
   const { node } = nodes.get(selected), before = fieldBefore?.key === selected ? fieldBefore.node : copy(node);
   if (!applyField(node, e.target)) { populateInspector(); return; }
   paint(selected); record(selected, before, copy(node)); fieldBefore = { key: selected, node: copy(node) }; liveEdit = false;
@@ -586,8 +694,9 @@ function stopTextEdit() { if (textEdit) dom.get(textEdit)?.blur(); }
 // Pointer gestures on the canvas.
 function cancelGesture(){
   const g=gesture;if(!g)return;gesture=null;
+  clearGuides();g.marquee?.remove();
   if(g.kind==='resize')for(const item of g.before)applyNode(item.key,item.before);
-  else if(g.kind==='node')applyNode(g.key,g.before);
+  else if(g.kind==='node'){for(const item of g.changes||[{key:g.key,before:g.before}])applyNode(item.key,item.before);if(g.duplicateAction)applyHistory(g.duplicateAction,true);}
   else if(g.kind==='draw'&&g.key)detach(g.key);
   if(g.pointerId!==undefined&&stage.hasPointerCapture(g.pointerId))stage.releasePointerCapture(g.pointerId);
   populateInspector();renderTree();
@@ -595,9 +704,17 @@ function cancelGesture(){
 function finishGesture() {
   if (!gesture) return;
   const g = gesture; gesture = null;
+  clearGuides();g.marquee?.remove();
   if (g.pointerId !== undefined && stage.hasPointerCapture(g.pointerId)) stage.releasePointerCapture(g.pointerId);
   if(g.kind==='resize'&&g.moved){pushHistory({kind:'nodes',changes:g.before.map(item=>({...item,after:copy(nodes.get(item.key).node)}))});populateInspector();}
-  else if (g.kind === 'node' && g.moved) { record(g.key, g.before, copy(nodes.get(g.key).node)); populateInspector(); }
+  else if(g.kind==='marquee'){
+    if(g.box){const found=[];for(const [key,entry] of nodes){if(entry.page!==g.page||entry.node.locked||entry.node.visible===false||entry.node.connectionLabel)continue;const r=dom.get(key)?.getBoundingClientRect();if(r&&r.width+r.height>0&&r.left>=g.box.left&&r.top>=g.box.top&&r.right<=g.box.right&&r.bottom<=g.box.bottom)found.push(key);}selectMany([...g.previous,...found]);}
+  }
+  else if (g.kind === 'node' && g.moved) {
+    if(g.duplicateAction){for(const item of g.duplicateAction.changes)if(item.after)item.after=copy(entries.get(g.duplicateAction.pageId).get(item.id));pushHistory(g.duplicateAction);}
+    else {const changes=(g.changes||[{key:g.key,before:g.before}]).map(item=>({key:item.key,before:item.before,after:copy(nodes.get(item.key).node)})).filter(item=>JSON.stringify(item.before)!==JSON.stringify(item.after));if(changes.length)pushHistory({kind:'nodes',changes});}
+    populateInspector();
+  }else if(g.kind==='node'&&g.collapse)selectNode(g.key);
   else if (g.kind === 'draw') {
     if(g.tool==='connector' && g.source && g.lastClient){
       const drawing=dom.get(g.key),hit=document.elementsFromPoint(g.lastClient.x,g.lastClient.y).find(el=>!drawing?.contains(el)&&hitSymbol(el)&&nodes.get(hitSymbol(el))?.node.type!=='connector');
@@ -683,6 +800,22 @@ function insertTemplate(template,drop) {
 }
 $('#connect-symbol').addEventListener('click',()=>{if(!canEdit||!selected)return;const source=selected;setTool('connector');connectFrom=source;$('#connect-hint').hidden=false;stage.focus({preventScroll:true});});
 $('#edit-connection-label').addEventListener('click',()=>{const entry=nodes.get(selected),n=entry?.node.children?.map(id=>entries.get(entry.page.id).get(id)).find(n=>n.connectionLabel);if(n)startTextEdit(keyOf(entry.page,n.id),true);});
+const guides=[];
+function clearGuides(){for(const element of guides)element.remove();guides.length=0;}
+function moveChanges(){const page=nodes.get(selected).page,map=entries.get(page.id);return selectedRoots().map(id=>map.get(id)).filter(n=>!n.locked&&!n.bindings&&!n.connectionLabel).map(node=>({key:keyOf(page,node.id),before:copy(node),scale:childTransform(map.get(node.parent),map),world:nodeBounds(node,map)}));}
+function snapDelta(g,event,dx,dy){
+  clearGuides();let x=dx/camera.z,y=dy/camera.z;
+  if(event.shiftKey){if(Math.abs(x)>Math.abs(y))y=0;else x=0;}
+  if(event.altKey||!g.changes?.length)return {x,y};
+  const anchor=g.changes[0],r=anchor.world,offset=offsetForPage(scene.pages.indexOf(nodes.get(anchor.key).page)),threshold=5/camera.z;
+  for(const axis of ['x','y']){
+    if(event.shiftKey&&(axis==='x'?x:y)===0)continue;
+    const delta=axis==='x'?x:y,size=axis==='x'?'w':'h',edges=[r[axis]+delta,r[axis]+delta+r[size]/2,r[axis]+delta+r[size]];let nearest=threshold,adjust=null,target;
+    if(canvasView.objects)for(const other of g.snapRects||[])for(const value of [other[axis],other[axis]+other[size]/2,other[axis]+other[size]])for(const edge of edges)if(Math.abs(value-edge)<nearest){nearest=Math.abs(value-edge);adjust=value-edge;target=value;}
+    if(adjust!==null){if(axis==='x')x+=adjust;else y+=adjust;const guide=document.createElement('div');guide.className=`snap-guide ${axis}`;guide.style[axis==='x'?'left':'top']=`${(target+offset[axis])*camera.z+camera[axis]}px`;stage.append(guide);guides.push(guide);}
+    else if(canvasView.snap){const value=Math.round((r[axis]+delta)/8)*8-r[axis];if(axis==='x')x=value;else y=value;}
+  }return {x,y};
+}
 stage.addEventListener('pointerdown', e => {
   if (inspection || e.button !== 0 || e.target.isContentEditable) return;
   if (e.target.closest('[data-board-select]') && !spaceHeld) return;
@@ -699,9 +832,13 @@ stage.addEventListener('pointerdown', e => {
     gesture={kind:'draw',key:null,tool:mode,context:b,layer:layer?.dataset.nodeKey||null,source:mode==='connector'?hitSymbol(e.target):null,lastClient:{x:e.clientX,y:e.clientY},start:p,origin:{x,y}};
   } else if (handle || layer) {
     const key = handle ? handle.dataset.boardMove : (e.metaKey||e.ctrlKey?layer.dataset.nodeKey:hitSymbol(layer)), node = nodes.get(key).node;
-    selectNode(key);
-    if (canEdit && !node.locked && !node.bindings) gesture = { kind: 'node', key, before: copy(node), start: p,scale:childTransform(entries.get(nodes.get(key).page.id).get(node.parent),entries.get(nodes.get(key).page.id)) };
-  } else { selectNode(null); gesture = { kind: 'pan', start: p, camera: { ...camera } }; }
+    if(e.shiftKey){selectNode(key,{add:true});stage.focus({preventScroll:true});e.preventDefault();return;}
+    const collapse=selection.size>1&&selection.has(key);if(selection.has(key))selectMany([...selection],{primary:key});else selectNode(key);
+    if (canEdit && !node.locked && !node.bindings){const changes=moveChanges(),excluded=new Set(changes.flatMap(item=>subtree(entries.get(nodes.get(item.key).page.id),nodes.get(item.key).node.id))),page=nodes.get(key).page;
+      gesture={kind:'node',key,before:copy(node),changes,start:p,collapse,duplicatePending:e.altKey,snapRects:page.nodes.filter(n=>!excluded.has(n.id)&&n.visible!==false&&(n.parent??null)===(node.parent??null)).slice(0,2000).map(n=>nodeBounds(n,entries.get(page.id)))};
+    }
+  } else if(e.shiftKey){const marquee=document.createElement('div');marquee.className='selection-marquee';stage.append(marquee);gesture={kind:'marquee',start:p,marquee,page:drawingContext(e.target).page,previous:e.metaKey?[...selection]:[]};}
+  else { selectNode(null); gesture = { kind: 'pan', start: p, camera: { ...camera } }; }
   presenceUI?.changed();
   if (gesture) { gesture.pointerId = e.pointerId; stage.setPointerCapture(e.pointerId); }
   e.preventDefault(); stage.focus({ preventScroll: true });
@@ -713,10 +850,13 @@ stage.addEventListener('pointermove', e => {
   if (!gesture.moved && Math.hypot(dx, dy) < 3) return;
   gesture.moved = true;
   if (gesture.kind === 'pan') { camera.x = bound(gesture.camera.x + dx); camera.y = bound(gesture.camera.y + dy); paintCamera(); }
+  else if(gesture.kind==='marquee'){const s=stage.getBoundingClientRect(),x=Math.min(p.x,gesture.start.x),y=Math.min(p.y,gesture.start.y),w=Math.abs(dx),h=Math.abs(dy);Object.assign(gesture.marquee.style,{left:`${x}px`,top:`${y}px`,width:`${w}px`,height:`${h}px`});gesture.box={left:s.left+x,top:s.top+y,right:s.left+x+w,bottom:s.top+y+h};}
   else if(gesture.kind==='resize'){for(const item of gesture.before)Object.assign(nodes.get(item.key).node,copy(item.before));const entry=nodes.get(gesture.key);resizeArtboard(entry.page,entry.node.id,gesture.before[0].before,gesture.edge,dx/camera.z,dy/camera.z);for(const item of gesture.before)paint(item.key);}
   else if (gesture.kind === 'draw') {
     if (!gesture.key) gesture.key = newNode(gesture.context, gesture.origin.x, gesture.origin.y);
-    const node = nodes.get(gesture.key).node, x = gesture.origin.x + dx / camera.z, y = gesture.origin.y + dy / camera.z;
+    let ax=dx/camera.z,ay=dy/camera.z;
+    if(e.shiftKey&&gesture.tool!=='stroke'){if(gesture.tool==='connector'){const angle=Math.round(Math.atan2(ay,ax)/(Math.PI/4))*Math.PI/4,length=Math.hypot(ax,ay);ax=Math.cos(angle)*length;ay=Math.sin(angle)*length;}else{const side=Math.max(Math.abs(ax),Math.abs(ay));ax=Math.sign(ax||1)*side;ay=Math.sign(ay||1)*side;}}
+    const node = nodes.get(gesture.key).node, x = gesture.origin.x + ax, y = gesture.origin.y + ay;
     if (node.type === 'text') return;
     if (node.type === 'stroke') node.points.push({ x, y, p: e.pressure || .5 });
     const pts = node.type === 'stroke' ? node.points : [gesture.origin, { x, y }];
@@ -725,8 +865,9 @@ stage.addEventListener('pointermove', e => {
     if (node.type === 'connector') node.points = [{ x: gesture.origin.x - minX, y: gesture.origin.y - minY }, { x: x - minX, y: y - minY }];
     paint(gesture.key);
   } else if (gesture.kind === 'node') {
-    const node = nodes.get(gesture.key).node;
-    const x=bound(gesture.before.rect.x+dx/camera.z/(gesture.scale?.sx||1)),y=bound(gesture.before.rect.y+dy/camera.z/(gesture.scale?.sy||1));moveLayer(node,x-node.rect.x,y-node.rect.y);paint(gesture.key);
+    if(gesture.duplicatePending){gesture.duplicatePending=false;if(duplicateSelection(0)){gesture.duplicateAction=history.pop();updateHistory();gesture.key=selected;gesture.changes=moveChanges();}}
+    const delta=snapDelta(gesture,e,dx,dy);
+    for(const item of gesture.changes){const node=nodes.get(item.key).node,x=bound(item.before.rect.x+delta.x/(item.scale.sx||1)),y=bound(item.before.rect.y+delta.y/(item.scale.sy||1));moveLayer(node,x-node.rect.x,y-node.rect.y);paint(item.key);}
   }
 });
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(name, finishGesture);
@@ -797,6 +938,7 @@ window.addEventListener('gestureend', () => { nativePinch = null; }, { capture: 
 const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 const tools = { v: 'select', h: 'hand', r: 'rect', o: 'ellipse', a: 'connector', l: 'connector', t: 'text', p: 'stroke' };
 function nudge(key, [x, y], step) {
+  if(selection.size>1){const page=nodes.get(selected)?.page;if(page)pageChange(page,()=>{for(const id of selectedRoots()){const n=entries.get(page.id).get(id);if(!n.locked&&!n.bindings&&!n.connectionLabel)moveLayer(n,x*step,y*step);}return selectedRoots();});return;}
   const node = nodes.get(key)?.node; if (!node || node.locked || node.bindings || node.connectionLabel) return;
   const before = copy(node); moveLayer(node,x*step,y*step); paint(key); record(key, before, copy(node)); populateInspector();
 }
@@ -809,9 +951,13 @@ function onKey(e) {
   if (editable(e.target)) return;
   if (!canEdit && (mod && /^[zy]$/.test(k) || ['Delete','Backspace','Enter'].includes(e.key) || arrows[e.key])) return;
   if (e.target.closest('dialog')) return;
+  if(mod&&e.altKey&&(k==='c'||k==='v')){e.preventDefault();editCommand(k==='c'?'copy-style':'paste-style');return;}
+  if(mod&&['c','x','v','d','g'].includes(k)){e.preventDefault();editCommand(({c:'copy',x:'cut',v:'paste',d:'duplicate',g:e.shiftKey?'ungroup':'group'})[k]);return;}
+  if(mod&&k==='a'){e.preventDefault();const page=nodes.get(selected)?.page||visiblePages()[0],entry=nodes.get(selected),ids=entry?.node.parent!=null?entries.get(page.id).get(entry.node.parent).children:page.root;selectMany(ids.map(id=>keyOf(page,id)));return;}
+  if(canEdit&&mod&&['b','i'].includes(k)&&selected){e.preventDefault();const page=nodes.get(selected).page;pageChange(page,()=>{for(const id of selectedRoots()){const node=entries.get(page.id).get(id);if(node.type==='text'&&!node.locked){const field=k==='b'?'bold':'italic';node.text_style={...(node.text_style||{}),[field]:!node.text_style?.[field]};}}return selectedRoots();});return;}
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }
-  if (e.key === 'Escape') { if (mode !== 'select') setTool('select'); else selectNode(null); return; }
+  if (e.key === 'Escape') { if(gesture)cancelGesture();if (mode !== 'select') setTool('select'); else selectNode(null); return; }
   if (selected && (e.key === 'Delete' || e.key === 'Backspace') && !e.target.closest('input')) { e.preventDefault(); removeSelected(); return; }
   // Camera shortcuts also work from tree rows and buttons (they don't use Shift+digits).
   const cameraKey = !mod && !e.altKey && e.shiftKey && { Digit1: 'fit', Digit2: 'selection', Digit0: '100' }[e.code];
@@ -821,6 +967,7 @@ function onKey(e) {
   if (handle && arrows[e.key]) { e.preventDefault(); if (selected !== handle.dataset.boardMove) selectNode(handle.dataset.boardMove); nudge(handle.dataset.boardMove, arrows[e.key], e.shiftKey ? 10 : 1); return; }
   if (e.target.closest('button,a,select')) return;
   if (e.code === 'Space') { e.preventDefault(); spaceHeld = true; return; }
+  if(!mod&&!e.altKey&&selected&&['[',']'].includes(e.key)){e.preventDefault();editCommand(e.key===']'?'front':'back');return;}
   if (mod || e.altKey) return;
   if (selected && arrows[e.key]) { e.preventDefault(); nudge(selected, arrows[e.key], e.shiftKey ? 10 : 1); }
   else if (e.key === 'Enter' && selected && nodes.get(selected).node.type === 'text') { e.preventDefault(); startTextEdit(selected); }
@@ -838,7 +985,7 @@ window.addEventListener('keydown', e => {
   if (!mesurer || inspection || editable(e.target) || e.target.closest?.('dialog,#layer-tree')) return;
   if (e.target.closest?.('.mesurer-root') && !e.target.closest('#rail,.menu')) return;
   const mod = e.metaKey || e.ctrlKey;
-  const design = (!mod && !e.altKey && e.key.length === 1) || (mod && /^[zy]$/i.test(e.key)) || ['Escape', 'Delete', 'Backspace'].includes(e.key);
+  const design = (!mod && !e.altKey && e.key.length === 1) || (mod && /^[zyacdvxgbi]$/i.test(e.key)) || ['Escape', 'Delete', 'Backspace'].includes(e.key);
   if (!design) return;
   e.stopImmediatePropagation(); onKey(e);
 }, true);
@@ -856,8 +1003,8 @@ tree.addEventListener('click', e => {
   const key = row.dataset.key;
   if (e.target.closest('.tw')) { expanded.has(key) ? expanded.delete(key) : expanded.add(key); renderTree(); focusRow(key); return; }
   const flag = e.target.closest('.vis') ? 'visible' : e.target.closest('.lock') ? 'locked' : null;
-  if (flag) { const node = nodes.get(key).node, before = copy(node); node[flag] = flag === 'visible' ? node.visible === false : !node.locked; paint(key); record(key, before, copy(node)); renderTree(); populateInspector(); return; }
-  commitFields(); selectNode(key, { reveal: true }); focusRow(key);
+  if (flag) { if(!canEdit)return;const node = nodes.get(key).node, before = copy(node); node[flag] = flag === 'visible' ? node.visible === false : !node.locked; paint(key); record(key, before, copy(node)); renderTree(); populateInspector(); return; }
+  commitFields(); selectNode(key, { reveal: true,add:e.shiftKey }); focusRow(key);
 });
 tree.addEventListener('dblclick', e => { if (e.target.closest('.tree-row') && !e.target.closest('button')) fitSelection(); });
 function focusRow(key) {
@@ -961,7 +1108,16 @@ $('#export').addEventListener('click', e => {
 });
 exportMenu.addEventListener('click', e => {
   const item = e.target.closest('[data-export]'); if (!item || item.disabled) return;
-  closeMenu(); if (item.dataset.export === 'json') exportScene(); else exportArtboard(item.dataset.export);
+  closeMenu(); if (item.dataset.export === 'json') exportScene();else if(item.dataset.export==='bundle')exportBundle();else if(item.dataset.export==='preview'){commitFields();stopTextEdit();paperPreview(50*1024*1024).then(({html})=>download(new Blob([html],{type:'text/html'}),`${slug(scene.name)}.preview.html`)).catch(error=>message(error.message));} else exportArtboard(item.dataset.export);
+});
+$('#copy-paper-link').addEventListener('click',()=>{closeMenu();copyLink();});
+async function exportBundle(){
+  if(access.shared)return;
+  try{commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your local changes before exporting.');const response=await fetch(`/api/bundle${paperQuery}`,{cache:'no-store'});if(!response.ok)throw new Error((await response.json()).error||'Export failed.');download(await response.blob(),`${slug(scene.name)}.paper.zip`);message('Exported Paper with its assets and notes');}catch(error){message(error.message);}
+}
+$('#paper-import').addEventListener('change',async event=>{
+  const file=event.target.files?.[0];event.target.value='';if(!file)return;
+  try{if(file.size>50*1024*1024)throw new Error('Paper files must fit within 50 MB.');commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your changes before opening another Paper.');const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':file.name.endsWith('.json')?'application/json':'application/zip'},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'This Paper could not be opened.');leaving=true;location.assign(result.href);}catch(error){message(error.message);}
 });
 const slug = text => (text || 'artboard').normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toLowerCase().slice(0, 60) || 'artboard';
 function download(blob, name) { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
@@ -984,6 +1140,25 @@ async function standaloneHtml(clone, title, w, h) {
   const fontLicense = await licenseResponse.text();
   return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=${w}"><title>${escapeHtml(title)}</title>`
     + `<meta name="generator" content="Paper"><style>${css}</style></head><body>${copy.outerHTML}<template id="font-license">${escapeHtml(fontLicense)}</template><template id="asset-licenses">${escapeHtml(JSON.stringify(scene.assetCredits||{}))}</template></body></html>\n`;
+}
+async function paperPreview(limit=18*1024*1024){
+  const container=document.createElement('div'),pageInfo=[];
+  for(const page of scene.pages){
+    const section=document.createElement('section');section.dataset.previewPage=page.id;
+    const roots=page.root.map(id=>nodes.get(keyOf(page,id))?.node).filter(Boolean),minX=Math.min(0,...roots.map(n=>n.rect.x)),minY=Math.min(0,...roots.map(n=>n.rect.y));
+    const w=Math.max(1,...roots.map(n=>n.rect.x+n.rect.w))-minX,h=Math.max(1,...roots.map(n=>n.rect.y+n.rect.h))-minY;
+    pageInfo.push({id:page.id,name:page.name||'Page',w,h});
+    for(const node of roots){const original=dom.get(keyOf(page,node.id));if(!original)continue;const clone=original.cloneNode(true);for(const element of [clone,...clone.querySelectorAll('*')]){element.classList?.remove('selected');element.removeAttribute('contenteditable');element.removeAttribute('title');for(const attr of [...element.attributes])if(attr.name.startsWith('data-'))element.removeAttribute(attr.name);}
+      Object.assign(clone.style,{position:'absolute',left:`${node.rect.x-minX}px`,top:`${node.rect.y-minY}px`,width:`${node.rect.w}px`,height:`${node.rect.h}px`});section.append(clone);
+    }container.append(section);
+  }
+  let html=await standaloneHtml(container,scene.name,1440,900);
+  const data=JSON.stringify(pageInfo).replace(/</g,'\\u003c'),active=JSON.stringify(nodes.get(selected)?.page.id||(pageId==='all'?scene.pages[0].id:pageId)).replace(/</g,'\\u003c');
+  const css='html,body{width:100%;height:100%;overflow:hidden}body{background:#eeefec;color:#232321}nav{height:40px;display:flex;gap:4px;align-items:center;padding:4px 8px;background:#fafaf8;overflow:auto;border-bottom:1px solid #ddd}nav button{border:0;border-radius:5px;padding:6px 9px;white-space:nowrap;background:transparent;color:inherit;font:12px system-ui}nav button[aria-current=true]{background:#e1e8ed}#viewport{position:absolute;inset:40px 0 0;overflow:hidden;touch-action:none}#artwork{position:absolute;transform-origin:0 0}[data-preview-page]{position:relative}[data-preview-page][hidden]{display:none}';
+  const script=`const pages=${data};let active=${active},camera={x:0,y:0,z:1},drag;const source=document.body.firstElementChild;source.id='artwork';const nav=document.createElement('nav'),viewport=document.createElement('main');viewport.id='viewport';viewport.append(source);document.body.replaceChildren(nav,viewport);const paint=()=>source.style.transform='translate('+camera.x+'px,'+camera.y+'px) scale('+camera.z+')';function fit(){const p=pages.find(p=>p.id===active);camera.z=Math.min((viewport.clientWidth-32)/p.w,(viewport.clientHeight-32)/p.h,1);camera.z=Math.max(.02,camera.z);camera.x=(viewport.clientWidth-p.w*camera.z)/2;camera.y=(viewport.clientHeight-p.h*camera.z)/2;paint()}function show(id){active=id;for(const el of source.children)el.hidden=el.dataset.previewPage!==id;for(const button of nav.children)button.setAttribute('aria-current',String(button.dataset.id===id));fit()}for(const page of pages){const button=document.createElement('button');button.textContent=page.name;button.dataset.id=page.id;button.onclick=()=>show(page.id);nav.append(button)}viewport.onpointerdown=e=>{if(e.button!==0&&e.button!==1)return;e.preventDefault();drag={x:e.clientX,y:e.clientY,cx:camera.x,cy:camera.y};viewport.setPointerCapture(e.pointerId)};viewport.onpointermove=e=>{if(drag){camera.x=drag.cx+e.clientX-drag.x;camera.y=drag.cy+e.clientY-drag.y;paint()}};viewport.onpointerup=viewport.onpointercancel=()=>drag=null;viewport.addEventListener('wheel',e=>{e.preventDefault();if(e.ctrlKey||e.metaKey){const r=viewport.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,z=Math.max(.02,Math.min(4,camera.z*Math.exp(-e.deltaY*.006))),ratio=z/camera.z;camera.x=x-(x-camera.x)*ratio;camera.y=y-(y-camera.y)*ratio;camera.z=z}else{camera.x-=e.deltaX;camera.y-=e.deltaY}paint()},{passive:false});viewport.ondblclick=fit;addEventListener('resize',fit);show(active);document.fonts.ready.then(fit);`;
+  html=html.replace('content="width=1440"','content="width=device-width,initial-scale=1"').replace('</head>',()=>`<style>${css}</style></head>`).replace('</body>',()=>`<script>${script.replace("document.body.replaceChildren(nav,viewport)","document.body.replaceChildren(nav,viewport,...document.querySelectorAll('body>template'))")}</script></body>`);
+  if(new Blob([html]).size>limit)throw new Error('This Paper preview is too large. Export its .paper.zip or reduce the images first.');
+  return {html};
 }
 async function pngCredits(blob) {
   if(!Object.keys(scene.assetCredits||{}).length)return blob;
@@ -1044,7 +1219,7 @@ paintRail();
 $('#home').addEventListener('click', e => { const r = e.currentTarget.getBoundingClientRect(); toggleMenu($('#project-menu'), e.currentTarget, e.detail === 0, () => ({ x: r.left, y: r.bottom + 6 })); });
 $('#project-menu').addEventListener('click', e => {
   const item = e.target.closest('[data-action]'); if (!item || item.disabled) return;
-  closeMenu(); ({ home: goHome, new: newPaper, rename: startRename, undo, redo })[item.dataset.action]();
+  closeMenu(); ({ home: goHome, new: newPaper, rename: startRename, undo, redo,import:()=>$('#paper-import').click(),'open-notion':()=>notionUI.open() })[item.dataset.action]?.();
 });
 // New Paper: saves this Paper's pending edits first, asks the local server to create a blank Paper
 // (Paper/<id>/ on disk) and opens it. A failure says so and leaves the item ready to try again.
@@ -1091,18 +1266,23 @@ titleInput.addEventListener('blur', () => endRename(true));
 const canvasMenu = $('#canvas-menu');
 function paintCanvasMenu() {
   for (const b of canvasMenu.querySelectorAll('[data-pattern]')) b.setAttribute('aria-checked', String(b.dataset.pattern === canvasView.pattern));
+  $('#snap-grid').setAttribute('aria-checked',String(canvasView.snap));$('#snap-objects').setAttribute('aria-checked',String(canvasView.objects));
   $('#canvas-color').value = canvasView.color || (getComputedStyle(stage).backgroundColor.match(/\d+/g) || [24, 24, 27]).slice(0, 3).reduce((s, v) => s + Number(v).toString(16).padStart(2, '0'), '#');
   $('#canvas-color-reset').disabled = !canvasView.color;
 }
 stage.addEventListener('contextmenu', e => {
-  if (inspection || e.target.isContentEditable || e.target.closest('.artboard,[data-node-key]')) return;
+  if (inspection || e.target.isContentEditable) return;
   e.preventDefault();
+  const key=hitSymbol(e.target)||e.target.closest('[data-board-select]')?.dataset.boardSelect;
+  if(key){if(!selection.has(key))selectNode(key);for(const item of $('#edit-menu').querySelectorAll('[data-edit]'))item.disabled=!canEdit&&!['copy','copy-style','link'].includes(item.dataset.edit);showMenu($('#edit-menu'),{at:()=>({x:e.clientX,y:e.clientY}),keyboard:e.clientX===0&&e.clientY===0});return;}
   const keyboard = e.clientX === 0 && e.clientY === 0, r = stage.getBoundingClientRect();
   paintCanvasMenu(); showMenu(canvasMenu, { at: () => keyboard ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: e.clientX, y: e.clientY }, keyboard });
 });
 canvasMenu.addEventListener('click', e => {
   const p = e.target.closest('[data-pattern]');
   if (p) { setCanvasView({ pattern: p.dataset.pattern }); closeMenu(); }
+  else if(e.target.closest('#snap-grid')){setCanvasView({snap:!canvasView.snap});paintCanvasMenu();}
+  else if(e.target.closest('#snap-objects')){setCanvasView({objects:!canvasView.objects});paintCanvasMenu();}
   else if (e.target.closest('#canvas-color-reset')) { setCanvasView({ color: null }); paintCanvasMenu(); }
 });
 $('#canvas-color').addEventListener('input', e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) { setCanvasView({ color: e.target.value.toLowerCase() }); $('#canvas-color-reset').disabled = false; } });
@@ -1324,11 +1504,11 @@ async function remotePaper(force = false,actor = null) {
     if (loaded.revision === revision && !force) return true;
     if (!isPaperFormat(next?.format) || next.version !== 1 || !Array.isArray(next.pages) || !next.pages.length) throw new Error('unknown format');
     if (!quiet()) { conflict = true; updateSaveState(); return; }
-    const keep = selected;
+    const keep = [...selection];
     const previous=scene;scene = next; revision = loaded.revision; lastSaved = JSON.stringify(scene); history.length = 0; future.length = 0;
     if (pageId !== 'all' && !scene.pages.some(p => p.id === pageId)) pageId = scene.pages[0].id;
-    selected = null; buildScene(); renderPages(); showTitle(); updateHistory();
-    selectNode(nodes.has(keep) ? keep : null);
+    selected = null; selection.clear();buildScene(); renderPages(); showTitle(); updateHistory();
+    selectMany(keep.filter(key=>nodes.has(key)));
     designText = null; renderDesign(); paintCamera();presenceUI?.documentChanged(previous,next,actor);return true;
   } catch (error) { message(`This Paper changed elsewhere, but couldn’t be reloaded (${error.message}).`); }
   finally { reloading = false; }
@@ -1377,7 +1557,7 @@ function listenForChanges() {
 async function start() {
   if (access.error) throw new Error(access.error);
   let panels; try { panels = JSON.parse(localStorage.getItem(PANEL_KEY)); } catch { /* Use defaults. */ }
-  try { const v = JSON.parse(localStorage.getItem(CANVAS_KEY)); if (v) setCanvasView({ pattern: ['none', 'dots', 'grid'].includes(v.pattern) ? v.pattern : 'none', color: /^#[0-9a-f]{6}$/i.test(v.color || '') ? v.color : null }); } catch { /* Plain canvas. */ }
+  try { const v = JSON.parse(localStorage.getItem(CANVAS_KEY)); if (v) setCanvasView({ pattern: ['none', 'dots', 'grid'].includes(v.pattern) ? v.pattern : 'none', color: /^#[0-9a-f]{6}$/i.test(v.color || '') ? v.color : null,snap:v.snap===true,objects:v.objects!==false }); } catch { /* Plain canvas. */ }
   setLeftTab(panels?.tab, false);
   if (panels && typeof panels.left === 'boolean') setPanels(panels.left && !(narrow() && panels.right), panels.right, false); else setPanels(false, !narrow(), false);
   if (paperId === null || [...query.keys()].some(key => key !== 'paper')) throw new Error(paperIds.length ? 'This Paper link isn’t valid.' : 'No Paper was chosen.');
@@ -1416,6 +1596,7 @@ async function start() {
   buildScene(); renderPages(); populateInspector(); renderTree(); renderDesign(); showTitle(); updateSaveState();
   await document.fonts.ready;
   if (validCamera(views[pageId])) { camera = { ...views[pageId] }; paintCamera(); } else fitAll();
+  openDeepLink();
   viewReady = true;
   // The toolbar arrives after the first paint; the standalone design rail shows only if it doesn't.
   requestAnimationFrame(() => setTimeout(() => loadMesurer(!canEdit), 0));

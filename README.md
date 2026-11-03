@@ -38,6 +38,12 @@ Ask your agent to create a Paper, revise a design or draw a diagram. The plugin 
 
 Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Share includes PNG, HTML and Paper JSON exports, plus invitations for people and agents. An invitation works locally; to reach another device, connect the sharing listener to HTTPS hosting or a tunnel. See [sharing](skills/paper/references/sharing.md).
 
+Shift-click selects several layers. Copy, paste, duplicate, group and arrange them with familiar shortcuts or the right-click menu. Text and appearance controls live in Properties. Right-click empty canvas to choose snapping, grid and background. **Share → Copy link** links to the selected Page or layer.
+
+**Share → Save to Notion** connects through Notion’s own sign-in, then lets you choose a parent page. Later saves update the same page. **Home → Open → Open from Notion** searches accessible pages and opens a saved Paper as a new local copy. The snapshot includes editable files and a self-contained preview with Pages, pan and zoom. Save is manual; changes made elsewhere are reported before replacement. [Notion connection and storage](skills/paper/references/notion.md).
+
+Use **Share → Paper with assets** to download a complete `.paper.zip`, and **Home → Open → Open Paper file** to open it elsewhere. A JSON export contains the artwork records; the ZIP also carries images, guides and feedback.
+
 Home → **Servers** shows running Paper servers and active sharing. Stop a server there to close its connections and shared links. Your saved Papers remain on disk.
 
 ## Where Papers are saved
@@ -52,7 +58,7 @@ Project Papers stay in `<project>/Paper/`. Papers created outside a project use 
 
 Set `PAPER_HOME` to an absolute folder to choose another location. Home remembers projects you open with the plugin. Updating or removing the plugin leaves your Papers in place.
 
-A Paper contains `paper.json`, assets, a `DESIGN.md` guide and brief notes in `CONTEXT.md`. Feedback and previous saved versions live alongside them. Copy the whole folder to keep editing elsewhere. [Storage and MCP API](skills/paper/references/http-api.md).
+A Paper contains `paper.json`, assets, a `DESIGN.md` guide and brief notes in `CONTEXT.md`. Feedback and previous saved versions live alongside them. Copy the whole folder or export its `.paper.zip` to keep editing elsewhere. [Storage and MCP API](skills/paper/references/http-api.md).
 
 To run it without a plugin, clone this repository and run `node server/server.mjs`. Add `--workspace /absolute/path/to/project` to open a project library. The command prints the browser address. `node server/server.mjs --list` lists known Papers without opening a server.
 
