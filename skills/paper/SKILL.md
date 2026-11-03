@@ -2,14 +2,14 @@
 name: paper
 description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the current project. Use for Home, Paper storage, workspace setup and server controls.
 metadata:
-  version: "0.6.0-preview.3"
+  version: "0.6.0-preview.4"
 ---
 
 # Paper
 
 Use the plugin's existing editor and MCP tools. Node.js 22+ is the runtime requirement. The bundled references describe the installed version and work offline; the [repository](https://github.com/gustavonline/openpaperdesign) has installation and development documentation.
 
-The MCP server is `openpaperdesign_workspace`. When a host defers tools, use its available tool discovery before treating an operation as unavailable. If the host still cannot expose them, the bundled CLI and the documented file locations remain available.
+The MCP server is `openpaperdesign_workspace`. When a host defers tools, use its available tool discovery before treating an operation as unavailable. If the host still cannot expose them, run `node <plugin-root>/server/server.mjs --list`. This returns Home metadata, including each Paper’s exact `workspace` and `folder`, without starting a server. Read the requested `<folder>/paper.json` and notes with normal file tools, or open its workspace with the bundled CLI. Missing MCP tool visibility is not evidence that a Paper is absent.
 
 ## Find and open
 

@@ -23,7 +23,7 @@ if(embedded){
     else if(message.method==='ping'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
     else if(message.method==='ui/resource-teardown'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
   });
-  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.6.0-preview.3'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
+  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.6.0-preview.4'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
     hostContext(result.hostContext);
     if(!result.hostCapabilities?.serverTools)throw new Error('This host cannot open Paper Home. Ask your agent to open it in the browser.');
     parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');

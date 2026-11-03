@@ -164,7 +164,7 @@ export async function serveStdio() {
     if(name==='paper_open'){
       const root=await projectWorkspace(args.workspace===undefined?await personalWorkspace():args.workspace);
       await rememberWorkspace(root);active=await getApp(root);
-      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.6.0-preview.3'};
+      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.6.0-preview.4'};
     }
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
     if(name==='paper_list')return {papers:await active.library.list()};
@@ -237,8 +237,9 @@ export async function serveStdio() {
 async function main() {
   const args=process.argv.slice(2);if(args.includes('--stdio'))return serveStdio();
   const option=(name,fallback)=>{const i=args.indexOf(name);return i===-1?fallback:args[i+1];};
-  if(args.includes('--help')){process.stdout.write('OpenPaperDesign — Node.js 22+, no install or build required\n  node server/server.mjs [--workspace /path/to/project] [--port 8774]\n  node server/server.mjs [--workspace /path/to/project] --new-paper "Name" [--width 1440 --height 900]\n  node server/server.mjs --stdio\nWithout --workspace, Papers live in your personal OpenPaperDesign data folder.\n');return;}
+  if(args.includes('--help')){process.stdout.write('OpenPaperDesign — Node.js 22+, no install or build required\n  node server/server.mjs [--workspace /path/to/project] [--port 8774]\n  node server/server.mjs [--workspace /path/to/project] --new-paper "Name" [--width 1440 --height 900]\n  node server/server.mjs --list\n  node server/server.mjs --stdio\nWithout --workspace, Papers live in your personal OpenPaperDesign data folder.\n');return;}
   const workspace=option('--workspace')||await personalWorkspace(),port=Number(option('--port','8774'));
+  if(args.includes('--list')){const found=await createHome(connectWorkspace)();process.stdout.write(JSON.stringify({...found,papers:found.papers.map(({thumbnail,...paper})=>paper)})+'\n');return;}
   if(args.includes('--new-paper')){await checkRuntime(RUNTIME);const library=await PaperLibrary.open(await projectWorkspace(workspace));await rememberWorkspace(library.workspace);const made=await library.create({name:option('--new-paper'),width:Number(option('--width','1440')),height:Number(option('--height','900'))});process.stdout.write(JSON.stringify(made)+'\n');return;}
   const app=await startServer(workspace,{port,shareUrl:option('--share-url'),sharePort:Number(option('--share-port','0'))});process.stdout.write(`Paper ready: ${app.url}/home.html\nFiles: ${app.library.root}\n`);
   let closing=false;for(const event of ['SIGINT','SIGTERM'])process.on(event,async()=>{if(closing)return;closing=true;await app.close();process.exit(0);});

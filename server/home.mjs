@@ -52,7 +52,7 @@ export function createHome(open){
               const paperFolder=await library.folder(paper.id),file=path.join(paperFolder,'assets','thumbnail.png'),real=await fs.realpath(file),st=await fs.lstat(file);
               if(real.startsWith(paperFolder+path.sep)&&st.isFile()&&!st.isSymbolicLink()&&st.size<=Math.min(128*1024,previewBudget)){const bytes=await fs.readFile(real);previewBudget-=bytes.length;thumbnail=`data:image/png;base64,${bytes.toString('base64')}`;}
             }
-            const {href,...info}=paper;papers.push({...info,thumbnail,workspaceId:entry.id,workspaceName:entry.name});
+            const {href,...info}=paper;papers.push({...info,thumbnail,workspaceId:entry.id,workspaceName:entry.name,workspace:entry.root,folder:path.join(library.root,paper.id)});
           }
         }catch(error){if(!['ENOENT','ENOTDIR','EACCES'].includes(error.code))throw error;projects.push({id:entry.id,name:entry.name,count:0,unavailable:true});}
       }
