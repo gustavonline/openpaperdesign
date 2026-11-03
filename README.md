@@ -54,7 +54,7 @@ Set `PAPER_HOME` to an absolute folder to choose another location. Home remember
 
 A Paper contains `paper.json`, assets, a `DESIGN.md` guide and brief notes in `CONTEXT.md`. Feedback and previous saved versions live alongside them. Copy the whole folder to keep editing elsewhere. [Storage and MCP API](skills/paper/references/http-api.md).
 
-To run it without a plugin, clone this repository and run `node server/server.mjs`. Add `--workspace /absolute/path/to/project` to open a project library. The command prints the browser address.
+To run it without a plugin, clone this repository and run `node server/server.mjs`. Add `--workspace /absolute/path/to/project` to open a project library. The command prints the browser address. `node server/server.mjs --list` lists known Papers without opening a server.
 
 ## Credits
 
