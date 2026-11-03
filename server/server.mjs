@@ -164,7 +164,7 @@ export async function serveStdio() {
     if(name==='paper_open'){
       const root=await projectWorkspace(args.workspace===undefined?await personalWorkspace():args.workspace);
       await rememberWorkspace(root);active=await getApp(root);
-      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.6.0-preview.1'};
+      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.6.0-preview.2'};
     }
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
     if(name==='paper_list')return {papers:await active.library.list()};
