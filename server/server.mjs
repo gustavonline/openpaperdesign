@@ -1,0 +1,239 @@
+#!/usr/bin/env node
+import { createPresence } from './presence.mjs';
+import { discoverWorkspace, registerWorkspace, openWorkspaceServer, remotePresence } from './workspace.mjs';
+import { randomBytes } from 'node:crypto';
+import { checkRuntime, EDITOR_FILES, VERSION } from './runtime.mjs';
+import { isArtboard } from '../runtime/diagram-model.js';
+import http from 'node:http';
+import { promises as fs, watch } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline';
+import { PaperLibrary, PaperError, ID, MAX_PAPER_BYTES, imageBytes } from './library.mjs';
+import { json, readBody, staticFile } from './http.mjs';
+import { createSharing } from './sharing.mjs';
+import { complete, protocolError } from './mcp.mjs';
+import {createHome, homeResource, HOME_URI, HOME_MIME, personalWorkspace, rememberWorkspace} from './home.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+export const RUNTIME = path.resolve(HERE,'../runtime');
+const PLUGIN = path.resolve(HERE,'..');
+const ICONS=await Promise.all(['icon.svg','icon-dark.svg'].map(async(file,i)=>({src:`data:image/svg+xml;base64,${(await fs.readFile(path.join(PLUGIN,'assets',file))).toString('base64')}`,mimeType:'image/svg+xml',theme:i?'dark':'light'})));
+const SERVER_INFO={name:'osm-paper',title:'OpenPaperDesign',version:VERSION,icons:ICONS};
+const inside = (root,target) => target===root || target.startsWith(root+path.sep);
+const client = req => /^[a-zA-Z0-9_-]{1,80}$/.test(req.headers['x-paper-client']||'') ? req.headers['x-paper-client'] : '';
+function paperId(url) {
+  const keys=[...url.searchParams.keys()],ids=url.searchParams.getAll('paper');
+  if(keys.some(k=>k!=='paper')||ids.length!==1||!ID.test(ids[0]))throw new PaperError(400,'Choose exactly one valid Paper');
+  return ids[0];
+}
+async function projectWorkspace(workspace){
+  if(typeof workspace!=='string'||!path.isAbsolute(workspace))throw new PaperError(400,'Choose an absolute project folder');
+  const real=await fs.realpath(workspace),plugin=await fs.realpath(PLUGIN);
+  if(inside(plugin,real))throw new PaperError(400,'Choose a workspace outside the plugin installation');return real;
+}
+export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sharePort=0}={}) {
+  await checkRuntime(runtime);
+  const real=await projectWorkspace(workspace);
+  const library=await PaperLibrary.open(real),streams=new Set();let heartbeat,watcher,registration;
+  await rememberWorkspace(real);
+  const homeApps=new Map(),home=createHome(async root=>{
+    if(root===real)return {library,url:`http://127.0.0.1:${server.address().port}`};
+    const previous=homeApps.get(root);if(previous&&!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance)homeApps.delete(root);
+    if(!homeApps.has(root))homeApps.set(root,await connectWorkspace(root));return homeApps.get(root);
+  });
+  const presence=createPresence({publish:data=>emit('presence',data)});
+  const sharing=createSharing({library,runtime,presence,publicUrl:shareUrl,port:sharePort});
+  const emit=(event,data)=>{const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
+  library.onChange=emit;
+  const server=http.createServer(async(req,res)=>{
+    try {
+      const address=server.address(),host=req.headers.host,validHost=host===`127.0.0.1:${address.port}`||host===`localhost:${address.port}`;
+      if(!validHost)throw new PaperError(403,'Invalid host');
+      if(Object.keys(req.headers).some(k=>k==='forwarded'||k.startsWith('x-forwarded-')))throw new PaperError(403,'Use the separate share listener for a reverse proxy');
+      const url=new URL(req.url,`http://${host}`),pathname=decodeURIComponent(url.pathname);
+      if(['PUT','POST','DELETE','PATCH'].includes(req.method)&&req.headers.origin!==`http://${host}`)throw new PaperError(403,'Only this Paper workspace may write');
+      if(pathname==='/api/events'&&req.method==='GET'){
+        res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});res.write(': connected\n\n');res.paperId=url.searchParams.getAll('paper').length===1&&ID.test(url.searchParams.get('paper'))?url.searchParams.get('paper'):null;streams.add(res);if(res.paperId)res.write(`event: presence-snapshot\ndata: ${JSON.stringify(presence.snapshot(res.paperId))}\n\n`);req.on('close',()=>streams.delete(res));return;
+      }
+      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OSM Paper',version:VERSION,instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss()});
+      if(pathname==='/api/access'&&req.method==='GET')return json(res,200,{role:'owner',shared:false});
+      if(pathname==='/api/home'){
+        if(req.method==='GET')return json(res,200,await home());
+        if(req.method==='POST')return json(res,200,await home(JSON.parse(await readBody(req,2048))));
+      }
+      if(pathname==='/api/presence'){
+        const id=paperId(url);await library.folder(id);
+        if(req.method==='GET')return json(res,200,presence.snapshot(id));
+        if(req.method==='POST'){
+          const body=JSON.parse(await readBody(req,2048));if(!body||typeof body!=='object'||Array.isArray(body))throw new PaperError(400,'Invalid presence');
+          const {kind='human',long=false,event,revision,leave=false,restore=false,activity=false,...patch}=body,who=client(req);
+          if(!who||!['human','agent'].includes(kind)||typeof long!=='boolean'||typeof leave!=='boolean'||typeof restore!=='boolean'||typeof activity!=='boolean')throw new PaperError(400,'Invalid presence');
+          if(event!==undefined&&(!['paper-changed','feedback-changed','guide-changed'].includes(event)||!/^"[a-f0-9]{64}"$/.test(revision||'')))throw new PaperError(400,'Invalid saved change');
+          if(kind!=='agent'&&(event!==undefined||long||restore||activity))throw new PaperError(400,'Invalid participant activity');
+          if(leave){presence.leave('owner',who);return json(res,200,{left:true});}
+          const peer=presence.update(id,'owner',who,patch,kind,true,long,restore,activity);
+          if(event)emit(event,{paperId:id,revision,clientId:peer.id});return json(res,200,{peer});
+        }
+      }
+      if(pathname==='/api/sharing'){
+        const id=paperId(url);
+        if(req.method==='GET')return json(res,200,await sharing.status(id));
+        if(req.method==='DELETE')return json(res,200,await sharing.stop(id));
+        if(req.method==='POST'){const args=JSON.parse(await readBody(req,1024));return json(res,201,await sharing.create(id,args?.role));}
+      }
+      if(pathname==='/api/assets' && req.method==='POST')return json(res,201,await library.addAsset(paperId(url),await readBody(req,5*1024*1024)));
+      if(pathname==='/api/papers'){
+        if(req.method==='GET')return json(res,200,{papers:await library.list()});
+        if(req.method==='POST'){if(url.search)throw new PaperError(400,'Unexpected query');const raw=await readBody(req,4096);const args=raw.length?JSON.parse(raw):{};if(!args||typeof args!=='object'||Array.isArray(args))throw new PaperError(400,'Expected Paper options');const created=await library.create(args);return json(res,201,{id:created.id,name:created.name,href:created.href});}
+      }
+      if(['/api/paper','/api/scene','/api/feedback'].includes(pathname)){
+        const id=paperId(url),kind=pathname==='/api/feedback'?'feedback':'paper';
+        if(req.method==='GET'){const result=await library.read(id,kind);if(pathname==='/api/scene')return json(res,200,{revision:result.revision,scene:result.paper});return json(res,200,result);}
+        if(req.method==='PUT')return json(res,200,await library.save(id,await readBody(req,kind==='paper'?MAX_PAPER_BYTES:5*1024*1024),req.headers['if-match'],kind,client(req)));
+      }
+      if(pathname.startsWith('/api/'))throw new PaperError(404,'Unknown API action');
+      if(!['GET','HEAD'].includes(req.method))throw new PaperError(405,'Method not allowed');
+      if(pathname.startsWith('/Paper/')){
+        const [, ,id,...parts]=pathname.split('/'),folder=await library.folder(id),relative=parts.join('/');
+        if(!['paper.json','DESIGN.md','CONTEXT.md','feedback.json'].includes(relative)&&!relative.startsWith('assets/'))throw new PaperError(404,'Not found');
+        return await staticFile(req,res,folder,relative);
+      }
+      let relative=pathname.slice(1);
+      if(!relative)relative=url.searchParams.has('paper')?'index.html':'home.html';
+      if(!['index.html','home.html',...EDITOR_FILES].includes(relative)&&!relative.startsWith('assets/'))throw new PaperError(404,'Not found');
+      await staticFile(req,res,runtime,relative);
+    }catch(error){if(res.headersSent){res.destroy();return;}const status=error.status||(error.code==='ENOENT'?404:error instanceof SyntaxError||error instanceof URIError?400:500);if(status===500)process.stderr.write(`Paper request failed: ${error.message}\n`);json(res,status,{error:status===500?'The operation failed; your saved files were kept':error.message});}
+  });
+  server.headersTimeout=15000;server.requestTimeout=30000;server.keepAliveTimeout=5000;
+  try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});registration=await registerWorkspace(real,`http://127.0.0.1:${server.address().port}`);}catch(error){presence.close();if(server.listening)await new Promise(resolve=>server.close(resolve));throw error;}
+  heartbeat=setInterval(()=>{for(const response of streams)response.write(': heartbeat\n\n');},20000);heartbeat.unref();
+  // Native file watching also exposes changes made by an agent's ordinary file tools. The API emits
+  // immediately; duplicate watcher events carry the same revision and are ignored by clients.
+  const timers=new Map();
+  try {
+    watcher=watch(library.root,{recursive:true},(_event,file)=>{
+      const parts=String(file||'').split(path.sep);if(parts.length!==2||!ID.test(parts[0])||!['paper.json','feedback.json','DESIGN.md','CONTEXT.md'].includes(parts[1]))return;
+      const key=parts.join('/');clearTimeout(timers.get(key));timers.set(key,setTimeout(async()=>{
+        timers.delete(key);try{const kind=parts[1]==='paper.json'?'paper':parts[1]==='feedback.json'?'feedback':'guide',data=kind==='guide'?(await library.notes(parts[0]))[parts[1]]:await library.read(parts[0],kind);emit(`${kind}-changed`,{paperId:parts[0],revision:data.revision,clientId:''});}catch(error){process.stderr.write(`Paper file change: ${error.message}\n`);}
+      },120));
+    });
+    watcher.on('error',error=>{process.stderr.write(`File watching stopped: ${error.message}. API updates still notify open browsers.\n`);watcher.close();});
+  }catch(error){process.stderr.write(`File watching unavailable: ${error.message}. API updates still notify open browsers.\n`);}
+  return {library,server,sharing,presence,url:`http://127.0.0.1:${server.address().port}`,async close(){for(const app of homeApps.values())await app.close();presence.close();clearInterval(heartbeat);watcher?.close();for(const t of timers.values())clearTimeout(t);for(const res of streams)res.end();streams.clear();await sharing.close();await new Promise(resolve=>server.close(resolve));await registration.close();}};
+}
+
+async function connectWorkspace(root,agentClient){
+  const opened=await openWorkspaceServer(root,port=>startServer(root,{port}));
+  if(opened.library)return opened;
+  const proxy=agentClient?remotePresence(opened.url,agentClient):null;
+  return {url:opened.url,instance:opened.instance,library:await PaperLibrary.open(root),presence:proxy,close:async()=>proxy?.close()};
+}
+
+const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false}});
+export const TOOLS=[
+  {...tool('paper_home','Open Home: personal Papers and explicitly opened projects. No arguments lists them; create/open use a returned workspaceId.',{action:{type:'string',enum:['list','create','open']},workspaceId:string,paperId:string,name:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/ui':{entrypoints:[{type:'global'}]}}},
+  tool('paper_open','Open a Paper workspace. Omit workspace for the personal library; select an absolute project folder for project-local Papers.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
+  tool('paper_list','List saved Papers in the opened workspace.',{}),
+  tool('paper_create','Create a blank saved Paper; return its id, files and editor URL.',{name:string,width:{type:'integer',minimum:16,maximum:10000},height:{type:'integer',minimum:16,maximum:10000}}),
+  tool('paper_read','Read revision, file paths, page summary and notes. Set includePaper only when the complete layer JSON is needed.',{paperId:string,includePaper:{type:'boolean'}},['paperId']),
+  tool('paper_save','Save artwork with its read revision. Supply paper JSON or an edited sourceFile inside the workspace; stale edits are refused.',{paperId:string,revision:string,paper:{type:'object'},sourceFile:string},['paperId','revision']),
+  tool('paper_read_feedback','Read this Paper’s saved comments, guides and measurements, with their independent revision.',{paperId:string},['paperId']),
+  tool('paper_save_feedback','Save the complete feedback workspace with its read revision; preserve unrelated feedback.',{paperId:string,revision:string,workspace:{type:['object','null']}},['paperId','revision','workspace']),
+  tool('paper_add_asset','Copy a PNG/JPEG/WebP into this Paper. Supply base64 or a workspace sourceFile; then add returned asset/path to paper.assets and save the Paper.',{paperId:string,base64:string,sourceFile:string},['paperId']),
+  tool('paper_activity','Show your current activity and optional work area. Empty status clears it. Temporary, not saved artwork.',{paperId:string,status:{type:'string',maxLength:120},pageId:string,nodeId:{type:'integer'},rect:{type:'object',properties:{x:{type:'number'},y:{type:'number'},w:{type:'number'},h:{type:'number'}},required:['x','y','w','h'],additionalProperties:false}},['paperId','status']),
+  tool('paper_write_note','Update DESIGN.md or CONTEXT.md with its read revision.',{paperId:string,file:{type:'string',enum:['DESIGN.md','CONTEXT.md']},revision:string,text:string},['paperId','file','revision','text']),
+];
+export async function serveStdio() {
+  const apps=new Map(),agentClient=randomBytes(16).toString('hex');let active=null;
+  const getApp=async root=>{
+    const previous=apps.get(root);if(previous&&!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance)apps.delete(root);
+    if(!apps.has(root))apps.set(root,await connectWorkspace(root,agentClient));return apps.get(root);
+  };
+  const home=createHome(getApp);
+  const rawCall=async(name,args={},peerId='agent-mcp')=>{
+    if(!TOOLS.some(t=>t.name===name))throw new PaperError(400,'Unknown tool');
+    if(name==='paper_home')return home(args);
+    if(name==='paper_open'){
+      const root=await projectWorkspace(args.workspace===undefined?await personalWorkspace():args.workspace);
+      await rememberWorkspace(root);active=await getApp(root);
+      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:'0.5.0-preview.2'};
+    }
+    if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
+    if(name==='paper_list')return {papers:await active.library.list()};
+    if(name==='paper_create'){const made=await active.library.create(args);return {...made,url:`${active.url}/?paper=${made.id}`};}
+    if(name==='paper_read'){
+      const read=await active.library.read(args.paperId),folder=await active.library.folder(args.paperId),notes=await active.library.notes(args.paperId),feedback=await active.library.read(args.paperId,'feedback');
+      return {revision:read.revision,path:path.join(folder,'paper.json'),folder,assetsDir:path.join(folder,'assets'),historyDir:path.join(folder,'.history'),feedback:{path:path.join(folder,'feedback.json'),revision:feedback.revision,exists:!!await fs.stat(path.join(folder,'feedback.json')).catch(()=>null)},summary:{name:read.paper.name,pages:read.paper.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length,artboards:p.nodes.filter(n=>p.root.includes(n.id)&&isArtboard(n)).length}))},notes:Object.fromEntries(Object.entries(notes).map(([name,note])=>[name,{...note,text:note.text.slice(0,8000),truncated:note.text.length>8000,path:path.join(folder,name)}])),...(args.includePaper?{paper:read.paper}:{})};
+    }
+    if(name==='paper_read_feedback')return active.library.read(args.paperId,'feedback');
+    if(name==='paper_save_feedback')return active.library.save(args.paperId,Buffer.from(JSON.stringify(args.workspace)),args.revision,'feedback',peerId);
+    if(name==='paper_add_asset'){
+      if((args.base64===undefined)===(args.sourceFile===undefined))throw new PaperError(400,'Supply exactly one of base64 or sourceFile');
+      let bytes;
+      if(args.sourceFile!==undefined){if(typeof args.sourceFile!=='string'||!path.isAbsolute(args.sourceFile))throw new PaperError(400,'Choose an absolute image source file');const source=await fs.realpath(args.sourceFile);if(!inside(active.library.workspace,source)||(await fs.stat(source)).size>5*1024*1024)throw new PaperError(400,'Image source must be inside this workspace and within 5 MB');bytes=await fs.readFile(source);}
+      else bytes=imageBytes(args.base64);
+      return active.library.addAsset(args.paperId,bytes);
+    }
+    if(name==='paper_save'){
+      if((args.paper===undefined)===(args.sourceFile===undefined))throw new PaperError(400,'Supply exactly one of paper or sourceFile');
+      let bytes;
+      if(args.sourceFile!==undefined){if(typeof args.sourceFile!=='string'||!path.isAbsolute(args.sourceFile))throw new PaperError(400,'Choose an absolute edited source file');const candidate=await fs.realpath(args.sourceFile);if(!inside(active.library.workspace,candidate)||(await fs.stat(candidate)).size>MAX_PAPER_BYTES)throw new PaperError(400,'Edited source file must be inside this workspace and within size limits');bytes=await fs.readFile(candidate);}
+      else bytes=Buffer.from(JSON.stringify(args.paper));
+      return active.library.save(args.paperId,bytes,args.revision,'paper',peerId);
+    }
+    return active.library.saveNote(args.paperId,args.file,args.text,args.revision,peerId);
+  };
+  // Transient UI failures must never turn a committed document save into a tool error.
+  const soft=async fn=>{try{return await fn();}catch{return null;}};
+  const labels={paper_read:'Reading the Paper',paper_save:'Updating artwork',paper_add_asset:'Adding an image',paper_read_feedback:'Reading feedback',paper_save_feedback:'Updating feedback',paper_write_note:'Updating notes'};
+  const call=async(name,args={})=>{
+    if(name==='paper_home'||!active||!args.paperId||!TOOLS.some(t=>t.name===name))return rawCall(name,args);
+    await active.library.folder(args.paperId);
+    if(name==='paper_activity'){if(typeof args.status!=='string')throw new PaperError(400,'Supply a status');const {paperId,status,pageId=null,nodeId=null,rect=null}=args;return {agent:await active.presence.activity(paperId,'owner',agentClient,{status,pageId,nodeId,rect})};}
+    const peer=await soft(()=>active.presence.update(args.paperId,'owner',agentClient,{status:labels[name]||'Working on the Paper'},'agent'));
+    try{
+      const result=await rawCall(name,args,peer?.id||'agent-mcp'),event={paper_save:'paper-changed',paper_save_feedback:'feedback-changed',paper_write_note:'guide-changed'}[name];
+      const finished=await soft(()=>active.presence.complete?active.presence.complete(args.paperId,event,result.revision):active.presence.restore(args.paperId,'owner',agentClient));
+      return {...result,agent:finished||peer};
+    }catch(error){await soft(()=>active.presence.restore(args.paperId,'owner',agentClient));throw error;}
+  };
+  let closing=false;const shutdown=async()=>{if(closing)return;closing=true;for(const app of apps.values())await app.close();};
+  const terminate=()=>shutdown().then(()=>process.exit(0),error=>{process.stderr.write(`Paper shutdown: ${error.message}\n`);process.exit(1);});process.once('SIGTERM',terminate);process.once('SIGINT',terminate);
+  const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
+  const respond=message=>process.stdout.write(JSON.stringify(message)+'\n');
+  for await(const line of lines){
+    if(!line.trim())continue;let request;
+    try{
+      if(Buffer.byteLength(line)>MAX_PAPER_BYTES+65536)throw new PaperError(413,'MCP request is too large');request=JSON.parse(line);
+      if(request.id===undefined)continue;
+      const invalid=protocolError(request);if(invalid){respond({jsonrpc:'2.0',id:request.id,error:invalid});continue;}
+      let result;
+      if(request.method==='initialize')result={protocolVersion:['2024-11-05','2025-03-26','2025-06-18','2025-11-25'].includes(request.params?.protocolVersion)?request.params.protocolVersion:'2025-11-25',capabilities:{tools:{},resources:{}},serverInfo:SERVER_INFO};
+      else if(request.method==='server/discover')result={supportedVersions:['2026-07-28'],capabilities:{tools:{},resources:{}},serverInfo:SERVER_INFO};
+      else if(request.method==='ping')result={};
+      else if(request.method==='tools/list')result={tools:TOOLS};
+      else if(request.method==='resources/list')result={resources:[{uri:HOME_URI,name:'OpenPaperDesign Home',mimeType:HOME_MIME}]};
+      else if(request.method==='resources/read'){
+        if(request.params?.uri!==HOME_URI)throw new PaperError(404,'Unknown resource');
+        result={contents:[await homeResource(RUNTIME)]};
+      }
+      else if(request.method==='tools/call'){
+        try{const value=await call(request.params?.name,request.params?.arguments);result=request.params?.name==='paper_home'?{structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:{content:[{type:'text',text:JSON.stringify(value)}]};}
+        catch(error){result={content:[{type:'text',text:error.message}],isError:true};}
+      }else{respond({jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Method not found'}});continue;}
+      respond({jsonrpc:'2.0',id:request.id,result:complete(request,result,SERVER_INFO)});
+    }catch(error){respond({jsonrpc:'2.0',id:request?.id??null,error:{code:request?-32602:-32700,message:error.message}});}
+  }
+  await shutdown();process.removeListener('SIGTERM',terminate);process.removeListener('SIGINT',terminate);
+}
+async function main() {
+  const args=process.argv.slice(2);if(args.includes('--stdio'))return serveStdio();
+  const option=(name,fallback)=>{const i=args.indexOf(name);return i===-1?fallback:args[i+1];};
+  if(args.includes('--help')){process.stdout.write('OpenPaperDesign — Node.js 22+, no install or build required\n  node server/server.mjs [--workspace /path/to/project] [--port 8774]\n  node server/server.mjs [--workspace /path/to/project] --new-paper "Name" [--width 1440 --height 900]\n  node server/server.mjs --stdio\nWithout --workspace, Papers live in your personal OpenPaperDesign data folder.\n');return;}
+  const workspace=option('--workspace')||await personalWorkspace(),port=Number(option('--port','8774'));
+  if(args.includes('--new-paper')){await checkRuntime(RUNTIME);const library=await PaperLibrary.open(await projectWorkspace(workspace));await rememberWorkspace(library.workspace);const made=await library.create({name:option('--new-paper'),width:Number(option('--width','1440')),height:Number(option('--height','900'))});process.stdout.write(JSON.stringify(made)+'\n');return;}
+  const app=await startServer(workspace,{port,shareUrl:option('--share-url'),sharePort:Number(option('--share-port','0'))});process.stdout.write(`Paper ready: ${app.url}/home.html\nFiles: ${app.library.root}\n`);
+  let closing=false;for(const event of ['SIGINT','SIGTERM'])process.on(event,async()=>{if(closing)return;closing=true;await app.close();process.exit(0);});
+}
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(error=>{process.stderr.write(`Paper: ${error.message}\n`);process.exitCode=1;});

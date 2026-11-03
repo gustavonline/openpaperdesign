@@ -1,0 +1,8 @@
+node_modules/
+Paper/
+.history/
+.env
+.env.*
+.DS_Store
+*.log
+*.zip

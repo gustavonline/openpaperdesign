@@ -1,0 +1,30 @@
+/* App chrome tokens, translated from OpenPaperDesign desktop 3286238 (src/theme.rs; MIT OR Apache-2.0,
+   upstream paper-rs by Michael Shimeles). Chrome only: imported artwork keeps its own fills and fonts. */
+@font-face{font-family:Inter;src:url('assets/Inter-Regular.ttf') format('truetype');font-weight:400;font-display:block}
+@font-face{font-family:Inter;src:url('assets/Inter-Bold.ttf') format('truetype');font-weight:700;font-display:block}
+:root{color-scheme:dark;--surface:#1e1e1f;--field:#2a2a2c;--popover:#262628;--edge:rgb(255 255 255/.055);--edge-strong:#48484c;--text:#ececed;--text-2:#a2a2a6;--text-3:#626266;--line:#303033;--canvas:#18181b;--hover:rgb(255 255 255/.05);--pressed:rgb(255 255 255/.08);--accent:#007aff;--accent-ink:#5ea8ff;--grid:#34343a;--grid-line:rgb(52 52 58/.6);--bar-h:40px;--gap:12px;--control-h:30px;--selected:color-mix(in srgb,var(--accent) 28%,var(--surface));--danger:#ff9a90;--shadow:0 2px 10px rgb(0 0 0/.31)}
+@media(prefers-color-scheme:light){:root:not([data-theme=dark]){color-scheme:light;--surface:#fafafa;--field:#f0f0f1;--popover:#fff;--edge:rgb(0 0 0/.055);--edge-strong:#d6d6d9;--text:#1c1c1e;--text-2:#6c6c70;--text-3:#aeaeb2;--line:#e8e8ea;--canvas:#eeeef0;--hover:rgb(0 0 0/.03);--pressed:rgb(0 0 0/.055);--accent-ink:#0062cc;--grid:#cfcfd6;--grid-line:rgb(207 207 214/.6);--selected:color-mix(in srgb,var(--accent) 15%,var(--surface));--danger:#b42318;--shadow:0 2px 10px rgb(0 0 0/.08)}}
+:root[data-theme=light]{color-scheme:light;--surface:#fafafa;--field:#f0f0f1;--popover:#fff;--edge:rgb(0 0 0/.055);--edge-strong:#d6d6d9;--text:#1c1c1e;--text-2:#6c6c70;--text-3:#aeaeb2;--line:#e8e8ea;--canvas:#eeeef0;--hover:rgb(0 0 0/.03);--pressed:rgb(0 0 0/.055);--accent-ink:#0062cc;--grid:#cfcfd6;--grid-line:rgb(207 207 214/.6);--selected:color-mix(in srgb,var(--accent) 15%,var(--surface));--danger:#b42318;--shadow:0 2px 10px rgb(0 0 0/.08)}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;overscroll-behavior:none}
+body{font:12px/1.4 Inter,system-ui,sans-serif;color:var(--text);background:var(--surface);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:default}
+.icon{width:16px;height:16px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}
+.ibtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--text-2);text-decoration:none;flex:0 0 auto}
+.ibtn:hover,.ibtn:focus-visible{background:var(--hover);color:var(--text)}
+.ibtn:active{background:var(--pressed)}
+.ibtn[aria-pressed=true].toggle{background:var(--pressed);color:var(--text)}
+.ibtn[aria-pressed=true]:not(.toggle){background:var(--selected);color:var(--accent-ink)}
+.ibtn:disabled{color:var(--text-3);background:transparent}
+.btn{height:24px;padding:0 10px;border:1px solid var(--edge);border-radius:5px;background:var(--field);color:var(--text)}
+.btn:hover{background:color-mix(in srgb,var(--field),var(--text) 6%)}
+.field{height:24px;padding:0 8px;border:1px solid var(--edge);border-radius:5px;background:var(--field);color:var(--text);min-width:0}
+.field::placeholder{color:var(--text-2)}
+:focus{outline:none}
+:focus-visible{outline:1.5px solid var(--accent);outline-offset:-1.5px}
+.field:focus,textarea.field:focus{border-color:var(--accent-ink)}
+.float{background:var(--popover);border:1px solid var(--edge);border-radius:10px;box-shadow:var(--shadow)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}

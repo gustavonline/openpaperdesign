@@ -1,0 +1,32 @@
+{
+  "upstream": "kubernetes/community",
+  "commit": "8ed8a77f278d4ca36d54b00aeda66d0c71d09510",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "file": "pod.svg",
+      "source": "https://raw.githubusercontent.com/kubernetes/community/8ed8a77f278d4ca36d54b00aeda66d0c71d09510/icons/svg/resources/labeled/pod.svg",
+      "sha256": "7a2b279b73542984d7eddd59b8731f9cc4cb264be3cb303eeb7eadc196fcdd32"
+    },
+    {
+      "file": "deploy.svg",
+      "source": "https://raw.githubusercontent.com/kubernetes/community/8ed8a77f278d4ca36d54b00aeda66d0c71d09510/icons/svg/resources/labeled/deploy.svg",
+      "sha256": "cf576665ea0fe11cc7f2ab04f2af10177883c30ee5492042bea58dd810ac659b"
+    },
+    {
+      "file": "svc.svg",
+      "source": "https://raw.githubusercontent.com/kubernetes/community/8ed8a77f278d4ca36d54b00aeda66d0c71d09510/icons/svg/resources/labeled/svc.svg",
+      "sha256": "2218180b926fcbda45963c5304a45f7ab80433dcd4a47a01e5bf935fc15a6775"
+    },
+    {
+      "file": "ing.svg",
+      "source": "https://raw.githubusercontent.com/kubernetes/community/8ed8a77f278d4ca36d54b00aeda66d0c71d09510/icons/svg/resources/labeled/ing.svg",
+      "sha256": "b5c7fe24b7a9b6e31f8317a1e41a04c45579b3566941c61b8dc76e728e9bf89a"
+    },
+    {
+      "file": "ns.svg",
+      "source": "https://raw.githubusercontent.com/kubernetes/community/8ed8a77f278d4ca36d54b00aeda66d0c71d09510/icons/svg/resources/labeled/ns.svg",
+      "sha256": "63752ca5e0c20413f42bec9cf481a726b56ee0ad8e5d89038482cff250f9db35"
+    }
+  ]
+}

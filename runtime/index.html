@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head><script>try{const theme=localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='osm-paper:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=874de546739b"><link rel="stylesheet" href="canvas.css?v=b606091b94b8"></head>
+<body class="right-open">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
+  <symbol id="i-sidebar" viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="2"/><path d="M6 3v10"/></symbol>
+  <symbol id="i-sidebar-right" viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="2"/><path d="M10 3v10"/></symbol>
+  <symbol id="i-pointer" viewBox="0 0 16 16"><path d="M4.5 2.5 12.5 9.5 8.8 9.9 10.9 14 9.4 14.7 7.3 10.6 4.5 13z"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 16 16"><path d="M5.5 9V5M7.7 9V3M9.9 9V3.5M12 5.5V11M5.5 9v2L3.3 9M12 11a3.25 3.25 0 0 1-6.5 0"/></symbol>
+  <symbol id="i-rect" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="2"/></symbol>
+  <symbol id="i-ellipse" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.75"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3 13 13 3M7.5 3H13v5.5"/></symbol>
+  <symbol id="i-text" viewBox="0 0 16 16"><path d="M3.5 4V3h9v1M8 3v10M6.3 13h3.4"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 16 16"><path d="M11 2.2 13.8 5 5.5 13.3 2.2 13.8 2.7 10.5z"/><path d="M9.3 3.9 12.1 6.7"/></symbol>
+  <symbol id="i-frame" viewBox="0 0 16 16"><path d="M5 2v12M11 2v12M2 5h12M2 11h12"/></symbol>
+  <symbol id="i-image" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2.5 12 6.5 7.5 9.5 10.5 11 9l2.5 2.5"/><circle cx="10.5" cy="5.8" r="1.1"/></symbol>
+  <symbol id="i-inspect" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><path d="M8 5.5v5M5.5 8h5"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 16 16"><path d="M13 13V9.5a5 5 0 0 0-10 0M1 7l2 2.8 2.6-2.4"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 16 16"><path d="M3 13V9.5a5 5 0 0 1 10 0M15 7l-2 2.8-2.6-2.4"/></symbol>
+  <symbol id="i-export" viewBox="0 0 16 16"><path d="M8 10V1.8M4.8 5 8 1.8 11.2 5M5 7H3v7h10V7h-2"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 16 16"><path d="M3 8h10"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+  <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+  <symbol id="i-caret" viewBox="0 0 16 16"><path d="M4 6.5 8 10.5 12 6.5"/></symbol>
+  <symbol id="i-page" viewBox="0 0 16 16"><path d="M3.5 1.8h6l3 3v9.4h-9z"/><path d="M9.5 1.8v3h3"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 16 16"><path d="M2 8q6-6.5 12 0-6 6.5-12 0z"/><circle cx="8" cy="8" r="2"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 16 16"><path d="M2 8q6-6.5 12 0-6 6.5-12 0z"/><path d="M3 3l10 10"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3.5" y="7.5" width="9" height="6.5" rx="1.5"/><path d="M5.5 7.5V5a2.5 2.5 0 0 1 5 0v2.5"/></symbol>
+  <symbol id="i-unlock" viewBox="0 0 16 16"><rect x="3.5" y="7.5" width="9" height="6.5" rx="1.5"/><path d="M8 7.5V5a2.5 2.5 0 0 1 5 0"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 16 16"><g fill="currentColor" stroke="none"><circle cx="6" cy="4" r="1.1"/><circle cx="10" cy="4" r="1.1"/><circle cx="6" cy="8" r="1.1"/><circle cx="10" cy="8" r="1.1"/><circle cx="6" cy="12" r="1.1"/><circle cx="10" cy="12" r="1.1"/></g></symbol>
+</svg>
+
+<main id="stage" tabindex="0" aria-label="Paper canvas. Drag empty space or scroll to pan. Pinch or Ctrl/Cmd + scroll to zoom. Space + drag pans over layers. Shift+1 fits everything."><div id="world"></div></main>
+
+<!-- A Paper is one saved document; inside it, Pages hold the artboards and their layers. -->
+<aside id="left-panel" data-canvas-chrome aria-label="Paper and design">
+  <div class="switch" role="tablist" aria-label="Left panel">
+    <button type="button" role="tab" id="tab-canvas-btn" data-tab="canvas" aria-controls="tab-canvas" aria-selected="true">Paper</button>
+    <button type="button" role="tab" id="tab-design-btn" data-tab="design" aria-controls="tab-design" aria-selected="false" tabindex="-1">Design</button>
+  </div>
+  <div id="tab-canvas" class="tab" role="tabpanel" aria-labelledby="tab-canvas-btn">
+    <section class="pages"><h2>Pages</h2><div id="pages" role="group" aria-label="Pages in this Paper"></div></section>
+    <section class="layers"><h2>Layers</h2>
+      <label class="search"><span class="sr-only">Find a layer on the shown pages</span><svg class="icon"><use href="#i-search"/></svg><input id="layer-search" class="field" type="search" placeholder="Find a layer" autocomplete="off"></label>
+      <div id="layer-tree" role="tree" aria-label="Layers"></div>
+    </section>
+    <section class="symbol-library"><button type="button" id="library-toggle" aria-expanded="false" aria-controls="library-panel"><svg class="icon"><use href="#i-grid"/></svg><span>Library</span><span class="library-hint">Shapes &amp; Scratchpad</span><span aria-hidden="true">↗</span></button></section>
+  </div>
+  <div id="tab-design" class="tab" role="tabpanel" aria-labelledby="tab-design-btn" hidden>
+    <section class="design-doc">
+      <details id="design-guide"><summary><span>Design guide</span><a id="design-open" href="DESIGN.md" target="_blank" rel="noopener" title="Open the governing DESIGN.md">DESIGN.md</a></summary><div id="design-doc" class="prose"></div></details>
+      <p class="note" id="design-missing" hidden>This Paper has no DESIGN.md yet.</p>
+    </section>
+    <section class="in-use">
+      <div class="section-head"><h2 title="Counted from every page of this Paper">In use</h2></div>
+      <h3>Text styles</h3><div id="text-styles" class="list"></div>
+      <h3>Colours</h3><div id="colours" class="list"></div>
+      <p class="note" id="image-note" hidden>Colours inside images stay in those images and aren’t listed.</p>
+    </section>
+  </div>
+</aside>
+<section id="library-panel" data-canvas-chrome class="float" role="dialog" aria-label="Library" hidden>
+  <header><strong>Library</strong><button type="button" id="library-close" class="ibtn" aria-label="Close Library">×</button></header>
+  <label class="search"><span class="sr-only">Find a symbol</span><svg class="icon"><use href="#i-search"/></svg><input id="symbol-search" class="field" type="search" placeholder="Find a symbol" autocomplete="off"></label>
+  <div class="library-browser"><nav id="symbol-categories" aria-label="Symbol categories"></nav><div class="library-results"><div id="symbol-families"></div><section id="scratchpad" hidden><div id="saved-symbols"></div><div class="scratch-actions"><button type="button" class="btn" id="upload-symbol">Add image…</button><button type="button" class="btn" id="url-symbol">From URL…</button></div><p class="note">Drop images here, or save a selected layer.</p></section></div></div>
+  <footer>Click to insert · drag anywhere on the canvas</footer>
+  <input id="symbol-file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+</section>
+
+<div id="left-bar" data-canvas-chrome class="topbar">
+  <button id="home" class="ibtn" type="button" title="Paper menu" aria-label="Paper menu" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu"><svg class="icon"><use href="#i-grid"/></svg></button>
+  <span class="title"><button id="title-text" class="title-text" type="button"></button><input id="title-input" class="field title-input" type="text" maxlength="80" aria-label="Paper name" spellcheck="false" hidden></span>
+  <button id="left-toggle" class="ibtn toggle" type="button" aria-pressed="false" aria-controls="left-panel" title="Pages, layers and design" aria-label="Pages, layers and design"><svg class="icon"><use href="#i-sidebar"/></svg></button>
+</div>
+<div id="project-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Paper" hidden>
+  <button type="button" role="menuitem" data-action="home">All Papers</button>
+  <button type="button" role="menuitem" data-action="new">New Paper</button>
+  <button type="button" role="menuitem" data-action="rename">Rename Paper…</button>
+  <hr>
+  <button type="button" role="menuitem" data-action="undo" id="undo" disabled>Undo<kbd>⌘Z</kbd></button>
+  <button type="button" role="menuitem" data-action="redo" id="redo" disabled>Redo<kbd>⇧⌘Z</kbd></button>
+</div>
+<div id="canvas-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Canvas view" hidden>
+  <button type="button" role="menuitemradio" data-pattern="none" aria-checked="true">No background</button>
+  <button type="button" role="menuitemradio" data-pattern="dots" aria-checked="false">Dots</button>
+  <button type="button" role="menuitemradio" data-pattern="grid" aria-checked="false">Grid</button>
+  <hr>
+  <div class="menu-row"><label for="canvas-color">Canvas colour</label><input type="color" id="canvas-color"><button type="button" id="canvas-color-reset" class="reset">Reset</button></div>
+  <hr>
+  <button type="button" role="menuitem" data-zoom="fit">Zoom to fit<kbd>⇧1</kbd></button>
+</div>
+
+<aside id="right-panel" data-canvas-chrome aria-label="Properties">
+  <div id="doc-view">
+    <section><h3>Page</h3><dl><dt>Name</dt><dd id="doc-page"></dd><dt>Content</dt><dd id="doc-count"></dd></dl></section>
+    <section><h3>View</h3><div class="row"><button class="btn" type="button" data-zoom="fit">Zoom to fit</button><button class="btn" type="button" data-zoom="100">100%</button></div><p class="note">Your view only: camera and canvas background (right-click the canvas) stay in this browser, not in the project.</p></section>
+  </div>
+  <form id="properties" hidden autocomplete="off">
+    <section class="head"><h3 id="node-name"></h3><span id="node-kind"></span></section>
+    <section><div class="pair">
+      <label class="num"><span>X</span><input class="field" type="number" step="any" name="x"></label>
+      <label class="num"><span>Y</span><input class="field" type="number" step="any" name="y"></label>
+      <label class="num"><span>W</span><input class="field" type="number" step="any" min="0.1" name="w"></label>
+      <label class="num"><span>H</span><input class="field" type="number" step="any" min="0.1" name="h"></label>
+    </div></section>
+    <section id="fill-section"><h3>Fill</h3><div class="fill"><input type="color" name="color-picker" aria-label="Fill colour"><input class="field" type="text" name="color" aria-label="Fill hex" pattern="#[0-9a-fA-F]{6}" spellcheck="false"></div><p class="note" id="fill-note" hidden></p></section>
+    <section id="text-section"><h3>Text</h3>
+      <textarea class="field" name="text" rows="3" aria-label="Text content"></textarea>
+      <div class="pair"><label class="num"><span>Size</span><input class="field" type="number" name="font_size" min="1" max="500" step="any"></label>
+      <select class="field" name="weight" aria-label="Font weight"><option value="400">Inter Regular</option><option value="700">Inter Bold</option></select></div>
+    </section>
+    <section><h3>Layer</h3><div class="row">
+      <label class="check"><input type="checkbox" name="visible"> Visible</label>
+      <label class="check"><input type="checkbox" name="locked"> Locked</label>
+    </div></section>
+    <section id="symbol-actions" hidden><div class="row"><button type="button" class="btn" id="connect-symbol">Connect to…</button><button type="button" class="btn" id="save-symbol">Save to Scratchpad</button><button type="button" class="btn" id="edit-connection-label" hidden>Edit label</button></div><p class="note" id="connect-hint" hidden>Click another symbol to connect. Escape cancels.</p></section>
+  </form>
+</aside>
+<div id="right-bar" data-canvas-chrome class="topbar">
+  <button id="export" class="share-button" type="button" title="Share or export" aria-label="Share" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu"><svg class="icon"><use href="#i-export"/></svg><span>Share</span></button>
+  <span class="zoom"><button id="zoom-out" class="ibtn" type="button" title="Zoom out (−)" aria-label="Zoom out"><svg class="icon"><use href="#i-minus"/></svg></button><button id="zoom" class="level" type="button" title="Zoom options" aria-haspopup="menu" aria-expanded="false">100%</button><button id="zoom-in" class="ibtn" type="button" title="Zoom in (+)" aria-label="Zoom in"><svg class="icon"><use href="#i-plus"/></svg></button></span>
+  <button id="right-toggle" class="ibtn toggle" type="button" aria-pressed="true" aria-controls="right-panel" title="Properties" aria-label="Properties"><svg class="icon"><use href="#i-sidebar-right"/></svg></button>
+</div>
+<!-- Exports of the artwork as it is rendered (no editor chrome), and the whole Paper as its file. -->
+<div id="export-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Share and export" hidden>
+  <button type="button" role="menuitem" id="open-sharing">Share this Paper…</button>
+  <hr class="owner-only">
+  <div class="menu-label" id="export-target"></div>
+  <button type="button" role="menuitem" data-export="png">PNG image<kbd id="export-size"></kbd></button>
+  <button type="button" role="menuitem" data-export="html">HTML file<kbd>fonts + images inside</kbd></button>
+  <hr>
+  <button type="button" role="menuitem" data-export="json">Paper file<kbd>.json · all pages</kbd></button>
+</div>
+<dialog id="sharing-dialog" data-canvas-chrome aria-labelledby="sharing-title">
+  <header><h2 id="sharing-title">Share Paper</h2><button type="button" class="ibtn" data-close-sharing aria-label="Close sharing"><svg class="icon"><use href="#i-close"/></svg></button></header>
+  <p id="share-state" role="status">Only you have access</p><p id="share-detail" class="note"></p>
+  <label class="share-permission">Access<select id="share-role" class="field"><option value="view">Can view</option><option value="edit">Can edit</option></select></label>
+  <div class="share-actions"><button type="button" id="share-primary">Create link</button><button type="button" id="share-agent" hidden>Connect your agent</button></div>
+  <textarea class="field" aria-label="Connection text" readonly hidden></textarea>
+  <button type="button" id="share-stop" class="share-stop" hidden>Stop sharing</button>
+</dialog>
+<!-- Save status: its own small live note beside the right corner bar; silent until something changes. -->
+<div id="status" data-canvas-chrome class="save-status" role="status" aria-live="polite" hidden></div>
+<div id="zoom-menu" data-canvas-chrome class="float menu" role="menu" hidden>
+  <button type="button" role="menuitem" data-zoom="fit">Zoom to fit<kbd>⇧1</kbd></button>
+  <button type="button" role="menuitem" data-zoom="selection">Zoom to selection<kbd>⇧2</kbd></button>
+  <button type="button" role="menuitem" data-zoom="100">Zoom to 100%<kbd>⇧0</kbd></button>
+</div>
+
+<!-- Edit mode's few tools (they change the artwork). Mesurer's native toolbar shows them in place of its own
+     toolset while Edit is the current mode (sample-only slot); on their own only while it is minimised or
+     unavailable. -->
+<div id="rail" class="float" role="toolbar" aria-label="Edit tools: change the artwork" aria-orientation="vertical">
+  <button type="button" class="ibtn tool-main" data-family-main="select"></button>
+  <button type="button" class="ibtn tool-main" data-family-main="hand"></button>
+  <div class="family"><button type="button" class="ibtn tool-main" data-family-main="shapes"></button><button type="button" class="chev" data-family-chev="shapes" aria-haspopup="menu" aria-expanded="false" aria-label="More shapes: rectangle, ellipse, arrow" title="More shapes"><svg class="icon"><use href="#i-caret"/></svg></button></div>
+  <button type="button" class="ibtn tool-main" data-family-main="text"></button>
+  <button type="button" class="ibtn tool-main" data-family-main="pencil"></button>
+</div>
+<div id="tool-flyout" data-canvas-chrome class="float menu" role="menu" aria-label="Shapes to draw" hidden></div>
+
+<div id="toast" data-canvas-chrome role="status" hidden></div>
+<dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is copied into this Paper. If the site blocks access, download the image and drop it here.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
+<div id="mesurer-root"></div>
+<script type="module" src="app.js?v=9aaceb5af4d4"></script>
+</body></html>

@@ -1,0 +1,12 @@
+{
+  "name": "osm-paper",
+  "displayName": "OpenPaperDesign",
+  "version": "0.5.0-preview.2",
+  "description": "Project-local design and diagram Papers with bundled methods, browser editing, inspection, file storage and agent MCP tools.",
+  "author": {
+    "name": "Gustav Online"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/gustavonline/openpaperdesign",
+  "homepage": "https://github.com/gustavonline/openpaperdesign"
+}

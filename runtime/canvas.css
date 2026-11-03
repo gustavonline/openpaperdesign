@@ -1,0 +1,304 @@
+/* Editor layout after OpenPaperDesign desktop 3286238: full-viewport canvas, full-height 240/260 panels,
+   38px top rows whose bars float in the canvas corners when a panel is closed, vertical tool rail. */
+body{overflow:hidden;background:var(--canvas);--lw:0px;--rw:0px}
+body.left-open{--lw:240px}body.right-open{--rw:260px}
+
+#stage{position:fixed;top:0;bottom:0;left:var(--lw);right:var(--rw);overflow:hidden;overscroll-behavior:none;background:var(--canvas);cursor:default;touch-action:none}
+#stage:focus-visible{outline:none}
+#world{position:absolute;left:0;top:0;transform-origin:0 0}
+
+/* Panels */
+#left-panel,#right-panel{position:fixed;top:0;bottom:0;z-index:20;background:var(--surface);padding-top:40px;display:none}
+#left-panel{left:0;width:240px;border-right:1px solid var(--line);flex-direction:column}
+#right-panel{right:0;width:260px;border-left:1px solid var(--line);overflow:auto}
+body.left-open #left-panel{display:flex}body.right-open #right-panel{display:block}
+
+/* Top rows: in the open panel (40px), or floating in the canvas corner. The floating bar keeps every control
+   exactly where it is in the open row: content 10px from the edge (5 + 1px edge + 4 padding), the same
+   220px content width, the same 20px centre line (top 2 + 36 / 2). Opening a panel moves nothing. */
+.topbar{position:fixed;top:0;z-index:30;height:40px;display:flex;align-items:center;gap:2px}
+#left-bar{left:0;width:240px;padding:0 10px}
+#right-bar{right:0;width:260px;padding:0 14px 0 10px;justify-content:flex-end}
+body:not(.left-open) #left-bar,body:not(.right-open) #right-bar{top:2px;height:36px;padding:4px;background:var(--popover);border:1px solid var(--edge);border-radius:10px;box-shadow:var(--shadow)}
+body:not(.left-open) #left-bar{left:5px;width:230px}
+body:not(.right-open) #right-bar{right:5px;width:auto;padding-right:8px}
+/* The Paper title renames in place: one fixed slot, truncated, with the full name as its tooltip. */
+.title{flex:1;min-width:0;display:flex;align-items:center;padding:0 0 0 4px;height:26px}
+.title-text{min-width:0;max-width:100%;height:26px;padding:0 6px;border:0;border-radius:5px;background:transparent;color:var(--text);font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+.title-text:hover{background:var(--hover)}
+.title-input{flex:1;min-width:0;height:26px;font-size:13px;font-weight:600}
+.zoom{display:flex;align-items:center;gap:2px}
+.level{height:26px;min-width:46px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:var(--text-2);font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+.level:hover,.level:focus-visible,.level[aria-expanded=true]{background:var(--hover);color:var(--text)}
+.ibtn[aria-expanded=true]{background:var(--pressed);color:var(--text)}
+
+/* Menus: one family for project, zoom, canvas view and shapes */
+.menu{position:fixed;z-index:200;padding:5px;min-width:200px;pointer-events:auto}
+.menu button{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;height:26px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:var(--text);text-align:left}
+.menu button:hover:not(:disabled),.menu button:focus-visible{background:var(--selected);outline:none}
+.menu button:disabled{color:var(--text-3)}
+.menu button .icon{color:var(--text-2)}.menu button span{flex:1}
+.menu [role=menuitemradio]{padding-left:24px;position:relative}
+#tool-flyout [role=menuitemradio]{padding-left:8px}
+.menu [role=menuitemradio][aria-checked=true]::before{content:'';position:absolute;left:9px;top:11px;width:5px;height:5px;border-radius:50%;background:currentColor}
+#tool-flyout [role=menuitemradio][aria-checked=true]::before{display:none}
+#tool-flyout [aria-checked=true]{background:var(--selected)}
+.menu kbd{font:inherit;font-size:11px;color:var(--text-2)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+.menu-row{display:flex;align-items:center;gap:6px;height:30px;padding:0 4px 0 8px}
+.menu-row label{flex:1}
+.menu-row .reset{width:auto!important;height:24px!important;padding:0 8px!important;color:var(--text-2)!important}
+.menu-label{padding:4px 8px 6px;max-width:240px;font-size:11px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Design tools. Shown inside Mesurer's native toolbar while Design is the current mode (sample-only
+   slot), and on their own only while Mesurer is minimised or unavailable. 32px buttons, 16px icons. */
+#rail{display:none;position:fixed;z-index:25;left:calc(var(--lw) + 8px);top:50%;transform:translateY(-50%);padding:4px;flex-direction:column;gap:1px}
+body.rail-standalone:not(.mesurer-ready) #rail,body.mesurer-ready.mesurer-minimized #rail,body.mesurer-docked #rail{display:flex}
+#rail .ibtn{width:32px;height:32px;color:var(--text)}
+#rail .ibtn[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
+.family{position:relative;display:flex}
+@media(max-height:440px){#rail{top:52px;transform:none}}
+/* Docked in the native toolbar's Edit slot, the Edit tools take the native button language: 32px buttons
+   4px apart in a 4px-padded group (as a native ToolbarGroup), 20px glyphs at the native 1px line (0.8 of
+   the 16-unit grid), the native ink and control radius; hover and the current tool use the editor's own
+   tints (as every native tool button below). */
+.osm-design-slot{display:flex;align-items:center;justify-content:center;padding:4px 0}
+.osm-design-slot[data-vertical=true]{padding:4px 0}
+body.mesurer-docked #rail{position:static;transform:none;padding:0;gap:4px;border:0;background:none;box-shadow:none}
+.osm-design-slot[data-vertical=false] #rail{flex-direction:row}
+body.mesurer-docked #rail .ibtn{width:32px;height:32px;border-radius:var(--msr-radius-control,5px);color:var(--msr-color-ink-900,var(--text));background:transparent}
+body.mesurer-docked #rail .ibtn .icon{width:20px;height:20px;stroke-width:.8}
+body.mesurer-docked #rail .ibtn:hover{background:var(--hover)}
+body.mesurer-docked #rail .ibtn[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
+body.mesurer-docked #rail .ibtn:focus-visible{outline:1px solid var(--msr-color-ink-500,var(--accent));outline-offset:1px}
+/* Edit is the first group of the native tool track [Edit | Inspect]: the same stage-size and track-offset
+   rules the native groups use. At rest the stage shows one group; the native group motion (build.mjs)
+   animates between them. Capture, comments and settings follow in both modes, after the native divider. */
+#mesurer-root .mesurer-toolbar-tool-slot[data-group=design],#mesurer-root .mesurer-toolbar-tool-stage[data-group=design]{width:var(--msr-design-size,auto)}
+#mesurer-root .mesurer-toolbar-tool-stage[data-group=inspect]:has([data-group=design]) .mesurer-toolbar-tool-track{transform:translateX(calc(-1 * var(--msr-design-size,0px)))}
+#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-slot[data-group=design],#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-stage[data-group=design]{width:auto;height:var(--msr-design-size,auto)}
+#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-stage[data-group=inspect]:has([data-group=design]) .mesurer-toolbar-tool-track{transform:translateY(calc(-1 * var(--msr-design-size,0px)))}
+/* Native tool buttons: the editor's hover and its selected tint with accent ink, not the solid accent. */
+#mesurer-root .mesurer-toolbar-motion [data-tool-id]>button:not([aria-pressed=true]):hover{background:var(--hover)}
+#mesurer-root .mesurer-toolbar-motion [data-tool-id]>button[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
+/* Corner chevrons (as OPD): a menu's caret is a small chevron in its button's corner, lower right on a
+   horizontal bar and the canvas-side lower corner on a vertical one, pointing where the menu opens. It is
+   still its own focusable button; the guide caret's slot takes no room. Same for the shapes chevron. */
+#mesurer-root .mesurer-toolbar-caret-anchor{position:relative;margin:0}
+#mesurer-root .mesurer-toolbar-caret-anchor:not(:has([data-tool-id])){flex:0 0 0;width:0;min-width:0;align-self:stretch;margin-left:-4px}
+#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-caret-anchor{width:auto}
+#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-caret-anchor:not(:has([data-tool-id])){width:auto;height:0;min-height:0;margin:-4px 0 0}
+#mesurer-root .mesurer-toolbar-caret-btn,.family .chev{position:absolute;z-index:1;right:0;left:auto;bottom:0;display:flex;align-items:flex-end;justify-content:flex-end;width:14px;height:14px;padding:0 1px 1px 0;border:0;border-radius:3px;background:transparent;color:var(--text-2)}
+#mesurer-root .mesurer-toolbar-caret-btn:hover,#mesurer-root .mesurer-toolbar-caret-btn[aria-expanded=true],.family .chev:hover,.family .chev[aria-expanded=true]{color:var(--text);background:var(--hover)}
+#mesurer-root .mesurer-toolbar-caret-btn:focus-visible,.family .chev:focus-visible{outline:1px solid var(--accent);outline-offset:0}
+#mesurer-root .mesurer-toolbar-motion[data-column-side=right] .mesurer-toolbar-caret-btn,.mesurer-toolbar-motion[data-column-side=right] .family .chev{right:auto;left:0;justify-content:flex-start;padding:0 0 1px 1px}
+#mesurer-root .mesurer-toolbar-caret,.family .chev .icon{width:8px;height:8px}
+#mesurer-root .mesurer-toolbar-motion[data-orientation=horizontal][data-edge=bottom] .mesurer-toolbar-caret,.mesurer-toolbar-motion[data-orientation=horizontal][data-edge=bottom] .family .chev .icon{transform:rotate(180deg)}
+.mesurer-toolbar-motion[data-column-side=left] .family .chev .icon,body:not(.mesurer-docked) .family .chev .icon{transform:rotate(-90deg)}
+.mesurer-toolbar-motion[data-column-side=right] .family .chev .icon{transform:rotate(90deg)}
+#mesurer-root .mesurer-toolbar-motion[data-shape-side=top] .family .chev .icon{transform:rotate(180deg)}
+#mesurer-root .mesurer-toolbar-motion[data-shape-side=bottom] .family .chev .icon{transform:rotate(0deg)}
+#mesurer-root .mesurer-toolbar-motion[data-shape-side=right] .family .chev .icon{transform:rotate(-90deg)}
+#mesurer-root .mesurer-toolbar-motion[data-shape-side=left] .family .chev .icon{transform:rotate(90deg)}
+#mesurer-root .mesurer-toolbar-caret-btn[data-menu-side=top] .mesurer-toolbar-caret{transform:rotate(180deg)}
+#mesurer-root .mesurer-toolbar-caret-btn[data-menu-side=bottom] .mesurer-toolbar-caret{transform:rotate(0deg)}
+#mesurer-root .mesurer-toolbar-caret-btn[data-menu-side=right] .mesurer-toolbar-caret{transform:rotate(-90deg)}
+#mesurer-root .mesurer-toolbar-caret-btn[data-menu-side=left] .mesurer-toolbar-caret{transform:rotate(90deg)}
+#mesurer-root [role=menu] [role^=menuitem]:hover{background:var(--hover);color:var(--text)}
+#mesurer-root [role=menu] [role^=menuitem][aria-checked=true]{background:var(--selected);color:var(--accent-ink)}
+/* Edit is the first segment of the native mode switch (Edit | Inspect). */
+.osm-toolbar-grip{display:flex;align-items:center;justify-content:center;flex:0 0 10px;color:var(--msr-color-ink-500);cursor:grab}
+.osm-toolbar-grip:hover{color:var(--msr-color-ink-700)}
+.mesurer-toolbar-motion[data-orientation=vertical] .osm-toolbar-grip svg{transform:rotate(90deg)}
+.osm-design-mode{display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--msr-color-ink-700,currentColor)}
+.osm-design-mode[aria-pressed=true]{color:var(--msr-color-ink-900,currentColor)}
+.osm-design-mode:not([aria-pressed=true]):hover{background:color-mix(in srgb,var(--msr-color-ink-200,currentColor) 50%,transparent)}
+.osm-design-mode svg{display:block}
+.osm-design-mode:focus-visible{outline:1px solid var(--msr-color-ink-500,currentColor);outline-offset:1px}
+/* The native pill marks the current mode and slides with its native transition: one 30px step per 28px
+   segment and 2px gap (build.mjs guards the native step), Edit first. */
+#mesurer-root .mesurer-toolbar-tool-switch:has(.osm-design-mode) .mesurer-toolbar-tool-switch-pill{transform:translate(0)}
+#mesurer-root .mesurer-toolbar-tool-switch:has(.osm-design-mode)[data-value=inspect] .mesurer-toolbar-tool-switch-pill{transform:translate(30px)}
+#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-switch:has(.osm-design-mode)[data-value=inspect] .mesurer-toolbar-tool-switch-pill{transform:translateY(30px)}
+/* Let native overlay, toolbar and popovers use their individual z-indexes. Editor chrome stays above
+   the inspection overlay, native popovers above chrome. Their containing block remains the viewport.
+   The bar's surface is the side panels' own token. */
+#mesurer-root>.mesurer-root{position:static;z-index:auto;--msr-accent:var(--accent);--msr-surface:var(--surface);font-family:Inter,system-ui,sans-serif}
+#mesurer-root .mesurer-toolbar-chrome{outline:1px solid var(--edge)}
+/* The whole bar is the drag handle (native); show it as one, while buttons keep the default cursor. */
+#mesurer-root .mesurer-toolbar-motion{cursor:grab}
+#mesurer-root .mesurer-toolbar-motion button{cursor:default}
+
+/* Save status: a separate small note just left of the right corner bar, on the top row's centre line;
+   app.js places it and moves it below a toolbar docked on top. Problems keep their action. */
+.save-status{position:fixed;z-index:31;top:8px;height:24px;display:flex;gap:8px;align-items:center;padding:0 10px;border-radius:8px;background:var(--popover);border:1px solid var(--edge);box-shadow:var(--shadow);font-size:11px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.save-status.problem{height:auto;min-height:24px;padding:3px 4px 3px 10px;white-space:normal;color:var(--danger);border-color:var(--danger);background:var(--surface)}
+.save-status button{flex:0 0 auto;height:20px;padding:0 8px;border:1px solid currentColor;border-radius:5px;background:transparent;color:inherit;font-size:11px}
+
+/* Left panel: Canvas / Design switch (28px, raised current half), then the chosen view */
+.switch{display:flex;gap:2px;margin:0 10px 6px;padding:2px;height:28px;border-radius:6px;background:var(--field)}
+.switch button{flex:1;height:24px;border:0;border-radius:5px;background:transparent;color:var(--text-2);font-weight:500}
+.switch button:hover{color:var(--text)}
+.switch button[aria-selected=true]{background:var(--surface);color:var(--text);box-shadow:0 0 0 1px var(--edge)}
+.tab{flex:1;min-height:0;display:flex;flex-direction:column}
+#tab-design{overflow:auto;padding:0 8px 12px}
+#tab-design section{padding:4px 0 8px}
+#tab-design section+section{border-top:1px solid var(--line);padding-top:8px}
+.list-row{display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:5px}
+.list-row .label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.list-row .count{color:var(--text-2);font-size:11px;font-variant-numeric:tabular-nums}
+.list-row .aa{width:16px;color:var(--text-2);font-size:11px}
+.swatch{width:16px;height:16px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--edge-strong);flex:0 0 16px}
+.colours-more{margin:6px}
+/* Design tab: observed styles (In use, the whole Paper) apart from the governing guide. */
+.section-head{display:flex;align-items:center;justify-content:space-between;padding-right:4px}
+#tab-design h3{margin:6px 0 2px;padding:0 6px;font-size:11px;font-weight:500;color:var(--text-2)}
+#design-guide summary{display:flex;align-items:center;gap:6px;height:26px;padding:0 6px;border-radius:5px;list-style:none;font-size:11px;font-weight:500;color:var(--text-2)}
+#design-guide summary::-webkit-details-marker{display:none}
+#design-guide summary::before{content:'';width:10px;height:10px;flex:0 0 10px;background:currentColor;clip-path:polygon(30% 15%,75% 50%,30% 85%)}
+#design-guide[open] summary::before{transform:rotate(90deg)}
+#design-guide summary:hover{background:var(--hover);color:var(--text)}
+#design-guide summary span{flex:1}
+#design-guide summary a{font-size:11px;font-weight:400;color:var(--accent-ink);text-decoration:none}#design-guide summary a:hover{text-decoration:underline}
+.prose{padding:0 6px;font-size:12px;line-height:1.5;color:var(--text)}
+.prose table{width:100%;margin:4px 0 10px;border-collapse:collapse;font-size:11px}
+.prose th,.prose td{padding:3px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;color:var(--text-2)}
+.prose th{font-weight:500;color:var(--text)}
+.prose h3,.prose h4{margin:12px 0 4px;font-size:12px;font-weight:600}.prose h3{font-size:13px}
+.prose p{margin:0 0 8px;color:var(--text-2)}.prose ul{margin:0 0 8px;padding-left:16px;color:var(--text-2)}
+.prose code{font-size:11px;padding:0 3px;border-radius:3px;background:var(--field);color:var(--text)}
+.tab .note{padding:0 6px}
+
+/* Left panel: pages, layer tree */
+#left-panel h2{margin:0;padding:6px 6px 4px;font-size:11px;font-weight:500;color:var(--text-2)}
+.pages{flex:0 0 auto;padding:4px 8px 8px;border-bottom:1px solid var(--line);background:var(--surface)}
+#pages{max-height:118px;overflow:auto;display:flex;flex-direction:column;gap:1px}
+.page-row{display:flex;align-items:center;gap:8px;width:100%;height:24px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:var(--text);text-align:left;white-space:nowrap}
+.page-row span{overflow:hidden;text-overflow:ellipsis}.page-row .icon{width:14px;height:14px;color:var(--text-2)}
+.page-row:hover{background:var(--hover)}.page-row[aria-current=true]{background:var(--pressed)}
+.layers{flex:1;min-height:0;display:flex;flex-direction:column;padding:4px 8px 8px}
+.symbol-library{flex:0 0 auto;border-top:1px solid var(--line);padding:8px}
+#library-toggle{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--text);text-align:left}
+#library-toggle:hover,#library-toggle[aria-expanded=true]{background:var(--hover)}.library-hint{flex:1;color:var(--text-2);font-size:10px;text-align:right}
+#library-panel{position:fixed;z-index:45;width:min(492px,calc(100vw - 24px));height:min(438px,calc(100vh - 80px));display:flex;flex-direction:column;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+#library-panel[hidden]{display:none}#library-panel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px}
+#library-panel .search{margin:0 0 10px}#library-panel footer{font-size:10px;color:var(--text-2);border-top:1px solid var(--line);padding-top:10px;margin-top:8px}
+.library-browser{display:flex;gap:12px;flex:1;min-height:0}#symbol-categories{display:flex;flex-direction:column;gap:2px;width:116px;flex:none;overflow:auto}
+#symbol-categories button{flex:none;text-align:left;padding:7px 8px;border:0;border-radius:5px;background:transparent;color:var(--text-2);font-size:11px}
+#symbol-categories button:hover{background:var(--hover)}#symbol-categories button[aria-current=true]{background:var(--selected);color:var(--text)}
+.library-results{flex:1;min-width:0;overflow:auto;scrollbar-width:thin;padding-right:2px}#symbol-families h3{font-size:11px;font-weight:500;color:var(--text-2);margin:4px 0}
+.symbol-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px 0 6px}
+.symbol-tile{position:relative;min-width:0}
+.symbol-button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:100%;min-height:72px;padding:8px 5px 6px;background:var(--field);border:1px solid var(--line);border-radius:6px;color:var(--text);cursor:grab}
+.symbol-button img{width:76px;height:42px;object-fit:contain;pointer-events:none}
+.symbol-button span{max-width:100%;font-size:10px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.symbol-button:hover{background:var(--hover);border-color:var(--edge)}.symbol-button:active{cursor:grabbing}.symbol-button:disabled{cursor:default;opacity:.7}
+.remove-symbol{position:absolute;right:3px;top:3px;width:18px;height:18px;border:0;border-radius:4px;background:var(--surface);color:var(--text-2);visibility:hidden}.symbol-tile:hover .remove-symbol,.symbol-tile:focus-within .remove-symbol{visibility:visible}
+.scratch-actions{display:flex;gap:4px;padding:6px 0 0}.scratch-actions .btn{flex:1;font-size:10px}
+#scratchpad>.note{padding:0 3px;margin:6px 0}.symbol-content{position:absolute;left:0;top:0;transform-origin:0 0}
+#image-url-dialog{width:min(360px,calc(100vw - 32px));padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+#image-url-dialog::backdrop{background:#0003}#image-url-dialog h2{font-size:14px;margin:0 0 16px}#image-url-dialog label{display:block;font-size:11px}#image-url-dialog input{display:block;width:100%;margin-top:6px}#image-url-dialog .row{justify-content:flex-end;margin-top:16px}
+@media(max-height:560px){#pages{max-height:78px}}
+.search{position:relative;display:block;margin:2px 0 6px}
+.search .icon{position:absolute;left:7px;top:4px;width:14px;height:14px;color:var(--text-2);pointer-events:none;margin-top:1px}
+.search input{width:100%;padding-left:26px}
+#layer-tree{flex:1;min-height:0;overflow:auto;scrollbar-width:thin}
+.tree-row{display:flex;align-items:center;gap:4px;height:24px;padding:0 2px 0 calc(4px + var(--d,0) * 14px);border-radius:5px;color:var(--text);white-space:nowrap;user-select:none}
+.tree-row:hover{background:var(--hover)}
+.tree-row[aria-selected=true]{background:var(--selected)}
+.tree-row:focus-visible{outline:1.5px solid var(--accent);outline-offset:-1.5px}
+.tree-row .tw{width:16px;height:16px;padding:0;border:0;background:transparent;color:var(--text-2);display:flex;align-items:center;justify-content:center;flex:0 0 16px}
+.tree-row .tw .icon{width:10px;height:10px;transition:transform .1s}
+.tree-row[aria-expanded=true] .tw .icon{transform:rotate(90deg)}
+.tree-row .kind{width:14px;height:14px;color:var(--text-2)}
+.tree-row .label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.tree-row.off .label{color:var(--text-2)}
+.tree-row .act{width:20px;height:20px;visibility:hidden}
+.tree-row .act .icon{width:14px;height:14px}
+.tree-row:hover .act,.tree-row:focus-within .act,.tree-row .act.on{visibility:visible}
+.tree-more{height:24px;padding:0 8px 0 calc(24px + var(--d,0) * 14px);border:0;background:transparent;color:var(--text-2);font-size:11px;text-align:left;width:100%;border-radius:5px}
+.tree-more:hover{background:var(--hover);color:var(--text)}
+.tree-empty{padding:6px 8px;color:var(--text-2);font-size:11px}
+
+/* Right panel: inspector */
+#right-panel section{padding:10px 14px 12px;border-bottom:1px solid var(--line)}
+#right-panel section:last-child{border-bottom:0}
+#right-panel h3{margin:0 0 8px;font-size:12px;font-weight:500}
+#right-panel .head{display:flex;align-items:baseline;gap:6px;padding-top:12px}
+#right-panel .head h3{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#node-kind{font-size:11px;color:var(--text-2);flex:0 0 auto}
+dl{display:grid;grid-template-columns:64px 1fr;gap:6px 8px;margin:0}dt{color:var(--text-2)}dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+.note{margin:8px 0 0;font-size:11px;color:var(--text-2)}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:6px 8px}
+.num{display:flex;align-items:center;height:24px;padding-left:8px;border:1px solid var(--edge);border-radius:5px;background:var(--field)}
+.num:focus-within{border-color:var(--accent-ink)}
+.num span{color:var(--text-2);font-size:11px;margin-right:6px;flex:0 0 auto}
+.num .field{flex:1;width:0;height:22px;padding:0 6px 0 0;border:0;background:transparent;font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+.num .field:focus-visible{outline:none}
+.num input::-webkit-inner-spin-button,.num input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.fill{display:flex;gap:6px}.fill .field{flex:1}
+input[type=color]{width:24px;height:24px;padding:0;border:1px solid var(--edge);border-radius:5px;background:none;flex:0 0 auto}
+input[type=color]::-webkit-color-swatch-wrapper{padding:2px}input[type=color]::-webkit-color-swatch{border:0;border-radius:3px}
+textarea.field{display:block;width:100%;height:auto;padding:6px 8px;margin-bottom:6px;resize:vertical;line-height:1.4}
+select.field{width:100%}
+.check{display:flex;align-items:center;gap:6px;height:24px;margin-right:12px}
+.check input{accent-color:var(--accent);margin:0}
+
+/* Canvas content. Artwork keeps its own fills; only selection/hover chrome is drawn over it. */
+.artboard{position:absolute;left:0;top:0;isolation:isolate}
+.board-content{position:relative;width:100%;height:100%}
+/* The label is drawn at screen size and never wider than its board on screen, so neighbours don't collide. */
+.board-label{position:absolute;left:0;bottom:calc(100% + 6px/var(--zoom,1));transform:scale(calc(1/var(--zoom,1)));transform-origin:left bottom;display:flex;align-items:center;gap:2px;width:max-content;max-width:calc(100% * var(--zoom,1));overflow:hidden;white-space:nowrap;font-size:11px;color:var(--text-2)}
+.board-label .board-move{width:18px;height:18px;flex:0 0 18px;touch-action:none}.board-label .board-move .icon{width:12px;height:12px}
+.board-label .board-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;height:18px;padding:0 4px;border:0;border-radius:4px;background:transparent;color:var(--text-2);font-size:11px}
+.board-label .board-name:hover,.board-label .board-name:focus-visible{color:var(--text)}
+.board-label .board-name[aria-pressed=true]{color:var(--accent-ink)}
+.design-layer{position:absolute;box-sizing:border-box;cursor:default;transform-origin:0 0}
+.design-layer.node-text{white-space:pre-wrap;overflow-wrap:normal;user-select:none;font-family:Inter,sans-serif}
+.design-layer.node-text[contenteditable]:not([contenteditable=false]){user-select:text;cursor:text;outline:calc(1px/var(--zoom,1)) solid var(--accent)}
+.design-layer.selected,.board-content.selected{outline:calc(1px/var(--zoom,1)) solid var(--accent);outline-offset:0}
+.design-layer:not(.selected):hover{outline:calc(1px/var(--zoom,1)) solid color-mix(in srgb,var(--accent) 55%,transparent)}
+.design-layer img{position:absolute;width:100%;height:100%;user-select:none;pointer-events:none}
+.design-layer svg{overflow:visible;width:100%;height:100%;pointer-events:none}
+.node-connector{pointer-events:none}.node-connector>svg>path{pointer-events:stroke}.node-connector>.node-text{pointer-events:auto}
+.artboard.solo-root .board-label{display:none}
+body.inspecting .design-layer,body.inspecting .board-content{outline:none!important}
+body.inspecting #stage{cursor:crosshair}
+
+#toast{position:fixed;z-index:60;bottom:12px;left:50%;transform:translateX(-50%);max-width:70vw;padding:6px 12px;border-radius:8px;background:var(--popover);border:1px solid var(--edge);box-shadow:var(--shadow);font-size:12px}
+.load-error{padding:40px;font-size:13px;color:var(--danger)}
+
+/* Sharing is optional; exports remain in the same small menu. */
+.share-button{height:30px;display:inline-flex;align-items:center;gap:5px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:var(--text);font-size:12px;white-space:nowrap}
+.share-button:hover,.share-button[aria-expanded=true]{background:var(--hover)}
+#sharing-dialog{width:min(376px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--surface);color:var(--text);box-shadow:0 12px 48px #0002}
+#sharing-dialog::backdrop{background:#0003}
+#sharing-dialog header{display:flex;align-items:center;justify-content:space-between;gap:8px}#sharing-dialog h2{margin:0;font-size:15px;font-weight:600}#sharing-dialog p{font-size:12px;line-height:1.5;margin:12px 0}#share-state{font-weight:500}
+.share-permission{display:flex;align-items:center;justify-content:space-between;font-size:12px;gap:12px;margin:16px 0}.share-permission select{width:140px}
+.share-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.share-actions button{padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--field);color:var(--text);font:inherit;font-size:12px}#share-primary{background:var(--text);color:var(--surface);border-color:transparent}
+#sharing-dialog textarea{width:100%;height:100px;margin-top:12px;font-size:11px}.share-stop{padding:0;margin-top:16px;border:0;background:transparent;color:var(--text-2);font-size:12px;text-decoration:underline}
+body.shared-paper [aria-label="Clear feedback…"],body.read-only [data-mesurer-comment-ui]{display:none!important}
+body.read-only .osm-design-mode{opacity:.4;cursor:default}
+
+.access-badge{font-size:10px;white-space:nowrap;color:var(--text-2);padding:0 4px}body.read-only #home{display:none}
+
+body.read-only .osm-design-mode{pointer-events:none}body.read-only #rail [data-tool]:not([data-tool=select]):not([data-tool=hand]){opacity:.4;pointer-events:none}
+
+.artboard.free-root{background:transparent;box-shadow:none}.free-root>.board-label{display:none}
+.board-resizers{position:absolute;inset:0;pointer-events:none;display:none;outline:calc(1px / var(--zoom)) solid var(--accent)}
+.artboard.board-selected>.board-resizers{display:block}.board-resizers button{position:absolute;pointer-events:auto;box-sizing:border-box;border:0;padding:0;background:transparent}
+.board-resizers [data-resize=n],.board-resizers [data-resize=s]{height:calc(8px / var(--zoom));left:0;right:0;cursor:ns-resize}.board-resizers [data-resize=n]{top:calc(-4px / var(--zoom))}.board-resizers [data-resize=s]{bottom:calc(-4px / var(--zoom))}
+.board-resizers [data-resize=w],.board-resizers [data-resize=e]{width:calc(8px / var(--zoom));top:0;bottom:0;cursor:ew-resize}.board-resizers [data-resize=w]{left:calc(-4px / var(--zoom))}.board-resizers [data-resize=e]{right:calc(-4px / var(--zoom))}
+.board-resizers [data-resize=nw],.board-resizers [data-resize=ne],.board-resizers [data-resize=sw],.board-resizers [data-resize=se]{width:calc(7px / var(--zoom));height:calc(7px / var(--zoom));background:var(--surface);border:calc(1px / var(--zoom)) solid var(--accent)}
+.board-resizers [data-resize^=n]{top:calc(-3.5px / var(--zoom))}.board-resizers [data-resize^=s]{bottom:calc(-3.5px / var(--zoom))}.board-resizers [data-resize$=w]{left:calc(-3.5px / var(--zoom))}.board-resizers [data-resize$=e]{right:calc(-3.5px / var(--zoom))}
+.board-resizers [data-resize=nw],.board-resizers [data-resize=se]{cursor:nwse-resize}.board-resizers [data-resize=ne],.board-resizers [data-resize=sw]{cursor:nesw-resize}
+
+/* Ephemeral collaborators: never part of artwork/export or hit testing. */
+#presence-layer{position:absolute;inset:0;z-index:34;pointer-events:none;overflow:hidden}#presence-roster{position:absolute;z-index:35;left:12px;top:52px;display:flex;align-items:center;gap:4px;max-width:calc(100% - 24px);pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:3px;box-shadow:0 2px 8px #0000000a}#presence-roster[hidden]{display:none}
+.presence-avatar{display:grid;place-items:center;width:24px;height:24px;flex:none;border-radius:50%;background:color-mix(in srgb,var(--peer) 12%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--peer) 25%,transparent);font:14px system-ui;color:var(--peer);pointer-events:auto}
+.presence-status{font-size:11px;color:var(--text-2);padding:0 8px 0 4px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.presence-more{font-size:10px;color:var(--text-2);padding:0 4px}
+.presence-box{position:absolute;border:1.5px solid var(--peer);border-radius:2px;box-sizing:border-box}.presence-box.ghost{border-style:dashed;background:color-mix(in srgb,var(--peer) 4%,transparent)}
+.presence-box>span{position:absolute;left:-1.5px;bottom:calc(100% + 3px);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:4px 4px 4px 0;padding:3px 6px;background:var(--peer);color:white;font:10px/14px Inter,system-ui,sans-serif}
+.presence-cursor{position:absolute;left:0;top:0;will-change:transform;transition:transform .1s linear}.presence-cursor svg{fill:var(--peer);stroke:var(--surface);stroke-width:1.2;display:block}.presence-cursor span{position:absolute;left:11px;top:14px;white-space:nowrap;border-radius:4px;padding:2px 5px;background:var(--peer);color:white;font:10px/14px Inter,system-ui,sans-serif}
+@media(prefers-reduced-motion:reduce){.presence-cursor{transition:none}}

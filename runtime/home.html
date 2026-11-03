@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en"><head><script>try{const theme=localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='osm-paper:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>All Papers — Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=874de546739b">
+<style>
+/* One grid for both columns: the 40px title row (--bar-h), then the 30px control row (--control-h) after a
+   12px gap (--gap), so the Projects row and the search field share a centre line, as do the mark and title. */
+body{font-size:13px;overflow:hidden}
+.side{position:fixed;inset:0 auto 0 0;width:200px;padding:0 12px var(--gap);display:flex;flex-direction:column;border-right:1px solid var(--line)}
+.mark{display:flex;align-items:center;gap:8px;height:var(--bar-h);flex:0 0 var(--bar-h);font-size:13px;font-weight:600}
+.mark svg{width:20px;height:20px}
+.nav{display:flex;align-items:center;gap:8px;height:var(--control-h);margin-top:var(--gap);padding:0 8px;border-radius:6px;background:var(--pressed);color:var(--text);font-size:13px}
+.store{margin-top:auto;font-size:11px;color:var(--text-2)}
+main{position:fixed;inset:0 0 0 200px;display:flex;flex-direction:column;background:var(--surface)}
+.bar{height:var(--bar-h);flex:0 0 var(--bar-h);display:flex;align-items:center;padding:0 20px}
+h1{margin:0;font-size:17px;line-height:1;font-weight:600}
+.content{flex:1;min-height:0;overflow:auto;padding:var(--gap) 20px 20px}
+.tools{display:flex;align-items:center;gap:6px;margin-bottom:16px;height:var(--control-h)}
+.search{position:relative;flex:1;height:var(--control-h)}
+.search .icon{position:absolute;left:9px;top:calc((var(--control-h) - 16px) / 2);color:var(--text-2);pointer-events:none}
+.search input{width:100%;height:var(--control-h);padding-left:30px;font-size:13px;border-color:var(--edge-strong);border-radius:6px}
+.tools .ibtn{width:var(--control-h);height:var(--control-h);border-radius:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(208px,1fr));gap:12px 12px}
+.card{color:inherit;text-decoration:none;display:block;border-radius:10px}
+.thumb{aspect-ratio:1.6;border-radius:8px;background:var(--field);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;padding:8px;overflow:hidden}
+.card:hover .thumb{border-color:var(--edge-strong)}
+.card:focus-visible{outline:none}.card:focus-visible .thumb{outline:1.5px solid var(--accent);outline-offset:-1.5px}
+.thumb img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.thumb .icon{width:28px;height:28px;color:var(--text-2)}
+.name{margin:8px 0 1px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{margin:0;font-size:11px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.list{display:flex;flex-direction:column;gap:2px}
+.list .card{display:flex;align-items:center;gap:12px;height:44px;padding:0 8px;border-radius:8px}
+.list .card:hover{background:var(--hover)}
+.list .card:focus-visible{outline:1.5px solid var(--accent);outline-offset:-1.5px}
+.list .thumb{display:none}.list .row-icon{display:block}
+.row-icon{display:none;color:var(--text-2)}
+.list .name{margin:0}
+.empty{color:var(--text-2);font-size:12px}
+.bar{justify-content:space-between}
+.primary{height:var(--control-h);padding:0 14px;border:0;border-radius:6px;background:var(--text);color:var(--surface);font-size:13px;font-weight:500}
+.primary:hover{background:color-mix(in srgb,var(--text) 88%,var(--surface))}
+.primary:disabled{opacity:.55}
+.placeholder{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--text-2);font-size:11px;font-variant-numeric:tabular-nums}
+.problem{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:12px;color:var(--danger)}
+.problem button{height:24px;padding:0 8px;border:1px solid currentColor;border-radius:5px;background:transparent;color:inherit;font-size:12px}
+@media(max-width:759px){.side{display:none}main{left:0}}
+.nav{border:0;text-align:left;background:transparent;flex-shrink:0}.nav[aria-current=page],.project-nav[aria-current=page]{background:var(--pressed)}
+.project-heading{margin:24px 8px 6px;font-size:11px;color:var(--text-2)}
+#workspaces{overflow:auto;min-height:0;margin-bottom:16px}
+.project-nav{display:block;text-align:left;width:100%;height:30px;padding:0 8px;border:0;border-radius:6px;background:transparent;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
+.project-nav:hover,.nav:hover{background:var(--hover);color:var(--text)}
+#workspace-filter{display:none;max-width:140px;height:var(--control-h)}
+body{padding:var(--safe-top,0) var(--safe-right,0) var(--safe-bottom,0) var(--safe-left,0)}
+.side{top:var(--safe-top,0);bottom:var(--safe-bottom,0);left:var(--safe-left,0)}
+main{top:var(--safe-top,0);right:var(--safe-right,0);bottom:var(--safe-bottom,0);left:calc(200px + var(--safe-left,0px))}
+@media(max-width:759px){main{left:var(--safe-left,0)}#workspace-filter{display:block}.tools{flex-wrap:wrap;height:auto}.search{min-width:80px}}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
+  <symbol id="i-list" viewBox="0 0 16 16"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></symbol>
+  <symbol id="i-page" viewBox="0 0 16 16"><path d="M3.5 1.8h6l3 3v9.4h-9z"/><path d="M9.5 1.8v3h3"/></symbol>
+</svg>
+<aside class="side" aria-label="Library">
+  <div class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M18.5 13.5V7.5L13.5 2.5H5A1.5 1.5 0 0 0 3.5 4V19A1.5 1.5 0 0 0 5 20.5H12.5M13.5 2.5V6A1.5 1.5 0 0 0 15 7.5H18.5" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><rect x="15" y="15" width="7" height="7" rx="1.5" fill="var(--accent)"/></svg>OpenPaperDesign</div>
+  <button type="button" id="all-papers" data-workspace="all" class="nav" aria-current="page"><svg class="icon"><use href="#i-grid"/></svg>All Papers</button>
+  <p class="project-heading">Collections</p><nav id="workspaces" aria-label="Projects"></nav>
+  <div class="store" id="storage" title="Each Paper is an ordinary folder of files on this device">Saved on this device</div>
+</aside>
+<main>
+  <header class="bar"><h1>All Papers</h1><button class="primary" id="new-paper" type="button" title="Create a blank Paper and open it">New Paper</button></header>
+  <div class="content">
+    <p class="problem" id="problem" role="alert" hidden></p>
+    <div class="tools">
+      <select id="workspace-filter" class="field" aria-label="Collection"><option value="all">All Papers</option></select>
+      <label class="search"><span class="sr-only">Search Papers</span><svg class="icon"><use href="#i-search"/></svg><input id="q" class="field" type="search" placeholder="Search Papers" autocomplete="off"></label>
+      <button class="ibtn" id="as-list" type="button" aria-pressed="false" title="List" aria-label="List"><svg class="icon"><use href="#i-list"/></svg></button>
+      <button class="ibtn" id="as-grid" type="button" aria-pressed="true" title="Grid" aria-label="Grid"><svg class="icon"><use href="#i-grid"/></svg></button>
+    </div>
+    <nav id="projects" class="grid" aria-label="Papers"></nav>
+    <p id="none" class="empty" hidden>No Papers match your search. Press Escape to clear it.</p>
+  </div>
+</main>
+<script type="module" src="home.js?v=b8da040c3f0e"></script>
+</body></html>

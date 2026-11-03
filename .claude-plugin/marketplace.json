@@ -1,0 +1,16 @@
+{
+  "name": "openpaperdesign",
+  "owner": {
+    "name": "Gustav Online"
+  },
+  "plugins": [
+    {
+      "name": "osm-paper",
+      "source": "./",
+      "description": "Lightweight design and diagram Papers, browser Home and MCP tools."
+    }
+  ],
+  "metadata": {
+    "description": "OpenPaperDesign \u2014 lightweight design and diagram Papers."
+  }
+}
