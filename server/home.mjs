@@ -4,8 +4,9 @@ import os from 'node:os';
 import {createHash, randomBytes} from 'node:crypto';
 import {PaperLibrary, PaperError, ID} from './library.mjs';
 import {inspectWorkspace,stopWorkspace} from './workspace.mjs';
+import {VERSION} from './runtime.mjs';
 
-export const HOME_URI='ui://openpaperdesign/home';
+export const HOME_URI=`ui://openpaperdesign/home/${VERSION}`;
 export const HOME_MIME='text/html;profile=mcp-app';
 export function dataHome(){
   if(process.env.PAPER_HOME){if(!path.isAbsolute(process.env.PAPER_HOME))throw new Error('PAPER_HOME must be an absolute folder');return process.env.PAPER_HOME;}

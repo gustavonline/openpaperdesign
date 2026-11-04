@@ -20,7 +20,7 @@ codex plugin marketplace add gustavonline/openpaperdesign
 codex plugin add openpaperdesign@openpaperdesign
 ```
 
-Open **OpenPaperDesign** in the desktop sidebar, or ask your agent to open Home. If you installed it while Codex was running, start a new session or restart the app.
+After installing or updating, quit and reopen Codex to reload its sidebar Home and local tools. Then open **OpenPaperDesign** in the desktop sidebar, or ask your agent to open Home.
 
 **Claude Code**
 

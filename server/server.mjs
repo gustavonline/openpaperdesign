@@ -20,6 +20,7 @@ import {createHome, homeResource, HOME_URI, HOME_MIME, personalWorkspace, rememb
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RUNTIME = path.resolve(HERE,'../runtime');
 const PLUGIN = path.resolve(HERE,'..');
+const PLUGIN_REAL = await fs.realpath(PLUGIN);
 const ICONS=await Promise.all(['icon.svg','icon-dark.svg'].map(async(file,i)=>({src:`data:image/svg+xml;base64,${(await fs.readFile(path.join(PLUGIN,'assets',file))).toString('base64')}`,mimeType:'image/svg+xml',theme:i?'dark':'light'})));
 const SERVER_INFO={name:'openpaperdesign',title:'OpenPaperDesign',version:VERSION,icons:ICONS};
 const inside = (root,target) => target===root || target.startsWith(root+path.sep);
@@ -31,8 +32,8 @@ function paperId(url) {
 }
 async function projectWorkspace(workspace){
   if(typeof workspace!=='string'||!path.isAbsolute(workspace))throw new PaperError(400,'Choose an absolute project folder');
-  const real=await fs.realpath(workspace),plugin=await fs.realpath(PLUGIN);
-  if(inside(plugin,real))throw new PaperError(400,'Choose a workspace outside the plugin installation');return real;
+  const real=await fs.realpath(workspace);
+  if(inside(PLUGIN_REAL,real))throw new PaperError(400,'Choose a workspace outside the plugin installation');return real;
 }
 async function importPaper(library,bytes,type){
   if(type!=='application/json')return importBundle(library,bytes);
@@ -190,6 +191,8 @@ export const TOOLS=[
   {...tool('paper_notion','Connect the official Notion account, list accessible pages, save/update a Paper, or open a cloud snapshot as a new local Paper. Login completes in the browser. Save is explicit; remote changes are never silently overwritten.',{action:{type:'string',enum:['status','connect','disconnect','pages','save','open']},paperId:string,parentId:string,pageId:string,query:string,cursor:string,newCopy:{type:'boolean'}},['action']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true}},
 ];
 export async function serveStdio() {
+  // An installed version can be pruned while this process is still attached to its host.
+  const homeView=await homeResource(RUNTIME);
   const apps=new Map(),agentClient=randomBytes(16).toString('hex');let active=null;
   const getApp=async root=>{
     const previous=apps.get(root);if(previous&&(previous.closed||!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance))apps.delete(root);
@@ -273,8 +276,8 @@ export async function serveStdio() {
       else if(request.method==='tools/list')result={tools:TOOLS};
       else if(request.method==='resources/list')result={resources:[{uri:HOME_URI,name:'OpenPaperDesign Home',mimeType:HOME_MIME}]};
       else if(request.method==='resources/read'){
-        if(request.params?.uri!==HOME_URI)throw new PaperError(404,'Unknown resource');
-        result={contents:[await homeResource(RUNTIME)]};
+        if(![HOME_URI,'ui://openpaperdesign/home'].includes(request.params?.uri))throw new PaperError(404,'Unknown resource');
+        result={contents:[{...homeView,uri:request.params.uri}]};
       }
       else if(request.method==='tools/call'){
         try{const value=await call(request.params?.name,request.params?.arguments);result=request.params?.name==='paper_home'?{structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:{content:[{type:'text',text:JSON.stringify(value)}]};}
