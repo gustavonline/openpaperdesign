@@ -1,7 +1,7 @@
 import {setupPresence} from './presence.js?v=3a51591568af';
-import { setupSharing } from './sharing.js?v=052a5c2d717a';
+import { setupSharing } from './sharing.js?v=40f15ce77f44';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
-import { setupLibrary } from './diagram-ui.js?v=257300bbee91';
+import { setupLibrary } from './diagram-ui.js?v=c314dc581c2d';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers} from './editing-model.js?v=1d0049e52e98';
 import {setupNotion,notionIcon} from './notion-ui.js?v=13dc21a7c39a';
 const $ = selector => document.querySelector(selector);
@@ -17,8 +17,10 @@ const paperBase = `Paper/${encodeURIComponent(paperId ?? '')}/`;
 const scoped = key => `${key}:paper:${paperId}`;
 const paperQuery = `?paper=${encodeURIComponent(paperId ?? '')}`;
 const sceneUrl = `/api/paper${paperQuery}`, feedbackUrl = `/api/feedback${paperQuery}`;
-const accessResponse = await fetch(`/api/access${paperQuery}`, { cache: 'no-store' });
-const access = accessResponse.ok ? await accessResponse.json() : { role: 'view', shared: true, error: 'This invitation is no longer available. Ask the owner for a new link.' };
+const access = await (async()=>{
+  try{const response=await fetch(`/api/access${paperQuery}`,{cache:'no-store',signal:AbortSignal.timeout(8000)});return response.ok?await response.json():{role:'view',shared:true,error:'This invitation is no longer available. Ask the owner for a new link.'};}
+  catch{return {role:'view',shared:false,error:'The Paper server did not respond. Reload this page or reopen Home.'};}
+})();
 let canEdit = access.role === 'owner' || access.role === 'edit', accessRevoked = false;
 body.classList.toggle('shared-paper', !!access.shared); body.classList.toggle('read-only', !canEdit);
 if (access.shared) { const badge = document.createElement('span'); badge.className = 'access-badge'; badge.textContent = canEdit ? 'Can edit' : 'View only'; $('#left-toggle').before(badge); }
@@ -1560,9 +1562,9 @@ async function start() {
   try { const v = JSON.parse(localStorage.getItem(CANVAS_KEY)); if (v) setCanvasView({ pattern: ['none', 'dots', 'grid'].includes(v.pattern) ? v.pattern : 'none', color: /^#[0-9a-f]{6}$/i.test(v.color || '') ? v.color : null,snap:v.snap===true,objects:v.objects!==false }); } catch { /* Plain canvas. */ }
   setLeftTab(panels?.tab, false);
   if (panels && typeof panels.left === 'boolean') setPanels(panels.left && !(narrow() && panels.right), panels.right, false); else setPanels(false, !narrow(), false);
-  if (paperId === null || [...query.keys()].some(key => key !== 'paper')) throw new Error(paperIds.length ? 'This Paper link isn’t valid.' : 'No Paper was chosen.');
+  if (paperId === null || [...query.keys()].some(key => key !== 'paper' && key !== 'notion') || query.getAll('notion').length>1 || (query.has('notion')&&!['save','open'].includes(query.get('notion')))) throw new Error(paperIds.length ? 'This Paper link isn’t valid.' : 'No Paper was chosen.');
   $('#design-open').href = assetUrl('DESIGN.md');
-  const response = await fetch(sceneUrl, { cache: 'no-store' });
+  const response = await fetch(sceneUrl, { cache: 'no-store',signal:AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(response.status === 404 ? 'This Paper doesn’t exist.' : `This Paper couldn’t be opened (${response.status}).`);
   const loaded = await response.json(); scene = loaded.paper; revision = loaded.revision;
   if (!isPaperFormat(scene?.format) || scene.version !== 1 || !Array.isArray(scene.pages) || !scene.pages.length) throw new Error('Unknown canvas format.');
@@ -1605,8 +1607,8 @@ async function start() {
 start().then(() => {
   const url=new URL(location.href);
   const action=url.searchParams.get('notion');
-  if(['save','open'].includes(action)){url.searchParams.delete('notion');history.replaceState(null,'',url.pathname+url.search+url.hash);return notionUI[action]();}
-  if(url.hash==='#notion'){url.hash='';history.replaceState(null,'',url.pathname+url.search);return notionUI.open();}
+  if(['save','open'].includes(action)){url.searchParams.delete('notion');window.history.replaceState(null,'',url.pathname+url.search+url.hash);return notionUI[action]();}
+  if(url.hash==='#notion'){url.hash='';window.history.replaceState(null,'',url.pathname+url.search);return notionUI.open();}
 }).catch(error => {
   const p = document.createElement('p'), home = document.createElement('a'); p.className = 'load-error'; home.href = './'; home.textContent = 'All Papers';
   p.append(`${error.message} `, home); stage.replaceChildren(p); leaving = true; showStatus('unopened', ['This Paper couldn’t be opened.'], true);

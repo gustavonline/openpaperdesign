@@ -1,9 +1,16 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import { PaperError } from './library.mjs';
 const inside = (root,target) => target===root || target.startsWith(root+path.sep);
 const mime = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.md':'text/markdown; charset=utf-8','.txt':'text/plain; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.avif':'image/avif','.gif':'image/gif','.ttf':'font/ttf','.woff2':'font/woff2'};
 export const json = (res,status,data) => {const raw=JSON.stringify(data);res.writeHead(status,{'Content-Type':mime['.json'],'Content-Length':Buffer.byteLength(raw),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(raw);};
+export function memoryFile(relative,bytes,modified){
+  const tag=`"${createHash('sha256').update(bytes).digest('hex')}"`,extension=path.extname(relative).toLowerCase();
+  const headers={'Content-Type':mime[extension]||'application/octet-stream','Content-Length':bytes.length,'Cache-Control':extension==='.html'?'no-cache':'private, max-age=0, must-revalidate','ETag':tag,'Last-Modified':modified.toUTCString(),'X-Content-Type-Options':'nosniff'};
+  if(extension==='.svg')headers['Content-Security-Policy']="sandbox; default-src 'none'; style-src 'unsafe-inline'";
+  return (req,res)=>{if(req.headers['if-none-match']===tag){res.writeHead(304,{ETag:tag});res.end();return;}res.writeHead(200,headers);res.end(req.method==='HEAD'?undefined:bytes);};
+}
 export async function readBody(req,max) {
   const declared=req.headers['content-length'];
   if(declared && (!/^\d+$/.test(declared)||Number(declared)>max))throw new PaperError(413,'Request is too large');

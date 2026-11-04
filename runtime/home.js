@@ -1,12 +1,13 @@
 const embedded=document.documentElement.dataset.mcp==='true';
+const VERSION='0.7.0-preview.6';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper');
-let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='',hostInfo={},openLinks=false;
+let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='',hostInfo={},openLinks=false,serverVersion=null;
 
 // The small MCP Apps transport is only used by the sidebar resource. The browser uses HTTP.
-const pending=new Map();let sequence=0,ready=Promise.resolve();
+const pending=new Map();let sequence=0,ready;
 function rpc(method,params={}){
   return new Promise((resolve,reject)=>{
-    const link=method==='ui/open-link',id=`paper-home-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(new Error(link?'Codex has not finished opening the link. Copy the address below or try again.':'The host did not respond. Reopen Home to retry.'));},link?60000:15000);
+    const link=method==='ui/open-link',id=`paper-home-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(new Error(link?'The browser did not respond. Copy the address below or try again.':'The host did not respond. Try again.'));},link?5000:15000);
     pending.set(id,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id,method,params},'*');
   });
 }
@@ -23,16 +24,20 @@ if(embedded){
     else if(message.method==='ping'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
     else if(message.method==='ui/resource-teardown'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
   });
-  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.7.0-preview.5'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
+}
+function initialize(){
+  if(!embedded)return Promise.resolve();
+  if(ready)return ready;
+  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:VERSION},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
     hostInfo=result.hostInfo||{};openLinks=!!result.hostCapabilities?.openLinks;
     hostContext(result.hostContext);
     if(!result.hostCapabilities?.serverTools)throw new Error('This host cannot open Paper Home. Ask your agent to open it in the browser.');
     parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');
-  });
+  }).catch(error=>{ready=null;throw error;});return ready;
 }
 async function request(args={}){
-  if(embedded){await ready;const result=await rpc('tools/call',{name:'paper_home',arguments:args});if(result.isError)throw new Error(result.content?.find(c=>c.type==='text')?.text||'Paper could not complete the request');return result.structuredContent||JSON.parse(result.content.find(c=>c.type==='text').text);}
-  const response=await fetch('/api/home',{cache:'no-store',...(Object.keys(args).length?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)}:{})});
+  if(embedded){await initialize();const result=await rpc('tools/call',{name:'paper_home',arguments:args});if(result.isError)throw new Error(result.content?.find(c=>c.type==='text')?.text||'Paper could not complete the request');return result.structuredContent||JSON.parse(result.content.find(c=>c.type==='text').text);}
+  const response=await fetch('/api/home',{cache:'no-store',signal:AbortSignal.timeout(15000),...(Object.keys(args).length?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)}:{})});
   const result=await response.json();if(!response.ok)throw new Error(result.error||`HTTP ${response.status}`);return result;
 }
 function localURL(value){
@@ -42,6 +47,7 @@ function localURL(value){
 }
 function runningURL(workspaceId,paperId){
   const server=projects.find(p=>p.id===workspaceId)?.server;if(server?.state!=='running')return null;
+  if(serverVersion&&server.version!==serverVersion)return null;
   try{const url=localURL(server.url);url.pathname=paperId?'/':'/home.html';url.search=paperId?new URLSearchParams({paper:paperId}).toString():'';url.hash='';return url;}catch{return null;}
 }
 async function targetURL(workspaceId,paperId){return runningURL(workspaceId,paperId)||localURL((await request({action:'open',workspaceId,...(paperId?{paperId}:{})})).url);}
@@ -49,12 +55,13 @@ async function navigate(value){
   const url=localURL(value).href;
   if(!embedded){location.assign(url);return;}
   try{
-    await ready;
+    await initialize();
     if(!openLinks)throw new Error('This host cannot open browser links. Copy the address and open it in your browser.');
     // Codex's external-link API rejects plain HTTP; its browser route accepts local previews.
-    const codex=hostInfo.client_type==='codex_desktop';
+    const codex=location.protocol==='codex-sandbox:'||hostInfo.client_type==='codex_desktop'||/^codex(?:\s|$)/i.test(hostInfo.name||'');
     const target=codex?'codex://browser?'+new URLSearchParams({url}):url;
     const result=await rpc('ui/open-link',{url:target});if(result?.isError)throw new Error('The host could not open this link. Copy the address and open it in the browser.');
+    activity.replaceChildren('Sent to your browser. ',Object.assign(document.createElement('input'),{value:url,readOnly:true,'ariaLabel':'Paper address'}));activity.hidden=false;
   }
   catch(error){error.openURL=url;throw error;}
 }
@@ -65,7 +72,7 @@ function fail(error,retry=()=>load(true),kind='action'){
 }
 async function opening(action,text='Opening Paper…'){
   if(busy)return;busy=true;problem.hidden=true;activity.textContent=text;activity.hidden=false;
-  try{await action();}catch(error){fail(error,()=>opening(action,text));}finally{busy=false;activity.hidden=true;if(!cards.length)void load();}
+  try{await action();}catch(error){activity.hidden=true;fail(error,()=>opening(action,text));}finally{busy=false;if(!embedded)activity.hidden=true;if(!cards.length)void load();}
 }
 const plural=(n,word)=>`${n} ${word}${n===1?'':'s'}`;
 const ago=ms=>{const seconds=Math.max(0,(Date.now()-ms)/1000);return seconds<60?'just now':seconds<3600?plural(Math.floor(seconds/60),'minute')+' ago':seconds<86400?plural(Math.floor(seconds/3600),'hour')+' ago':plural(Math.floor(seconds/86400),'day')+' ago';};
@@ -99,6 +106,7 @@ function filter(){
 }
 function choose(id){selected=id;if(!embedded){const url=new URL(location.href);if(id==='personal')url.searchParams.delete('collection');else url.searchParams.set('collection',id);history.replaceState(null,'',url.pathname+url.search+url.hash);}filter();}
 function render(data){
+  serverVersion=data.version||null;
   projects=data.projects||[];if(selected!=='all'&&!projects.some(p=>p.id===selected))selected='personal';
   const nextCards=JSON.stringify(data.papers||[]),nextOptions=JSON.stringify(projects.map(p=>[p.id,p.name]));
   if(nextCards!==cardsKey){cardsKey=nextCards;cards=(data.papers||[]).map(p=>({p,el:card(p)}));list.replaceChildren(...cards.map(c=>c.el));}
@@ -164,9 +172,10 @@ document.getElementById('cancel-import').addEventListener('click',()=>document.g
 const serversDialog=document.getElementById('servers-dialog'),serverMessage=document.getElementById('server-message');
 function renderServers(){
   const area=document.getElementById('server-list');area.replaceChildren();
+  const version=document.createElement('p');version.className='dialog-help';version.textContent=`Home ${VERSION}${serverVersion?` · MCP/server ${serverVersion}`:''}${embedded?` · ${hostInfo.name||'Host'}${hostInfo.version?' '+hostInfo.version:''} · ${location.protocol}`:''}`;area.append(version);
   for(const project of projects){
     const server=project.server,row=document.createElement('div'),info=document.createElement('div'),name=document.createElement('div'),status=document.createElement('div');row.className='server-row';name.className='server-name';status.className='server-status';name.textContent=project.name;
-    status.textContent=server?.state==='running'?`Running${server.sharingCount?` · ${plural(server.sharingCount,'shared Paper')}`:''}`:server?.state==='unavailable'?'Unavailable':project.unavailable?'Folder unavailable':'Stopped';
+    status.textContent=server?.state==='running'?`Running · ${server.version||'unknown version'}${server.sharingCount?` · ${plural(server.sharingCount,'shared Paper')}`:''}`:server?.state==='unavailable'?'Unavailable':project.unavailable?'Folder unavailable':'Stopped';
     if(server?.message)status.title=server.message;info.append(name,status);row.append(info);
     if(server?.state==='running'){
       const stop=document.createElement('button');stop.className='server-stop';stop.type='button';stop.textContent='Stop server';stop.disabled=!server.canStop;stop.title=server.canStop?`Stop ${project.name}`:'Stop this older server from its terminal';

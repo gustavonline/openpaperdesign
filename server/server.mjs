@@ -2,7 +2,7 @@
 import { createPresence } from './presence.mjs';
 import { discoverWorkspace, registerWorkspace, openWorkspaceServer, remotePresence } from './workspace.mjs';
 import { randomBytes } from 'node:crypto';
-import { checkRuntime, EDITOR_FILES, VERSION } from './runtime.mjs';
+import { checkRuntime, loadRuntime, EDITOR_FILES, VERSION } from './runtime.mjs';
 import { isArtboard } from '../runtime/diagram-model.js';
 import http from 'node:http';
 import { promises as fs, watch } from 'node:fs';
@@ -44,7 +44,7 @@ async function importPaper(library,bytes,type){
   try{const current=await library.read(made.id);await library.save(made.id,Buffer.from(JSON.stringify(paper)),current.revision);return made;}catch(error){await fs.rm(made.path,{recursive:true,force:true});throw error;}
 }
 export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sharePort=0}={}) {
-  await checkRuntime(runtime);
+  const editor=await loadRuntime(runtime);
   const real=await projectWorkspace(workspace);
   const library=await PaperLibrary.open(real),streams=new Set();let heartbeat,watcher,registration;
   await rememberWorkspace(real);
@@ -55,7 +55,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
     if(!homeApps.has(root))homeApps.set(root,await connectWorkspace(root));return homeApps.get(root);
   });
   const presence=createPresence({publish:data=>emit('presence',data)});
-  const sharing=createSharing({library,runtime,presence,publicUrl:shareUrl,port:sharePort});
+  const sharing=createSharing({library,editor,presence,publicUrl:shareUrl,port:sharePort});
   const notion=createNotion({library,configDir:dataHome(),origin:()=>`http://127.0.0.1:${server.address().port}`});
   const emit=(event,data)=>{const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
   library.onChange=emit;
@@ -123,7 +123,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         const id=paperId(url);
         if(req.method==='GET')return json(res,200,await sharing.status(id));
         if(req.method==='DELETE')return json(res,200,await sharing.stop(id));
-        if(req.method==='POST'){const args=JSON.parse(await readBody(req,1024));return json(res,201,await sharing.create(id,args?.role));}
+        if(req.method==='POST'){const args=JSON.parse(await readBody(req,1024));if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['role','network'].includes(k)))throw new PaperError(400,'Invalid sharing options');return json(res,201,await sharing.create(id,args.role,args.network??false));}
       }
       if(pathname==='/api/assets' && req.method==='POST')return json(res,201,await library.addAsset(paperId(url),await readBody(req,5*1024*1024)));
       if(pathname==='/api/papers'){
@@ -145,8 +145,8 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       let relative=pathname.slice(1);
       if(!relative)relative=url.searchParams.has('paper')?'index.html':'home.html';
       if(!['index.html','home.html',...EDITOR_FILES].includes(relative)&&!relative.startsWith('assets/'))throw new PaperError(404,'Not found');
-      await staticFile(req,res,runtime,relative);
-    }catch(error){if(res.headersSent){res.destroy();return;}const status=error.status||(error.code==='ENOENT'?404:error instanceof SyntaxError||error instanceof URIError?400:500);if(status===500)process.stderr.write(`Paper request failed: ${error.message}\n`);json(res,status,{error:status===500?'The operation failed; your saved files were kept':error.message});}
+      editor.serve(req,res,relative);
+    }catch(error){if(res.headersSent){res.destroy();return;}const status=error.status||(error.code==='ENOENT'?404:error instanceof SyntaxError||error instanceof URIError?400:500);if(status===500)process.stderr.write(`Paper request failed: ${error.message}\n`);json(res,status,{error:status===500?'The operation failed; your saved files were kept':error.code==='ENOENT'?'Not found':error.message});}
   });
   server.headersTimeout=15000;server.requestTimeout=30000;server.keepAliveTimeout=5000;
   try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});registration=await registerWorkspace(real,`http://127.0.0.1:${server.address().port}`);}catch(error){presence.close();if(server.listening)await new Promise(resolve=>server.close(resolve));throw error;}
@@ -176,7 +176,7 @@ async function connectWorkspace(root,agentClient){
 
 const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:['paper_list','paper_read','paper_read_feedback'].includes(name),destructiveHint:false,openWorldHint:false}});
 export const TOOLS=[
-  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop']},workspaceId:string,paperId:string,name:string,instance:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/ui':{entrypoints:[{type:'global'}]}}},
+  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop']},workspaceId:string,paperId:string,name:string,instance:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'}]}}},
   tool('paper_open','Open a Paper workspace. Omit workspace for the personal library; select an absolute project folder for project-local Papers.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
   tool('paper_list','List saved Papers in the opened workspace.',{}),
   tool('paper_create','Create a blank saved Paper; return its id, files and editor URL.',{name:string,width:{type:'integer',minimum:16,maximum:10000},height:{type:'integer',minimum:16,maximum:10000}}),
@@ -192,7 +192,7 @@ export const TOOLS=[
 ];
 export async function serveStdio() {
   // An installed version can be pruned while this process is still attached to its host.
-  const homeView=await homeResource(RUNTIME);
+  const editor=await loadRuntime(RUNTIME),homeView=await homeResource(editor);
   const apps=new Map(),agentClient=randomBytes(16).toString('hex');let active=null;
   const getApp=async root=>{
     const previous=apps.get(root);if(previous&&(previous.closed||!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance))apps.delete(root);
@@ -276,11 +276,12 @@ export async function serveStdio() {
       else if(request.method==='tools/list')result={tools:TOOLS};
       else if(request.method==='resources/list')result={resources:[{uri:HOME_URI,name:'OpenPaperDesign Home',mimeType:HOME_MIME}]};
       else if(request.method==='resources/read'){
-        if(![HOME_URI,'ui://openpaperdesign/home'].includes(request.params?.uri))throw new PaperError(404,'Unknown resource');
+        // Existing desktop entries can retain the older template URI across an update.
+        if(![HOME_URI,'ui://openpaperdesign/home','ui://openpaperdesign/home/0.7.0-preview.4','ui://openpaperdesign/home/0.7.0-preview.5'].includes(request.params?.uri))throw new PaperError(404,'Unknown resource');
         result={contents:[{...homeView,uri:request.params.uri}]};
       }
       else if(request.method==='tools/call'){
-        try{const value=await call(request.params?.name,request.params?.arguments);result=request.params?.name==='paper_home'?{structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:{content:[{type:'text',text:JSON.stringify(value)}]};}
+        try{const value=await call(request.params?.name,request.params?.arguments);result=request.params?.name==='paper_home'?{_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI},structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:{content:[{type:'text',text:JSON.stringify(value)}]};}
         catch(error){result={content:[{type:'text',text:error.message}],isError:true};}
       }else{respond({jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Method not found'}});continue;}
       respond({jsonrpc:'2.0',id:request.id,result:complete(request,result,SERVER_INFO)});

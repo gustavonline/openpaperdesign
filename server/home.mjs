@@ -27,9 +27,11 @@ async function workspaces(){
   const roots=[{id:'personal',name:'Personal',root:personal}];
   const files=await fs.readdir(folder,{withFileTypes:true}).catch(error=>{if(error.code==='ENOENT')return [];throw error;});
   for(const file of files.filter(f=>f.isFile()&&/^[a-f0-9]{24}\.json$/.test(f.name)).slice(0,100)){
-    const value=JSON.parse(await fs.readFile(path.join(folder,file.name),'utf8'));
-    if(typeof value.root!=='string'||!path.isAbsolute(value.root)||identity(value.root)+'.json'!==file.name)throw new PaperError(422,'Invalid saved project pointer');
-    roots.push({id:identity(value.root),name:path.basename(value.root),root:value.root});
+    try{
+      const value=JSON.parse(await fs.readFile(path.join(folder,file.name),'utf8'));
+      if(typeof value.root!=='string'||!path.isAbsolute(value.root)||identity(value.root)+'.json'!==file.name)throw new Error('Invalid saved project pointer');
+      roots.push({id:identity(value.root),name:path.basename(value.root),root:value.root});
+    }catch{roots.push({id:file.name.slice(0,-5),name:'Unavailable project',unavailable:true});}
   }
   return roots;
 }
@@ -40,6 +42,7 @@ export function createHome(open){
     if(action==='list'){
       const projects=[],papers=[];let previewBudget=1024*1024;
       for(const entry of roots){
+        if(entry.unavailable){projects.push(entry);continue;}
         try{
           if(entry.id!=='personal')await fs.access(path.join(entry.root,'Paper'));
           const library=await PaperLibrary.open(entry.root),found=await library.list();
@@ -58,9 +61,10 @@ export function createHome(open){
         }catch(error){if(!['ENOENT','ENOTDIR','EACCES'].includes(error.code))throw error;projects.push({id:entry.id,name:entry.name,count:0,unavailable:true});}
       }
       papers.sort((a,b)=>(b.modified||0)-(a.modified||0));
-      return {projects,papers,storageRoot:path.join(roots[0].root,'Paper')};
+      return {version:VERSION,projects,papers,storageRoot:path.join(roots[0].root,'Paper')};
     }
     const entry=roots.find(p=>p.id===(args.workspaceId||'personal'));if(!entry)throw new PaperError(404,'Unknown project');
+    if(entry.unavailable)throw new PaperError(409,'This saved project location is unavailable. Ask your agent to reopen its project folder.');
     if(action==='stop')return stopWorkspace(entry.root,args.instance);
     if(!['open','create'].includes(action))throw new PaperError(400,'Unknown Home action');
     const app=await open(entry.root);
@@ -69,11 +73,11 @@ export function createHome(open){
     return {url:`${app.url}/${args.paperId?`?paper=${encodeURIComponent(args.paperId)}`:'home.html'}`,workspace:entry.root,storageRoot:app.library.root};
   };
 }
-export async function homeResource(runtime){
-  let html=await fs.readFile(path.join(runtime,'home.html'),'utf8'),css=await fs.readFile(path.join(runtime,'chrome.css'),'utf8');
+export async function homeResource(editor){
+  let html=editor.text('home.html'),css=editor.text('chrome.css');
   // A single inline resource shares the browser Home, without localhost fetches or nested frames.
   css=css.replace(/@font-face\{[^}]*\}/g,'');
-  const script=await fs.readFile(path.join(runtime,'home.js'),'utf8');
+  const script=editor.text('home.js');
   html=html.replace('<html lang="en">','<html lang="en" data-mcp="true">').replace(/<link rel="stylesheet" href="chrome\.css[^\"]*">/,`<style>${css}</style>`).replace(/<link rel="stylesheet" href="notion\.css[^\"]*">/,'').replace(/<script type="module" src="home\.js[^\"]*"><\/script>/,()=>`<script type="module">${script}</script>`);
   return {uri:HOME_URI,mimeType:HOME_MIME,text:html,_meta:{ui:{csp:{connectDomains:[],resourceDomains:[]},prefersBorder:false},'openai/ui':{preferredDisplayMode:'fullscreen',availableDisplayModes:['fullscreen']}}};
 }

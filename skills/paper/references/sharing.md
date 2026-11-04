@@ -4,7 +4,7 @@ Sharing is optional. Owner files, the browser and agents use the same revision-c
 
 ## Owner flow
 
-Share → Share this Paper → Can view / Can edit → Create link. Copy link for a person, or Connect your agent for the endpoint and authorization key. Changing permission replaces the link and invalidates its previous browser sessions. Stop sharing revokes the key and closes its open connections. Clean views leave; dirty views freeze with a downloadable draft.
+Share → Share this Paper → Can view / Can edit → Same network / This device → Create link. Same network opens on computers and phones connected to your Wi-Fi or local network. This device is for another browser on your computer. Copy link for a person, or Connect your agent for the endpoint and authorization key. Changing permission or sharing location replaces the link and invalidates its previous browser sessions. Copying or retrying an identical invitation keeps it valid. Stop sharing revokes the key and closes its open connections. Clean views leave; dirty views freeze with a downloadable draft.
 
 The invitation includes this Paper's artwork, assets, DESIGN.md and saved feedback. CONTEXT.md and file history stay private. Edit guests can change artwork/feedback; only the owner changes the guide and working context through the local note tools. Remote MCP exposes `paper_read` and `paper_read_feedback`; edit invitations also get `paper_save`, `paper_save_feedback` `paper_add_asset` (base64 images) and `paper_activity`. Feedback and artwork have independent revisions. No owner filesystem sourceFile is accepted by remote tools. It exposes no workspace browsing, filesystem paths, sourceFile, new-Paper creation or invitation controls.
 
@@ -12,7 +12,11 @@ Keys are 256-bit random capabilities, not short PINs. Anyone with the link has i
 
 ## Local and online addresses
 
-The first invitation is local to this device. `paper_open` starts this local mode. For online sharing, use the direct CLI below; its lifecycle is independent of a host’s MCP stdin. For another machine to reach it, select an authorized HTTPS host or tunnel. The separate sharing listener exposes only invited data; the owner listener is never a public endpoint.
+`paper_open` starts the owner editor on loopback. Creating a Same network invitation starts a separate listener on the local network and copies a private-IP link, not localhost. The listener exposes only invited Paper data. Home, other Papers, Notion, private notes and owner controls stay unavailable there. Network links use HTTP on the local network; online sharing uses HTTPS. A guest network or firewall may prevent devices from reaching each other. No network settings are changed automatically.
+
+Invitations stop with their server process. If the host started that process through MCP, quitting or reloading the host can stop it. For a session independent of the agent host, start the bundled Node CLI directly. Home → Servers lists the running owner server and its active invitations.
+
+For internet sharing, select an authorized HTTPS host or tunnel and use the direct CLI below. Only the separate sharing listener is forwarded; the owner listener stays local. Use a tunnel that supports Server-Sent Events for live updates. [Cloudflare Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations) supply a temporary HTTPS address without an account, but do not support SSE; they are not a qualified live-sharing route. Tunnel setup is explicit and is not started by creating a network invitation.
 
 For a provider that forwards a public HTTPS origin to a local port, an owned direct server can be started with:
 

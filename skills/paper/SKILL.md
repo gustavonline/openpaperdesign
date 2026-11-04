@@ -2,7 +2,7 @@
 name: paper
 description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the project and cloud snapshots in Notion. Use for Home, Paper files, Notion save/open, workspace setup and server controls.
 metadata:
-  version: "0.7.0-preview.5"
+  version: "0.7.0-preview.6"
 ---
 
 # Paper
@@ -15,7 +15,7 @@ The MCP server is `openpaperdesign_workspace`. When a host defers tools, use its
 
 Home defaults to Personal. Its compact library selector separates personal Papers from project libraries; Location reveals the actual folder. Creating or importing uses the selected library. Projectless Papers belong in native personal storage, never a temporary output folder.
 
-After an update, the desktop host may retain the previous plugin process and Home view. An error naming a removed plugin-cache folder means that process is stale: quit and reopen the host to reload it. Use the running server's browser Home in the meantime. Do not restore deleted cache versions, and verify sidebar navigation separately from browser navigation.
+After an update, the desktop host may retain the previous Home view. Servers shows Home, MCP and running-server versions; verify those before diagnosing navigation. The current server keeps its shipped editor in memory so pruning its installation does not break open Papers. Reload the host to pick up new plugin code. Do not restore deleted cache versions, and verify sidebar navigation separately from browser navigation.
 
 - For an existing Paper, especially when its project is unknown or it is absent from the current project, call `paper_home` with `{}` first. It lists the personal library and explicitly remembered projects with Paper IDs, names and workspace IDs. Match the requested Paper before creating anything. Resolve ambiguous matches with the person.
 - Call `paper_home` with `action:"open"`, the returned `workspaceId` and `paperId`. It returns the browser URL and absolute `workspace`. Then call `paper_open` with that workspace to select it for document tools, followed by `paper_read` with the Paper ID. Home navigation does not switch the agent's active workspace.

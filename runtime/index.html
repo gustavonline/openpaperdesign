@@ -175,6 +175,7 @@
   <header><h2 id="sharing-title">Share Paper</h2><button type="button" class="ibtn" data-close-sharing aria-label="Close sharing"><svg class="icon"><use href="#i-close"/></svg></button></header>
   <p id="share-state" role="status">Only you have access</p><p id="share-detail" class="note"></p>
   <label class="share-permission">Access<select id="share-role" class="field"><option value="view">Can view</option><option value="edit">Can edit</option></select></label>
+  <label class="share-permission">Where<select id="share-location" class="field"><option value="network">Same network</option><option value="device">This device</option><option value="online" hidden>Internet</option></select></label>
   <div class="share-actions"><button type="button" id="share-primary">Create link</button><button type="button" id="share-agent" hidden>Connect your agent</button></div>
   <textarea class="field" aria-label="Connection text" readonly hidden></textarea>
   <button type="button" id="share-stop" class="share-stop" hidden>Stop sharing</button>
@@ -202,5 +203,5 @@
 <div id="toast" data-canvas-chrome role="status" hidden></div>
 <dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is copied into this Paper. If the site blocks access, download the image and drop it here.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="mesurer-root"></div>
-<script type="module" src="app.js?v=ff8d5ca0fbff"></script>
+<script type="module" src="app.js?v=9cd13fb5e9c5"></script>
 </body></html>

@@ -36,7 +36,7 @@ The Home command opens the dashboard in your browser.
 
 Ask your agent to create a Paper, revise a design or draw a diagram. The plugin includes [Paper](skills/paper/SKILL.md), [Design](skills/paper-design/SKILL.md) and [Diagrams](skills/paper-diagram/SKILL.md) skills.
 
-Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Share includes PNG, HTML and Paper JSON exports, plus invitations for people and agents. An invitation works locally; to reach another device, connect the sharing listener to HTTPS hosting or a tunnel. See [sharing](skills/paper/references/sharing.md).
+Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Share includes PNG, HTML and Paper JSON exports, plus invitations for people and agents. Choose **Share this Paper → Same network** to invite another computer or phone on your Wi-Fi, or **This device** for another browser on your computer. Keep the Paper server running. Internet sharing uses an HTTPS host or tunnel. See [sharing](skills/paper/references/sharing.md).
 
 Shift-click selects several layers. Copy, paste, duplicate, group and arrange them with familiar shortcuts or the right-click menu. Text and appearance controls live in Properties. Right-click empty canvas to choose snapping, grid and background. **Share → Copy link** links to the selected Page or layer.
 
