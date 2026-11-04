@@ -11,7 +11,7 @@ const uuid=value=>typeof value==='string'&&/^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9
 function pageId(value) {
   if(uuid(value))return value;
   let u;try{u=new URL(value);}catch{fail(400,'Choose a Notion page ID or page URL');}
-  if(u.protocol!=='https:'||!['notion.so','www.notion.so','notion.com','www.notion.com'].includes(u.hostname)||u.username||u.password||u.port)fail(400,'Choose an official Notion page URL');
+  if(u.protocol!=='https:'||!['notion.so','www.notion.so','notion.com','www.notion.com','app.notion.com'].includes(u.hostname)||u.username||u.password||u.port)fail(400,'Choose an official Notion page URL');
   const id=u.pathname.match(/([a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\/?$/i)?.[1];
   if(!id)fail(400,'The Notion URL has no page identity');return id;
 }
@@ -45,14 +45,14 @@ function content(result) {
 }
 function managed(result) {
   const text=content(result),starts=[...text.matchAll(/OpenPaperDesign managed start: ([a-f0-9]{32})/g)];
-  if(starts.length!==1)fail(422,'This page has no unique OpenPaperDesign archive. Choose a page saved by OpenPaperDesign');
+  if(!starts.length||new Set(starts.map(m=>m[1])).size!==1)fail(422,'This page has no unique OpenPaperDesign archive. Choose a page saved by OpenPaperDesign');
   const start=starts[0],end=`OpenPaperDesign managed end: ${start[1]}`;
-  if(text.split(end).length!==2)fail(422,'The OpenPaperDesign managed section is incomplete or duplicated');
+  if(text.indexOf(end,start.index)<0)fail(422,'The OpenPaperDesign managed section is incomplete');
   const last=text.indexOf(end,start.index);let section=text.slice(start.index,last+end.length);
   const containers=[...text.slice(0,start.index).matchAll(/<toggle\b[^>]*>\s*Paper preview and files/g)],outer=containers.at(-1)?.index;
   if(outer!==undefined){const tags=/<\/?toggle\b[^>]*>/g;tags.lastIndex=outer;let depth=0,tag;while((tag=tags.exec(text))){depth+=tag[0].startsWith('</')?-1:1;if(depth===0){section=text.slice(outer,tags.lastIndex);break;}}if(depth!==0)fail(422,'The Paper container is incomplete');}
   const revisions=[...section.matchAll(/OpenPaperDesign archive SHA256: ([a-f0-9]{64})/g)];
-  if(last<start.index||revisions.length!==1)fail(422,'This page has no valid OpenPaperDesign archive revision');
+  if(last<start.index||revisions.length!==1||section.split(end).length!==2||[...section.matchAll(/OpenPaperDesign managed start: /g)].length!==1)fail(422,'This page has no valid OpenPaperDesign archive revision');
   const remoteRevision=revisions[0][1],filename=`OpenPaperDesign.${remoteRevision}.paper.zip`;
   const files=[...section.matchAll(/<file\b([^>]*?)(?:\/>|>([\s\S]*?)<\/file>)/g)].filter(m=>m[0].includes(filename));
   if(files.length!==1)fail(422,'The OpenPaperDesign ZIP attachment is missing or ambiguous');
@@ -61,7 +61,7 @@ function managed(result) {
   return {section,managedId:start[1],remoteRevision,filename,reference,managedHash:hex(section),savedAt:section.match(/OpenPaperDesign saved at: ([0-9TZ:.+-]+)/)?.[1]};
 }
 function markup(managedId,remoteRevision,savedAt,files) {
-  return ['<toggle>Paper preview and files',
+  return [`<toggle>Paper preview and files · <date start="${savedAt}" />`,
     ...files.map(f=>f.tag==='embed'?`<embed source="${f.source}" />`:`<${f.tag} source="${f.source}">${f.filename}</${f.tag}>`),
     '<toggle>Details',`OpenPaperDesign managed start: ${managedId}`,
     'OpenPaperDesign — manual snapshot. This section is managed by OpenPaperDesign.',
@@ -157,12 +157,19 @@ export function createNotion({library,configDir,origin}) {
       }
       return result;
     },
-    async connect() {
+    async connect({returnTo}={}) {
       await ready();const now=Date.now();for(const [state,p] of pending)if(p.expires<=now)pending.delete(state);
+      let destination;
+      if(returnTo!==undefined){
+        if(typeof returnTo!=='string'||returnTo.length>2048||!returnTo.startsWith('/'))fail(400,'Invalid Notion return address');
+        const url=new URL(returnTo,currentOrigin());
+        if(url.origin!==currentOrigin()||!['/','/home.html'].includes(url.pathname)||url.username||url.password)fail(400,'Notion must return to this Paper workspace');
+        destination=url.pathname+url.search+url.hash;
+      }
       if(pending.size>=8)fail(429,'Too many pending Notion connections. Complete one or wait ten minutes');
       const state=randomBytes(32).toString('base64url'),verifier=randomBytes(32).toString('base64url');
       const redirect=`${currentOrigin()}/api/notion/callback`;
-      const p={verifier,redirect,expires:now+600000};pending.set(state,p);
+      const p={verifier,redirect,returnTo:destination,expires:now+600000};pending.set(state,p);
       try {
         const resource=json((await request(`${NOTION_ORIGIN}/.well-known/oauth-protected-resource`,{max:128*1024,signal:client.abort.signal})).body);
         if(resource.resource!==NOTION_ORIGIN||!resource.authorization_servers?.includes(NOTION_ORIGIN))fail(502,'Notion protected resource metadata does not match the official issuer');
@@ -191,7 +198,7 @@ export function createNotion({library,configDir,origin}) {
         const value=json((await request(`${NOTION_ORIGIN}/token`,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',accept:'application/json'},body:new URLSearchParams({grant_type:'authorization_code',code:codes[0],client_id:p.clientId,redirect_uri:p.redirect,code_verifier:p.verifier,resource:NOTION_ORIGIN}),max:128*1024,signal:client.abort.signal})).body);
         await client.store(tokens(value,{client_id:p.clientId}));
       });
-      client.tools=null;client.session=null;client.boundClientId=null;pending.clear();return {connected:true};
+      client.tools=null;client.session=null;client.boundClientId=null;pending.clear();return {connected:true,...(p.returnTo?{returnTo:p.returnTo}:{})};
     },
     async disconnect() {
       await ready();if(inflight.size)fail(423,'A Paper is saving to Notion. Complete the save before disconnecting');pending.clear();await withPrivateLock(folder,'notion-auth',()=>fs.rm(client.file,{force:true}));
@@ -212,8 +219,9 @@ export function createNotion({library,configDir,origin}) {
       const pages=[];
       for(const item of rows.slice(0,50)) {
         const type=item.type||item.object;if(type&&type!=='page')continue;
-        if(!uuid(item.id)||typeof item.title!=='string'||query&& !item.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()))continue;
-        pages.push({id:item.id,title:item.title,url:pageURL(item.id)});
+        if(typeof item.title!=='string')continue;
+        let id;try{id=uuid(item.id)?item.id:pageId(item.url);}catch{continue;}
+        pages.push({id,title:item.title,url:pageURL(id)});
       }
       const next=result.next_cursor||result.nextCursor;
       return {pages,...(typeof next==='string'&&next.length<=4096?{cursor:next}:{})};
@@ -243,7 +251,9 @@ export function createNotion({library,configDir,origin}) {
         if(id) {
           const fresh=await remoteForSave(id);sameRemote(fresh,state);
           if(fresh.section!==remote.section)fail(409,'The remote managed section changed during upload. Open it to compare; no replacement was made');
-          await guardedWrite(paperId,existing,{...existing,pending:{kind:'update',at:savedAt}},'update-page',{page_id:id,command:'update_content',content_updates:[{old_str:fresh.section,new_str:section}],allow_async:false});
+          // Native Notion file blocks cannot reliably be matched by update_content.
+          // Prepend a dated version on this same page; preserve every older snapshot and human note.
+          await guardedWrite(paperId,existing,{...existing,pending:{kind:'update',at:savedAt}},'update-page',{page_id:id,command:'insert_content',content:section,position:{type:'start'},allow_async:false});
         } else {
           const created=await guardedWrite(paperId,existing,{...existing,account:account(a),pending:{kind:'create',at:savedAt,parentId:parent}},'create-pages',{parent:{page_id:parent},pages:[{properties:{title:snapshot.paper.name},content:section}],allow_async:false});
           id=created.pages?.length===1?created.pages[0].id:null;

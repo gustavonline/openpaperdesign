@@ -78,7 +78,7 @@ export function setupNotion({
   let dialog, title, body, alert, connection, disconnect, cancel, returnFocus;
   let destroyed = false, session = 0, view = 0, mode = 'open';
   let connectionState = { connected: false }, mutating = false;
-  let searchTimer, pollTimer, popup = null;
+  let searchTimer;
 
   const owner = () => access?.role === 'owner' && !access.shared;
   const alive = token => !destroyed && dialog?.open && token === session;
@@ -98,19 +98,13 @@ export function setupNotion({
 
   function stopTimers() {
     clearTimeout(searchTimer);
-    clearTimeout(pollTimer);
   }
 
-  function closePopup() {
-    try { if (popup && !popup.closed) popup.close(); } catch { /* OAuth may isolate its browsing context. */ }
-    popup = null;
-  }
 
   function closed() {
     session++;
     view++;
     stopTimers();
-    closePopup();
     if (returnFocus?.isConnected) returnFocus.focus();
   }
 
@@ -195,11 +189,12 @@ export function setupNotion({
 
   async function launch(nextMode) {
     if (destroyed) return;
+    const address=new URL(location.href),connectionFailed=address.searchParams.get('notion_error')==='1';
+    if(connectionFailed){address.searchParams.delete('notion_error');history.replaceState(null,'',address.pathname+address.search+address.hash);}
     ensureDialog();
     if (dialog.open && mutating) { cancel.focus(); return; }
     session++;
     stopTimers();
-    closePopup();
     mode = nextMode;
     const token = session;
     title.textContent = mode === 'save' ? 'Save to Notion' : 'Open from Notion';
@@ -230,6 +225,7 @@ export function setupNotion({
       if (!alive(token)) return;
       connectionState = result;
       resume(token);
+      if(connectionFailed)showError('Notion sign-in was not completed. Your current connection is shown below.');
     } catch (error) {
       if (!alive(token)) return;
       body.replaceChildren(note('Could not check the Notion connection.'));
@@ -251,71 +247,30 @@ export function setupNotion({
 
   function connectView(token) {
     const screenId = screen();
-    body.append(note('Sign in with Notion and choose a workspace. Paper can use pages available to your account. Your files stay on this device too.'));
-    const connect = button('Connect Notion', () => connectNotion(token, screenId, connect), 'notion-primary');
+    body.append(note('Sign in to Notion and choose your workspace. You can then open Papers saved there. A local copy stays on this device.'));
+    const connect = button('Connect to Notion', () => connectNotion(token, screenId, connect), 'notion-primary');
     body.append(actions(connect));
     connect.focus();
   }
 
   async function connectNotion(token, screenId, connect) {
     if (!current(token, screenId) || connect.disabled) return;
-    // Reserve the popup during the click, before the asynchronous connect request.
-    let opened = null;
-    try {
-      opened = window.open('about:blank', '_blank', 'popup,width=600,height=740');
-      if (opened) opened.opener = null;
-    } catch { /* A real link is offered below if the browser blocks the popup. */ }
-    popup = opened;
     connect.disabled = true;
     alert.hidden = true;
-    const progress = live('Preparing Notion sign-in…');
+    const progress = live('Opening Notion sign-in…');
     body.append(progress);
     try {
-      const result = await transport('/api/notion/connect', { method: 'POST', body: {} });
+      await beforeSave();
+      const back = new URL(location.href);
+      if (paperId) back.searchParams.set('notion', mode);
+      else back.hash = 'notion';
+      const result = await transport('/api/notion/connect', { method: 'POST', body: {returnTo: back.pathname + back.search + back.hash} });
       if (!current(token, screenId)) return;
       const url = new URL(result?.url);
-      if (url.origin !== 'https://mcp.notion.com' || url.pathname !== '/authorize' || url.username || url.password) {
-        throw new Error('Notion returned an unexpected sign-in address.');
-      }
-      let navigated = false;
-      try { if (opened && !opened.closed) { opened.location.href = url.href; navigated = true; } } catch { /* Use the link. */ }
-      progress.textContent = navigated ? 'Finish connecting in Notion, then return here.' :
-        'The sign-in window was blocked. Continue using the link below.';
-      connect.hidden = true;
-      body.append(actions(externalLink('Continue in Notion', url.href)));
-      const check = button('Check connection', () => poll());
-      body.append(actions(check));
-      const deadline = Date.now() + 5 * 60 * 1000;
-      let checking = false;
-      const poll = async () => {
-        if (!current(token, screenId) || checking) return;
-        clearTimeout(pollTimer);
-        checking = true;
-        check.disabled = true;
-        try {
-          const result = await status();
-          if (!current(token, screenId)) return;
-          if (result.connected) {
-            connectionState = result;
-            closePopup();
-            resume(token);
-            return;
-          }
-          alert.hidden = true;
-        } catch (error) {
-          if (current(token, screenId)) showError(`Could not check the connection. ${failure(error)}`);
-        } finally {
-          checking = false;
-          check.disabled = false;
-        }
-        if (!current(token, screenId)) return;
-        if (Date.now() < deadline) pollTimer = setTimeout(poll, 2000);
-        else progress.textContent = 'Still waiting for Notion. Finish signing in, then choose Check connection.';
-      };
-      pollTimer = setTimeout(poll, 1000);
+      if (url.origin !== 'https://mcp.notion.com' || url.pathname !== '/authorize' || url.username || url.password) throw new Error('Notion returned an unexpected sign-in address.');
+      location.assign(url.href);
     } catch (error) {
       if (!current(token, screenId)) return;
-      closePopup();
       progress.remove();
       connect.disabled = false;
       showError(failure(error));
@@ -326,7 +281,7 @@ export function setupNotion({
   function savedView(token, justSaved) {
     screen();
     const link = connectionState.link;
-    body.append(justSaved ? live('Saved to Notion.') : note('Save changes updates the same Paper page in Notion. Your files stay on this device too.'));
+    body.append(justSaved ? live('Saved to Notion.') : note('Save changes adds the latest version to this same Notion page. Earlier versions are kept.'));
     const time = savedTime(link?.savedAt);
     body.append(note(time ? `Last saved: ${time}` : 'No last-saved time is available.'));
     if(connectionState.changed===true)body.append(note('This Paper has local changes since its last Notion save.'));
@@ -343,7 +298,7 @@ export function setupNotion({
     body.append(note(mode === 'save' ?
       (elsewhere ? 'Choose another parent page. A new page uses your Paper’s title; future saves update that page.' :
         'Choose a parent page. A new page uses your Paper’s title. Your files stay on this device too.') :
-      'Choose a page containing a saved Paper. It opens as a new local Paper; your current Paper stays untouched.'));
+      'Choose a Notion page saved from Paper. It opens in this library as a new local Paper. Ordinary Notion pages are not Paper files.'));
     const label = element('label', 'notion-search-label', 'Find an accessible Notion page');
     const search = element('input', 'notion-search');
     search.type = 'search';
@@ -603,7 +558,6 @@ export function setupNotion({
     if (destroyed) return;
     destroyed = true;
     stopTimers();
-    closePopup();
     if (dialog?.open) dialog.close();
     dialog?.remove();
   }

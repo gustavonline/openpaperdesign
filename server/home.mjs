@@ -45,13 +45,13 @@ export function createHome(open){
           let server;
           try{const live=await inspectWorkspace(entry.root);server=live?{state:'running',...live}:{state:'stopped'};}
           catch(error){server={state:'unavailable',message:error.message};}
-          projects.push({id:entry.id,name:entry.name,count:found.length,server});
+          projects.push({id:entry.id,name:entry.name,kind:entry.id==='personal'?'personal':'project',storageRoot:library.root,count:found.length,server});
           for(const paper of found.slice(0,200)){
             let thumbnail=null;
-            if(paper.thumbnail&&previewBudget>0){
+            try{if(paper.thumbnail&&previewBudget>0){
               const paperFolder=await library.folder(paper.id),file=path.join(paperFolder,'assets','thumbnail.png'),real=await fs.realpath(file),st=await fs.lstat(file);
               if(real.startsWith(paperFolder+path.sep)&&st.isFile()&&!st.isSymbolicLink()&&st.size<=Math.min(128*1024,previewBudget)){const bytes=await fs.readFile(real);previewBudget-=bytes.length;thumbnail=`data:image/png;base64,${bytes.toString('base64')}`;}
-            }
+            }}catch{thumbnail=null;}
             const {href,...info}=paper;papers.push({...info,thumbnail,workspaceId:entry.id,workspaceName:entry.name,workspace:entry.root,folder:path.join(library.root,paper.id)});
           }
         }catch(error){if(!['ENOENT','ENOTDIR','EACCES'].includes(error.code))throw error;projects.push({id:entry.id,name:entry.name,count:0,unavailable:true});}

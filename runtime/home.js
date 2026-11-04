@@ -1,6 +1,6 @@
 const embedded=document.documentElement.dataset.mcp==='true';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),create=document.getElementById('new-paper');
-let selected='all',projects=[],cards=[],busy=false,disconnected=false;
+let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false;
 
 // The small MCP Apps transport is only used by the sidebar resource. The browser uses HTTP.
 const pending=new Map();let sequence=0,ready=Promise.resolve();
@@ -23,7 +23,7 @@ if(embedded){
     else if(message.method==='ping'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
     else if(message.method==='ui/resource-teardown'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
   });
-  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.7.0-preview.1'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
+  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.7.0-preview.2'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
     hostContext(result.hostContext);
     if(!result.hostCapabilities?.serverTools)throw new Error('This host cannot open Paper Home. Ask your agent to open it in the browser.');
     parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');
@@ -56,27 +56,29 @@ function filter(){
   for(const c of cards){const on=(selected==='all'||c.p.workspaceId===selected)&&`${c.p.name} ${c.p.workspaceName}`.toLowerCase().includes(text);c.el.hidden=!on;shown+=on;}
   const none=document.getElementById('none'),project=projects.find(p=>p.id===selected);
   none.textContent=project?.unavailable?'This project folder is unavailable. Reopen it with your agent when it is accessible.':text?'No Papers match your search. Press Escape to clear it.':'No Papers yet. New Paper creates one.';none.hidden=shown>0||!problem.hidden;
-  document.querySelector('h1').textContent=selected==='all'?'All Papers':project?.name||'All Papers';
-  create.disabled=!!project?.unavailable;create.title=`Create a Paper in ${selected==='all'?'Personal':project?.name||'Personal'}`;
+  document.querySelector('h1').textContent=selected==='all'?'All Papers':project?.name||'Personal';document.title=document.querySelector('h1').textContent+' — Paper';
+  document.getElementById('collection-help').textContent=selected==='all'?'Personal Papers and Papers from your projects.':selected==='personal'?'Your Papers, saved on this device. No project needed.':'Saved with this project. Your personal library stays separate.';
+  document.getElementById('location-path').textContent=project?.storageRoot||'Personal Papers and each project’s Paper folder.';
+  document.getElementById('location-help').textContent=selected==='personal'?'New Papers and imports in Personal are saved here. Updating the plugin keeps them in place.':selected==='all'?'Personal is the default for new Papers and imports. Project Papers stay in their own project folder.':'New Papers and imports in this project are saved here.';
+  create.disabled=disconnected||!!project?.unavailable;document.getElementById('open-paper').disabled=create.disabled;create.title=`Create a Paper in ${selected==='all'?'Personal':project?.name||'Personal'}`;
   document.getElementById('workspace-filter').value=selected;
   for(const button of document.querySelectorAll('[data-workspace]'))button.setAttribute('aria-current',button.dataset.workspace===selected?'page':'false');
 }
-function choose(id){selected=id;filter();}
+function choose(id){selected=id;if(!embedded){const url=new URL(location.href);if(id==='personal')url.searchParams.delete('collection');else url.searchParams.set('collection',id);history.replaceState(null,'',url.pathname+url.search+url.hash);}filter();}
 function render(data){
-  projects=data.projects||[];if(selected!=='all'&&!projects.some(p=>p.id===selected))selected='all';
+  projects=data.projects||[];if(selected!=='all'&&!projects.some(p=>p.id===selected))selected='personal';
   cards=(data.papers||[]).map(p=>({p,el:card(p)}));list.replaceChildren(...cards.map(c=>c.el));
-  const nav=document.getElementById('workspaces'),select=document.getElementById('workspace-filter');nav.replaceChildren();select.replaceChildren(new Option('All Papers','all'));
+  const select=document.getElementById('workspace-filter');select.replaceChildren();
   for(const project of projects){
-    const button=document.createElement('button');button.className='project-nav';button.type='button';button.dataset.workspace=project.id;button.title=project.name;button.textContent=project.name;button.addEventListener('click',()=>choose(project.id));nav.append(button);select.append(new Option(project.name,project.id));
+    select.append(new Option(project.id==='personal'?'Personal':`Project · ${project.name}`,project.id));
   }
-  document.getElementById('storage').title=`Personal Papers: ${data.storageRoot}. Project Papers stay in their project’s Paper folder.`;filter();
+  select.append(new Option('All Papers','all'));filter();
 }
 async function load(){if(busy||disconnected)return;problem.hidden=true;try{render(await request());}catch(error){fail(error);}}
 create.addEventListener('click',async()=>{
   if(busy)return;busy=true;create.disabled=true;create.textContent='Creating…';problem.hidden=true;
-  try{const made=await request({action:'create',workspaceId:selected==='all'?'personal':selected});await navigate(made.url);}catch(error){fail(error);}finally{busy=false;create.disabled=false;create.textContent='New Paper';if(embedded)load();}
+  try{const made=await request({action:'create',workspaceId:selected==='all'?'personal':selected});await navigate(made.url);}catch(error){fail(error);}finally{busy=false;create.textContent='New Paper';filter();if(embedded)load();}
 });
-document.getElementById('all-papers').addEventListener('click',()=>choose('all'));
 document.getElementById('workspace-filter').addEventListener('change',event=>choose(event.target.value));
 q.addEventListener('input',filter);q.addEventListener('keydown',event=>{if(event.key==='Escape'){q.value='';filter();}});
 const key='paper:home:layout';
@@ -92,19 +94,28 @@ openButton.addEventListener('click',()=>{if(openMenu.matches(':popover-open'))op
 openMenu.addEventListener('toggle',event=>openButton.setAttribute('aria-expanded',String(event.newState==='open')));
 async function openFromNotion(){
   openMenu.hidePopover();
-  try{if(embedded){const target=await request({action:'open',workspaceId:selected==='all'?'personal':selected});return navigate(target.url+'#notion');}
-    if(!notionHome){const module=await import('./notion-ui.js?v=a9283f37987a');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
+  try{const workspaceId=selected==='all'?'personal':selected,target=await request({action:'open',workspaceId}),url=new URL(target.url);
+    if(embedded||url.origin!==location.origin){url.searchParams.set('collection',workspaceId);url.hash='notion';return navigate(url.href);}
+    if(!notionHome){const module=await import('./notion-ui.js?v=13dc21a7c39a');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
     await notionHome.open();
   }catch(error){fail(error);}
 }
 document.getElementById('open-notion').addEventListener('click',openFromNotion);
-document.getElementById('open-file').addEventListener('click',async()=>{openMenu.hidePopover();try{if(embedded){const target=await request({action:'open',workspaceId:selected==='all'?'personal':selected});return navigate(target.url);}document.getElementById('home-paper-import').click();}catch(error){fail(error);}});
+document.getElementById('open-file').addEventListener('click',async()=>{openMenu.hidePopover();try{if(embedded){const workspaceId=selected==='all'?'personal':selected,target=await request({action:'open',workspaceId}),url=new URL(target.url);url.searchParams.set('collection',workspaceId);url.hash='import';return navigate(url.href);}document.getElementById('home-paper-import').click();}catch(error){fail(error);}});
 document.getElementById('home-paper-import').addEventListener('change',async event=>{
   const file=event.target.files?.[0];event.target.value='';if(!file||busy)return;
   busy=true;problem.hidden=true;
-  try{if(file.size>50*1024*1024)throw new Error('Paper files must fit within 50 MB.');const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':file.name.endsWith('.json')?'application/json':'application/zip'},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'The Paper could not be opened.');location.assign(result.href);}catch(error){fail(error);}finally{busy=false;}
+  try{if(file.size>50*1024*1024)throw new Error('Paper files must fit within 50 MB.');const response=await fetch('/api/import?workspaceId='+encodeURIComponent(selected==='all'?'personal':selected),{method:'POST',headers:{'Content-Type':/\.json$/i.test(file.name)?'application/json':'application/zip'},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'The Paper could not be opened.');location.assign(result.href);}catch(error){fail(error);}finally{busy=false;}
 });
-if(!embedded&&location.hash==='#notion'){history.replaceState(null,'',location.pathname);openFromNotion();}
+function openRequest(){
+  if(embedded)return;const hash=location.hash;
+  if(!['#notion','#import'].includes(hash))return;
+  history.replaceState(null,'',location.pathname+location.search);
+  if(hash==='#notion')openFromNotion();else document.getElementById('import-dialog').showModal();
+}
+addEventListener('hashchange',openRequest);openRequest();
+document.getElementById('choose-file').addEventListener('click',()=>{document.getElementById('import-dialog').close();document.getElementById('home-paper-import').click();});
+document.getElementById('cancel-import').addEventListener('click',()=>document.getElementById('import-dialog').close());
 
 const serversDialog=document.getElementById('servers-dialog'),serverMessage=document.getElementById('server-message');
 function renderServers(){
@@ -122,7 +133,7 @@ function renderServers(){
           disconnected=!embedded&&result.url===location.origin;
           if(disconnected){
             for(const p of projects)if(p.server?.url===result.url)p.server={state:'stopped'};
-            create.disabled=true;serverMessage.textContent='Server stopped. Reopen Home through the plugin to start it again.';problem.textContent='Server stopped. Your Papers are saved. Reopen Home through the plugin to continue.';problem.hidden=false;
+            create.disabled=true;openButton.disabled=true;serverMessage.textContent='Server stopped. Reopen Home through the plugin to start it again.';problem.textContent='Server stopped. Your Papers are saved. Reopen Home through the plugin to continue.';problem.hidden=false;
           }else{render(await request());serverMessage.textContent='Server stopped. Your Papers are saved.';}
           renderServers();serverMessage.hidden=false;
         }catch(error){serverMessage.textContent=error.message;serverMessage.hidden=false;stop.disabled=false;stop.textContent='Stop server';}

@@ -11,6 +11,8 @@ const normalize=name=>name.replace(/_/g,'-').replace(/^notion-/,'');
 const fail=(status,message)=>{throw new PaperError(status,message);};
 export function officialURL(value,media=false) {
   let u;try{u=new URL(value);}catch{fail(502,'Notion returned an invalid URL');}
+  // Download links can carry a filename fragment; fragments are never sent over HTTP.
+  if(media)u.hash='';
   const h=u.hostname;
   const notionHost=h==='notion.com'||h.endsWith('.notion.com')||h==='notion.so'||h.endsWith('.notion.so')||h==='notion-static.com'||h.endsWith('.notion-static.com');
   const bucket=['prod-files-secure.s3.us-west-2.amazonaws.com','s3.us-west-2.amazonaws.com'].includes(h)&&

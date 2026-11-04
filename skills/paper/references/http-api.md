@@ -56,9 +56,9 @@ Owner transfer/cloud routes use the same loopback Host and write-Origin checks:
 | Route | Method | Result |
 | --- | --- | --- |
 | `/api/bundle?paper=<id>` | GET | Complete `.paper.zip`, referenced assets and notes included. |
-| `/api/import` | POST | Binary ZIP; `Content-Type: application/json` also accepts asset-free Paper JSON. New local identity; no overwrite. |
+| `/api/import[?workspaceId=<known-library>]` | POST | Binary ZIP; `Content-Type: application/json` also accepts asset-free Paper JSON. New local identity; no overwrite. An optional Home library ID selects the destination; otherwise the active workspace is used. |
 | `/api/notion/status[?paper=<id>]` | GET | Stored connection, optional linked page, changed/unverified state. |
-| `/api/notion/connect` | POST | Official Notion sign-in URL. |
+| `/api/notion/connect` | POST | `{returnTo?}` → official Notion sign-in URL. A return address must be this workspace’s Home or editor. |
 | `/api/notion/callback` | GET | Single-use PKCE/state callback for this loopback origin. |
 | `/api/notion/connection` | DELETE | Disconnect locally. |
 | `/api/notion/pages` | POST | `{query?,cursor?}` → accessible page titles/IDs and optional next cursor. |

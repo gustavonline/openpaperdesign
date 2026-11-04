@@ -7,7 +7,7 @@
 
 A canvas for designs, diagrams and working with your AI agent. Create layouts and graphics, map an architecture, inspect spacing and colours, leave comments, and export your work.
 
-Each Paper is a folder of editable files. Open Home to browse your Papers, create one, or return to a project.
+Each Paper is a folder of editable files. Home opens your Personal library. Use its library selector to switch to a project or see all Papers; Location shows where the selected library is saved.
 
 ## Install
 
@@ -40,9 +40,9 @@ Draw and edit on the canvas, use the Library for diagram symbols, and switch to 
 
 Shift-click selects several layers. Copy, paste, duplicate, group and arrange them with familiar shortcuts or the right-click menu. Text and appearance controls live in Properties. Right-click empty canvas to choose snapping, grid and background. **Share → Copy link** links to the selected Page or layer.
 
-**Share → Save to Notion** connects through Notion’s own sign-in, then lets you choose a parent page. Later saves update the same page. **Home → Open → Open from Notion** searches accessible pages and opens a saved Paper as a new local copy. The snapshot includes editable files and a self-contained preview with Pages, pan and zoom. Save is manual; changes made elsewhere are reported before replacement. [Notion connection and storage](skills/paper/references/notion.md).
+**Share → Save to Notion** takes you through Notion’s own sign-in and back to Paper, then lets you choose a parent page. Later saves update the same page. **Home → Open → Open from Notion** searches accessible pages and opens a saved Paper as a new local copy. The snapshot includes editable files and a self-contained preview with Pages, pan and zoom. Save is manual; changes made elsewhere are reported before replacement. [Notion connection and storage](skills/paper/references/notion.md).
 
-Use **Share → Paper with assets** to download a complete `.paper.zip`, and **Home → Open → Open Paper file** to open it elsewhere. A JSON export contains the artwork records; the ZIP also carries images, guides and feedback.
+Use **Share → Paper with assets** to download a complete `.paper.zip`, and **Home → Open → Import Paper file** to open it elsewhere. A JSON export contains the artwork records; the ZIP also carries images, guides and feedback. Imports go into the library selected in Home, including Personal.
 
 Home → **Servers** shows running Paper servers and active sharing. Stop a server there to close its connections and shared links. Your saved Papers remain on disk.
 

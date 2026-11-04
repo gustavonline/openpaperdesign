@@ -2,7 +2,7 @@
 name: paper
 description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the project and cloud snapshots in Notion. Use for Home, Paper files, Notion save/open, workspace setup and server controls.
 metadata:
-  version: "0.7.0-preview.1"
+  version: "0.7.0-preview.2"
 ---
 
 # Paper
@@ -12,6 +12,8 @@ Use the plugin's existing editor and MCP tools. Node.js 22+ is the runtime requi
 The MCP server is `openpaperdesign_workspace`. When a host defers tools, use its available tool discovery before treating an operation as unavailable. If the host still cannot expose them, run `node <plugin-root>/server/server.mjs --list`. This returns Home metadata, including each Paper’s exact `workspace` and `folder`, without starting a server. Read the requested `<folder>/paper.json` and notes with normal file tools, or open its workspace with the bundled CLI. Missing MCP tool visibility is not evidence that a Paper is absent.
 
 ## Find and open
+
+Home defaults to Personal. Its compact library selector separates personal Papers from project libraries; Location reveals the actual folder. Creating or importing uses the selected library. Projectless Papers belong in native personal storage, never a temporary output folder.
 
 - For an existing Paper, especially when its project is unknown or it is absent from the current project, call `paper_home` with `{}` first. It lists the personal library and explicitly remembered projects with Paper IDs, names and workspace IDs. Match the requested Paper before creating anything. Resolve ambiguous matches with the person.
 - Call `paper_home` with `action:"open"`, the returned `workspaceId` and `paperId`. It returns the browser URL and absolute `workspace`. Then call `paper_open` with that workspace to select it for document tools, followed by `paper_read` with the Paper ID. Home navigation does not switch the agent's active workspace.

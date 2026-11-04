@@ -79,16 +79,21 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         const id=paperId(url),bytes=await exportBundle(library,id);res.writeHead(200,{'Content-Type':'application/zip','Content-Length':bytes.length,'Content-Disposition':`attachment; filename="${id}.paper.zip"`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(bytes);return;
       }
       if(pathname==='/api/import'&&req.method==='POST'){
-        if(url.search)throw new PaperError(400,'Unexpected import query');return json(res,201,await importPaper(library,await readBody(req,MAX_BUNDLE_BYTES),req.headers['content-type']));
+        if([...url.searchParams.keys()].some(k=>k!=='workspaceId')||url.searchParams.getAll('workspaceId').length>1)throw new PaperError(400,'Unexpected import query');
+        const bytes=await readBody(req,MAX_BUNDLE_BYTES),workspaceId=url.searchParams.get('workspaceId');
+        if(!workspaceId)return json(res,201,await importPaper(library,bytes,req.headers['content-type']));
+        const target=await home({action:'open',workspaceId}),destination=target.workspace===real?library:await PaperLibrary.open(target.workspace),made=await importPaper(destination,bytes,req.headers['content-type']);
+        return json(res,201,{...made,href:new URL(made.href,target.url).href});
       }
       if(pathname.startsWith('/api/notion/')){
         if(pathname==='/api/notion/callback'&&req.method==='GET'){
-          await notion.callback(url);const nonce=randomBytes(16).toString('hex');
-          res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'`});
-          res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Notion connected</title><style>body{font:15px/1.5 system-ui;max-width:440px;margin:12vh auto;padding:24px;color:#232321;background:#fafaf8}a{color:inherit}</style><h1>Notion connected</h1><p>You can return to Paper. This window can be closed.</p><a href="/home.html">Open Paper Home</a><script nonce="${nonce}">history.replaceState(null,'','/home.html#notion-connected');window.close()</script></html>`);return;
+          let destination;
+          try{destination=(await notion.callback(url)).returnTo||'/home.html#notion';}
+          catch{destination='/home.html?notion_error=1#notion';}
+          res.writeHead(303,{'Location':destination,'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});res.end();return;
         }
         if(pathname==='/api/notion/status'&&req.method==='GET')return json(res,200,await notion.status(url.search?paperId(url):undefined));
-        if(pathname==='/api/notion/connect'&&req.method==='POST'){if(url.search)throw new PaperError(400,'Unexpected connection query');await readBody(req,1024);return json(res,200,await notion.connect());}
+        if(pathname==='/api/notion/connect'&&req.method==='POST'){if(url.search)throw new PaperError(400,'Unexpected connection query');const bytes=await readBody(req,4096),args=bytes.length?JSON.parse(bytes):{};if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>k!=='returnTo'))throw new PaperError(400,'Invalid connection options');return json(res,200,await notion.connect(args));}
         if(pathname==='/api/notion/connection'&&req.method==='DELETE')return json(res,200,await notion.disconnect());
         if(pathname==='/api/notion/pages'&&req.method==='POST')return json(res,200,await notion.pages(JSON.parse(await readBody(req,8192))));
         if(pathname==='/api/notion/save'&&req.method==='POST'){const result=await notion.save(paperId(url),JSON.parse(await readBody(req,28*1024*1024)));return json(res,200,{...result.link,...result});}

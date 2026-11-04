@@ -3,7 +3,7 @@ import { setupSharing } from './sharing.js?v=052a5c2d717a';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=257300bbee91';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers} from './editing-model.js?v=1d0049e52e98';
-import {setupNotion,notionIcon} from './notion-ui.js?v=a9283f37987a';
+import {setupNotion,notionIcon} from './notion-ui.js?v=13dc21a7c39a';
 const $ = selector => document.querySelector(selector);
 const stage = $('#stage'), world = $('#world'), body = document.body, form = $('#properties'), tree = $('#layer-tree');
 // Which Paper this page edits, read once from the URL (`?paper=<id>`, exactly once; the server refuses an
@@ -1117,7 +1117,7 @@ async function exportBundle(){
 }
 $('#paper-import').addEventListener('change',async event=>{
   const file=event.target.files?.[0];event.target.value='';if(!file)return;
-  try{if(file.size>50*1024*1024)throw new Error('Paper files must fit within 50 MB.');commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your changes before opening another Paper.');const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':file.name.endsWith('.json')?'application/json':'application/zip'},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'This Paper could not be opened.');leaving=true;location.assign(result.href);}catch(error){message(error.message);}
+  try{if(file.size>50*1024*1024)throw new Error('Paper files must fit within 50 MB.');commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your changes before opening another Paper.');const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':/\.json$/i.test(file.name)?'application/json':'application/zip'},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'This Paper could not be opened.');leaving=true;location.assign(result.href);}catch(error){message(error.message);}
 });
 const slug = text => (text || 'artboard').normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toLowerCase().slice(0, 60) || 'artboard';
 function download(blob, name) { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
@@ -1602,7 +1602,12 @@ async function start() {
   requestAnimationFrame(() => setTimeout(() => loadMesurer(!canEdit), 0));
   setTimeout(() => { if (!body.classList.contains('mesurer-ready')) body.classList.add('rail-standalone'); }, 2000);
 }
-start().catch(error => {
+start().then(() => {
+  const url=new URL(location.href);
+  const action=url.searchParams.get('notion');
+  if(['save','open'].includes(action)){url.searchParams.delete('notion');history.replaceState(null,'',url.pathname+url.search+url.hash);return notionUI[action]();}
+  if(url.hash==='#notion'){url.hash='';history.replaceState(null,'',url.pathname+url.search);return notionUI.open();}
+}).catch(error => {
   const p = document.createElement('p'), home = document.createElement('a'); p.className = 'load-error'; home.href = './'; home.textContent = 'All Papers';
   p.append(`${error.message} `, home); stage.replaceChildren(p); leaving = true; showStatus('unopened', ['This Paper couldn’t be opened.'], true);
 });
