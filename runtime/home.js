@@ -1,12 +1,12 @@
 const embedded=document.documentElement.dataset.mcp==='true';
-const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),create=document.getElementById('new-paper');
-let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false;
+const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper');
+let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='';
 
 // The small MCP Apps transport is only used by the sidebar resource. The browser uses HTTP.
 const pending=new Map();let sequence=0,ready=Promise.resolve();
 function rpc(method,params={}){
   return new Promise((resolve,reject)=>{
-    const id=`paper-home-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(new Error('The host did not respond. Reopen Home to retry.'));},15000);
+    const link=method==='ui/open-link',id=`paper-home-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(new Error(link?'Codex has not finished opening the link. Copy the address below or try again.':'The host did not respond. Reopen Home to retry.'));},link?60000:15000);
     pending.set(id,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id,method,params},'*');
   });
 }
@@ -19,11 +19,11 @@ if(embedded){
     if(event.source!==parent||event.data?.jsonrpc!=='2.0')return;const message=event.data;
     if(pending.has(message.id)){const call=pending.get(message.id);clearTimeout(call.timer);pending.delete(message.id);message.error?call.reject(new Error(message.error.message)):call.resolve(message.result);}
     else if(message.method==='ui/notifications/host-context-changed')hostContext(message.params);
-    else if(message.method==='ui/notifications/tool-result'&&message.params?.structuredContent?.papers)render(message.params.structuredContent);
+    else if(message.method==='ui/notifications/tool-result'&&message.params?.structuredContent?.papers&&!busy)render(message.params.structuredContent);
     else if(message.method==='ping'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
     else if(message.method==='ui/resource-teardown'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
   });
-  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.7.0-preview.2'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
+  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.7.0-preview.3'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
     hostContext(result.hostContext);
     if(!result.hostCapabilities?.serverTools)throw new Error('This host cannot open Paper Home. Ask your agent to open it in the browser.');
     parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');
@@ -34,26 +34,51 @@ async function request(args={}){
   const response=await fetch('/api/home',{cache:'no-store',...(Object.keys(args).length?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)}:{})});
   const result=await response.json();if(!response.ok)throw new Error(result.error||`HTTP ${response.status}`);return result;
 }
-async function navigate(url){
-  if(!/^http:\/\/127\.0\.0\.1:\d+\//.test(url))throw new Error('Invalid local Paper address');
-  if(embedded)await rpc('ui/open-link',{url});else location.href=url;
+function localURL(value){
+  const url=new URL(value);
+  if(url.protocol!=='http:'||url.hostname!=='127.0.0.1'||!url.port||url.username||url.password)throw new Error('Invalid local Paper address');
+  return url;
 }
-function fail(error){problem.replaceChildren(error.message,Object.assign(document.createElement('button'),{type:'button',textContent:'Try again',onclick:load}));problem.hidden=false;}
+function runningURL(workspaceId,paperId){
+  const server=projects.find(p=>p.id===workspaceId)?.server;if(server?.state!=='running')return null;
+  try{const url=localURL(server.url);url.pathname=paperId?'/':'/home.html';url.search=paperId?new URLSearchParams({paper:paperId}).toString():'';url.hash='';return url;}catch{return null;}
+}
+async function targetURL(workspaceId,paperId){return runningURL(workspaceId,paperId)||localURL((await request({action:'open',workspaceId,...(paperId?{paperId}:{})})).url);}
+async function navigate(value){
+  const url=localURL(value).href;
+  if(!embedded){location.assign(url);return;}
+  try{const result=await rpc('ui/open-link',{url});if(result?.isError)throw new Error('Codex could not open this link. Copy the address and open it in the browser.');}
+  catch(error){error.openURL=url;throw error;}
+}
+function fail(error,retry=()=>load(true),kind='action'){
+  problem.replaceChildren(error.message,Object.assign(document.createElement('button'),{type:'button',textContent:'Try again',onclick:retry}));
+  if(error.openURL){const address=document.createElement('input');address.value=error.openURL;address.readOnly=true;address.setAttribute('aria-label','Paper address');address.addEventListener('click',()=>address.select());problem.append(address);}
+  problem.dataset.kind=kind;problem.hidden=false;
+}
+async function opening(action,text='Opening Paper…'){
+  if(busy)return;busy=true;problem.hidden=true;activity.textContent=text;activity.hidden=false;
+  try{await action();}catch(error){fail(error,()=>opening(action,text));}finally{busy=false;activity.hidden=true;if(!cards.length)void load();}
+}
 const plural=(n,word)=>`${n} ${word}${n===1?'':'s'}`;
 const ago=ms=>{const seconds=Math.max(0,(Date.now()-ms)/1000);return seconds<60?'just now':seconds<3600?plural(Math.floor(seconds/60),'minute')+' ago':seconds<86400?plural(Math.floor(seconds/3600),'hour')+' ago':plural(Math.floor(seconds/86400),'day')+' ago';};
+const paperMeta=p=>p.error||[p.workspaceName,Number.isFinite(p.modified)?`Edited ${ago(p.modified)}`:null,plural(p.pages,'page')].filter(Boolean).join(' · ');
 function card(p){
-  const a=document.createElement('a');a.className='card';a.href='#';a.title=p.name;
+  const a=document.createElement('a');a.className='card';a.title=p.name;
   a.innerHTML='<div class="thumb"></div><svg class="icon row-icon"><use href="#i-page"/></svg><div style="min-width:0;flex:1"><p class="name"></p><p class="meta"></p></div>';
   const thumb=a.querySelector('.thumb'),placeholder=()=>{const box=document.createElement('div');box.className='placeholder';box.innerHTML='<svg class="icon" aria-hidden="true"><use href="#i-page"/></svg><span></span>';box.querySelector('span').textContent=p.size?`${Math.round(p.size[0])} × ${Math.round(p.size[1])}`:'No preview';return box;};
   if(p.thumbnail){const img=new Image();img.alt='';img.src=p.thumbnail;img.onerror=()=>img.replaceWith(placeholder());thumb.append(img);}else thumb.append(placeholder());
   a.querySelector('.name').textContent=p.name;
-  a.querySelector('.meta').textContent=p.error||[p.workspaceName,Number.isFinite(p.modified)?`Edited ${ago(p.modified)}`:null,plural(p.pages,'page')].filter(Boolean).join(' · ');
-  a.addEventListener('click',async event=>{event.preventDefault();if(busy)return;busy=true;problem.hidden=true;try{await navigate((await request({action:'open',workspaceId:p.workspaceId,paperId:p.id})).url);}catch(error){fail(error);}finally{busy=false;}});
+  a.querySelector('.meta').textContent=paperMeta(p);
+  a.addEventListener('click',async event=>{
+    if(busy){event.preventDefault();return;}
+    if(!embedded&&runningURL(p.workspaceId,p.id))return;
+    event.preventDefault();await opening(()=>targetURL(p.workspaceId,p.id).then(navigate));
+  });
   return a;
 }
 function filter(){
   const text=q.value.trim().toLowerCase();let shown=0;
-  for(const c of cards){const on=(selected==='all'||c.p.workspaceId===selected)&&`${c.p.name} ${c.p.workspaceName}`.toLowerCase().includes(text);c.el.hidden=!on;shown+=on;}
+  for(const c of cards){const on=(selected==='all'||c.p.workspaceId===selected)&&`${c.p.name} ${c.p.workspaceName}`.toLowerCase().includes(text);c.el.hidden=!on;c.el.querySelector('.meta').textContent=paperMeta(c.p);shown+=on;}
   const none=document.getElementById('none'),project=projects.find(p=>p.id===selected);
   none.textContent=project?.unavailable?'This project folder is unavailable. Reopen it with your agent when it is accessible.':text?'No Papers match your search. Press Escape to clear it.':'No Papers yet. New Paper creates one.';none.hidden=shown>0||!problem.hidden;
   document.querySelector('h1').textContent=selected==='all'?'All Papers':project?.name||'Personal';document.title=document.querySelector('h1').textContent+' — Paper';
@@ -67,17 +92,27 @@ function filter(){
 function choose(id){selected=id;if(!embedded){const url=new URL(location.href);if(id==='personal')url.searchParams.delete('collection');else url.searchParams.set('collection',id);history.replaceState(null,'',url.pathname+url.search+url.hash);}filter();}
 function render(data){
   projects=data.projects||[];if(selected!=='all'&&!projects.some(p=>p.id===selected))selected='personal';
-  cards=(data.papers||[]).map(p=>({p,el:card(p)}));list.replaceChildren(...cards.map(c=>c.el));
-  const select=document.getElementById('workspace-filter');select.replaceChildren();
-  for(const project of projects){
-    select.append(new Option(project.id==='personal'?'Personal':`Project · ${project.name}`,project.id));
+  const nextCards=JSON.stringify(data.papers||[]),nextOptions=JSON.stringify(projects.map(p=>[p.id,p.name]));
+  if(nextCards!==cardsKey){cardsKey=nextCards;cards=(data.papers||[]).map(p=>({p,el:card(p)}));list.replaceChildren(...cards.map(c=>c.el));}
+  for(const {p,el} of cards)el.href=runningURL(p.workspaceId,p.id)?.href||'#';
+  if(nextOptions!==optionsKey){
+    optionsKey=nextOptions;const select=document.getElementById('workspace-filter');select.replaceChildren();
+    for(const project of projects)select.append(new Option(project.id==='personal'?'Personal':`Project · ${project.name}`,project.id));
+    select.append(new Option('All Papers','all'));
   }
-  select.append(new Option('All Papers','all'));filter();
+  filter();
 }
-async function load(){if(busy||disconnected)return;problem.hidden=true;try{render(await request());}catch(error){fail(error);}}
+function load(retry=false){
+  if(busy||disconnected)return Promise.resolve();if(loading)return loading;
+  loading=(async()=>{
+    try{const data=await request();if(busy)return;render(data);if(retry===true||problem.dataset.kind==='load')problem.hidden=true;}
+    catch(error){if(problem.hidden||problem.dataset.kind==='load')fail(error,()=>load(true),'load');}finally{loading=null;}
+  })();return loading;
+}
 create.addEventListener('click',async()=>{
   if(busy)return;busy=true;create.disabled=true;create.textContent='Creating…';problem.hidden=true;
-  try{const made=await request({action:'create',workspaceId:selected==='all'?'personal':selected});await navigate(made.url);}catch(error){fail(error);}finally{busy=false;create.textContent='New Paper';filter();if(embedded)load();}
+  let url;
+  try{const made=await request({action:'create',workspaceId:selected==='all'?'personal':selected});url=localURL(made.url).href;await navigate(url);}catch(error){fail(error,url?()=>opening(()=>navigate(url)):undefined);}finally{busy=false;create.textContent='New Paper';filter();if(embedded)load();}
 });
 document.getElementById('workspace-filter').addEventListener('change',event=>choose(event.target.value));
 q.addEventListener('input',filter);q.addEventListener('keydown',event=>{if(event.key==='Escape'){q.value='';filter();}});
@@ -85,7 +120,7 @@ const key='paper:home:layout';
 function layout(mode){list.className=mode;for(const value of ['list','grid'])document.getElementById(`as-${value}`).setAttribute('aria-pressed',String(value===mode));try{localStorage.setItem(key,mode);}catch{}}
 for(const mode of ['list','grid'])document.getElementById(`as-${mode}`).addEventListener('click',()=>layout(mode));
 let saved;try{saved=localStorage.getItem(key);}catch{}layout(saved==='list'?'list':'grid');
-load();addEventListener('focus',load);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
+const initial=load();addEventListener('focus',load);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
 setInterval(()=>{if(!document.hidden&&!disconnected)load();},15000);
 
 let notionHome;
@@ -94,23 +129,24 @@ openButton.addEventListener('click',()=>{if(openMenu.matches(':popover-open'))op
 openMenu.addEventListener('toggle',event=>openButton.setAttribute('aria-expanded',String(event.newState==='open')));
 async function openFromNotion(){
   openMenu.hidePopover();
-  try{const workspaceId=selected==='all'?'personal':selected,target=await request({action:'open',workspaceId}),url=new URL(target.url);
+  await opening(async()=>{const workspaceId=selected==='all'?'personal':selected,url=await targetURL(workspaceId);
     if(embedded||url.origin!==location.origin){url.searchParams.set('collection',workspaceId);url.hash='notion';return navigate(url.href);}
     if(!notionHome){const module=await import('./notion-ui.js?v=13dc21a7c39a');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
     await notionHome.open();
-  }catch(error){fail(error);}
+  },'Opening Notion…');
 }
 document.getElementById('open-notion').addEventListener('click',openFromNotion);
-document.getElementById('open-file').addEventListener('click',async()=>{openMenu.hidePopover();try{if(embedded){const workspaceId=selected==='all'?'personal':selected,target=await request({action:'open',workspaceId}),url=new URL(target.url);url.searchParams.set('collection',workspaceId);url.hash='import';return navigate(url.href);}document.getElementById('home-paper-import').click();}catch(error){fail(error);}});
+document.getElementById('open-file').addEventListener('click',async()=>{openMenu.hidePopover();if(!embedded){document.getElementById('home-paper-import').click();return;}await opening(async()=>{const workspaceId=selected==='all'?'personal':selected,url=await targetURL(workspaceId);url.searchParams.set('collection',workspaceId);url.hash='import';return navigate(url.href);},'Opening file import…');});
 document.getElementById('home-paper-import').addEventListener('change',async event=>{
   const file=event.target.files?.[0];event.target.value='';if(!file||busy)return;
   busy=true;problem.hidden=true;
   try{if(file.size>50*1024*1024)throw new Error('Paper files must fit within 50 MB.');const response=await fetch('/api/import?workspaceId='+encodeURIComponent(selected==='all'?'personal':selected),{method:'POST',headers:{'Content-Type':/\.json$/i.test(file.name)?'application/json':'application/zip'},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'The Paper could not be opened.');location.assign(result.href);}catch(error){fail(error);}finally{busy=false;}
 });
-function openRequest(){
+async function openRequest(){
   if(embedded)return;const hash=location.hash;
   if(!['#notion','#import'].includes(hash))return;
   history.replaceState(null,'',location.pathname+location.search);
+  await initial;
   if(hash==='#notion')openFromNotion();else document.getElementById('import-dialog').showModal();
 }
 addEventListener('hashchange',openRequest);openRequest();
