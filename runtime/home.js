@@ -1,6 +1,6 @@
 const embedded=document.documentElement.dataset.mcp==='true';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper');
-let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='';
+let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='',hostInfo={},openLinks=false;
 
 // The small MCP Apps transport is only used by the sidebar resource. The browser uses HTTP.
 const pending=new Map();let sequence=0,ready=Promise.resolve();
@@ -23,7 +23,8 @@ if(embedded){
     else if(message.method==='ping'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
     else if(message.method==='ui/resource-teardown'&&message.id!==undefined)parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},'*');
   });
-  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.7.0-preview.4'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
+  ready=rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign Home',version:'0.7.0-preview.5'},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'}).then(result=>{
+    hostInfo=result.hostInfo||{};openLinks=!!result.hostCapabilities?.openLinks;
     hostContext(result.hostContext);
     if(!result.hostCapabilities?.serverTools)throw new Error('This host cannot open Paper Home. Ask your agent to open it in the browser.');
     parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');
@@ -47,7 +48,14 @@ async function targetURL(workspaceId,paperId){return runningURL(workspaceId,pape
 async function navigate(value){
   const url=localURL(value).href;
   if(!embedded){location.assign(url);return;}
-  try{const result=await rpc('ui/open-link',{url});if(result?.isError)throw new Error('Codex could not open this link. Copy the address and open it in the browser.');}
+  try{
+    await ready;
+    if(!openLinks)throw new Error('This host cannot open browser links. Copy the address and open it in your browser.');
+    // Codex's external-link API rejects plain HTTP; its browser route accepts local previews.
+    const codex=hostInfo.client_type==='codex_desktop';
+    const target=codex?'codex://browser?'+new URLSearchParams({url}):url;
+    const result=await rpc('ui/open-link',{url:target});if(result?.isError)throw new Error('The host could not open this link. Copy the address and open it in the browser.');
+  }
   catch(error){error.openURL=url;throw error;}
 }
 function fail(error,retry=()=>load(true),kind='action'){

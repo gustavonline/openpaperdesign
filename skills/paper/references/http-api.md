@@ -113,6 +113,8 @@ Owner stdio exposes `resources/list` and `resources/read` for `ui://openpaperdes
 
 Personal data uses the native application data directory: `~/Library/Application Support/OpenPaperDesign` on macOS, `%LOCALAPPDATA%/OpenPaperDesign` on Windows, and `$XDG_DATA_HOME/openpaperdesign` (or `~/.local/share/openpaperdesign`) on Linux. `PAPER_HOME` overrides this with an absolute directory. `Paper/` holds personal files and `projects/<hash>.json` holds pointers to explicitly opened projects, without copying their designs. Missing project folders are shown as unavailable. Data is separate from the plugin cache and is not deleted on uninstall.
 
+The Home frontend checks the host's `openLinks` capability after MCP Apps initialization. In Codex desktop (`hostInfo.client_type === "codex_desktop"`), it requests `codex://browser?url=<encoded-local-url>` through `ui/open-link`; Codex's ordinary external-link validator does not accept plain HTTP. Other hosts receive the validated local URL unchanged. Validation always applies to the original loopback URL, and failures expose that original address for copying. A successful protocol reply alone is not proof that a browser view opened: verify the actual host UI.
+
 ## Finding an existing Paper
 
 Call `paper_home {}` before assuming a Paper is absent. Match its name/id and collection. `paper_home {action:"open",workspaceId,paperId}` returns the real workspace path; select it with `paper_open {workspace}` before `paper_read` or edits. Both personal Papers and remembered project Papers are discoverable this way; no directory scan is required.
