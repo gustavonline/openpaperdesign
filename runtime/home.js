@@ -1,5 +1,5 @@
 const embedded=document.documentElement.dataset.mcp==='true';
-const VERSION='0.7.0-preview.6';
+const VERSION='0.7.0-preview.7';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper');
 let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='',hostInfo={},openLinks=false,serverVersion=null;
 

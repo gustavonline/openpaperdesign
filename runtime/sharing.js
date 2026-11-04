@@ -3,24 +3,28 @@ export function setupSharing({paperId,access,closeMenu,onCancel}) {
   const dialog=document.getElementById('sharing-dialog'),open=document.getElementById('open-sharing');
   if(access.shared){open.hidden=true;return;}
   const role=dialog.querySelector('#share-role'),location=dialog.querySelector('#share-location'),primary=dialog.querySelector('#share-primary'),stop=dialog.querySelector('#share-stop'),agent=dialog.querySelector('#share-agent'),status=dialog.querySelector('#share-state'),detail=dialog.querySelector('#share-detail'),fallback=dialog.querySelector('textarea');
-  let state={active:false},busy=false;
+  let state={active:false},busy=false,starting=false;
   const endpoint=`/api/sharing?paper=${encodeURIComponent(paperId)}`;
-  const unchanged=()=>state.active&&role.value===state.role&&(location.value==='network')===state.network;
+  const unchanged=()=>state.active&&role.value===state.role&&(location.value==='network')===state.network&&(location.value==='online')===state.online;
   function render(){primary.disabled=stop.disabled=agent.disabled=role.disabled=location.disabled=busy;primary.textContent=unchanged()?'Copy link':state.active?'Replace link':'Create link';stop.hidden=agent.hidden=!state.active;
-    status.textContent=busy?'Updating sharing…':state.active?(state.network?'Shared on your network':state.localOnly?'On this device only':'Ready to share'):'Only you have access';
+    status.textContent=busy?(starting?'Starting Cloudflare…':'Updating sharing…'):state.active?(state.network?'Shared on your network':state.localOnly?'On this device only':'Ready to share'):'Only you have access';
     const network=location.value==='network';
-    detail.textContent=(network?'Open the link on a computer or phone connected to the same Wi-Fi or local network. Keep this computer and Paper server running.':state.online?'Open the HTTPS link in a browser. Keep this computer, Paper server and tunnel running.':'This-device links open on this computer only. Choose Same network for another computer or phone.')+(state.active?` Anyone with the current link ${state.role==='edit'?'can edit':'can view'} this Paper. It expires ${new Date(state.expiresAt).toLocaleDateString()} or when the server stops.`:' Anyone with the link will have the access you choose.');
+    detail.textContent=(network?'Open the link on a computer or phone connected to the same Wi-Fi or local network. Keep this computer and Paper server running.':location.value==='online'?'Open the HTTPS link in a browser. Keep this computer, Paper server and tunnel running.':'This-device links open on this computer only. Choose Same network for another computer or phone.')+(state.active?` Anyone with the current link ${state.role==='edit'?'can edit':'can view'} this Paper. It expires ${new Date(state.expiresAt).toLocaleDateString()} or when the server stops.`:' Anyone with the link will have the access you choose.');
     location.querySelector('[value="network"]').disabled=state.networkAvailable===false;
-    location.querySelector('[value="device"]').disabled=!!state.online;
-    location.querySelector('[value="online"]').hidden=!state.online;
+    location.querySelector('[value="device"]').disabled=!!state.configuredOnline;
+    const internet=location.querySelector('[value="online"]');internet.hidden=false;internet.disabled=state.internetAvailable===false;internet.textContent=state.internetAvailable===false?'Internet (install cloudflared)':'Internet';
     if(network&&state.networkAvailable===false){primary.disabled=true;status.textContent='Connect this computer to Wi-Fi or Ethernet, then reopen Share.';}
   }
   async function request(method){
-    if(busy)return false;busy=true;render();let error;
-    try{const response=await fetch(endpoint,{method,signal:AbortSignal.timeout(8000),headers:{'Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify({role:role.value,network:location.value==='network'})}:{})}),data=await response.json();if(!response.ok)throw new Error(data.error||'Sharing is unavailable');state=data;if(state.active){role.value=state.role;location.value=state.online?'online':state.network?'network':'device';}else if(state.online)location.value='online';else if(!state.networkAvailable)location.value='device';fallback.value='';fallback.hidden=true;return true;}
+    if(busy)return false;busy=true;starting=method==='POST'&&location.value==='online'&&!state.online&&!state.configuredOnline;render();let error;
+    try{const response=await fetch(endpoint,{method,signal:AbortSignal.timeout(method==='POST'&&location.value==='online'?75000:8000),headers:{'Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify({role:role.value,network:location.value==='network',internet:location.value==='online'})}:{})}),data=await response.json();if(!response.ok)throw new Error(data.error||'Sharing is unavailable');state=data;if(state.active){role.value=state.role;location.value=state.online?'online':state.network?'network':'device';}else if(state.configuredOnline)location.value='online';else if(location.value==='network'&&!state.networkAvailable)location.value='device';fallback.value='';fallback.hidden=true;return true;}
     catch(e){error=e;return false;}finally{busy=false;render();if(error)status.textContent=error.name==='TimeoutError'?'Sharing did not respond. Try again.':error.message;}
   }
-  async function copy(text,label='Link copied'){fallback.value=text;fallback.hidden=false;try{await navigator.clipboard.writeText(text);status.textContent=label;}catch{fallback.focus();fallback.select();status.textContent='Copy the selected connection text.';}}
+  async function copy(text,label='Link copied'){
+    const copiedState=state;let timer;fallback.value=text;fallback.hidden=false;fallback.focus();fallback.select();status.textContent='Link ready. Copy the selected text.';
+    try{await Promise.race([navigator.clipboard.writeText(text),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Clipboard unavailable')),1000);})]);if(dialog.open&&state===copiedState)status.textContent=label;}
+    catch{if(dialog.open&&state===copiedState)status.textContent='Copy the selected connection text.';}finally{clearTimeout(timer);}
+  }
   open.addEventListener('click',async()=>{closeMenu();dialog.showModal();await request('GET');});
   role.addEventListener('change',render);
   location.addEventListener('change',render);

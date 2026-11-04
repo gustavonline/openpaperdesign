@@ -36,7 +36,9 @@ The Home command opens the dashboard in your browser.
 
 Ask your agent to create a Paper, revise a design or draw a diagram. The plugin includes [Paper](skills/paper/SKILL.md), [Design](skills/paper-design/SKILL.md) and [Diagrams](skills/paper-diagram/SKILL.md) skills.
 
-Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Share includes PNG, HTML and Paper JSON exports, plus invitations for people and agents. Choose **Share this Paper → Same network** to invite another computer or phone on your Wi-Fi, or **This device** for another browser on your computer. Keep the Paper server running. Internet sharing uses an HTTPS host or tunnel. See [sharing](skills/paper/references/sharing.md).
+Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Share includes PNG, HTML and Paper JSON exports, plus invitations for people and agents. Choose **Share this Paper → Same network** to invite another device on your Wi-Fi, **This device** for another browser, or **Internet** for a temporary HTTPS link through Cloudflare. Choose view or edit access, then Create link. Keep this computer and Paper server running. Stop sharing revokes access and closes the tunnel after the last internet invitation.
+
+Internet sharing needs the optional [cloudflared CLI](https://developers.cloudflare.com/tunnel/downloads/). On macOS, install it once with `brew install cloudflared`. No Cloudflare account, domain or hosted backend is needed. The plugin starts its own temporary tunnel only when you create an Internet invitation. [Sharing details](skills/paper/references/sharing.md).
 
 Shift-click selects several layers. Copy, paste, duplicate, group and arrange them with familiar shortcuts or the right-click menu. Text and appearance controls live in Properties. Right-click empty canvas to choose snapping, grid and background. **Share → Copy link** links to the selected Page or layer.
 

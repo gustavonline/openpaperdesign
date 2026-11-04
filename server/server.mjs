@@ -123,7 +123,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         const id=paperId(url);
         if(req.method==='GET')return json(res,200,await sharing.status(id));
         if(req.method==='DELETE')return json(res,200,await sharing.stop(id));
-        if(req.method==='POST'){const args=JSON.parse(await readBody(req,1024));if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['role','network'].includes(k)))throw new PaperError(400,'Invalid sharing options');return json(res,201,await sharing.create(id,args.role,args.network??false));}
+        if(req.method==='POST'){const args=JSON.parse(await readBody(req,1024));if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['role','network','internet'].includes(k)))throw new PaperError(400,'Invalid sharing options');return json(res,201,await sharing.create(id,args.role,args.network??false,args.internet??false));}
       }
       if(pathname==='/api/assets' && req.method==='POST')return json(res,201,await library.addAsset(paperId(url),await readBody(req,5*1024*1024)));
       if(pathname==='/api/papers'){
@@ -277,7 +277,7 @@ export async function serveStdio() {
       else if(request.method==='resources/list')result={resources:[{uri:HOME_URI,name:'OpenPaperDesign Home',mimeType:HOME_MIME}]};
       else if(request.method==='resources/read'){
         // Existing desktop entries can retain the older template URI across an update.
-        if(![HOME_URI,'ui://openpaperdesign/home','ui://openpaperdesign/home/0.7.0-preview.4','ui://openpaperdesign/home/0.7.0-preview.5'].includes(request.params?.uri))throw new PaperError(404,'Unknown resource');
+        if(![HOME_URI,'ui://openpaperdesign/home','ui://openpaperdesign/home/0.7.0-preview.4','ui://openpaperdesign/home/0.7.0-preview.5','ui://openpaperdesign/home/0.7.0-preview.6'].includes(request.params?.uri))throw new PaperError(404,'Unknown resource');
         result={contents:[{...homeView,uri:request.params.uri}]};
       }
       else if(request.method==='tools/call'){

@@ -4,7 +4,7 @@ Sharing is optional. Owner files, the browser and agents use the same revision-c
 
 ## Owner flow
 
-Share → Share this Paper → Can view / Can edit → Same network / This device → Create link. Same network opens on computers and phones connected to your Wi-Fi or local network. This device is for another browser on your computer. Copy link for a person, or Connect your agent for the endpoint and authorization key. Changing permission or sharing location replaces the link and invalidates its previous browser sessions. Copying or retrying an identical invitation keeps it valid. Stop sharing revokes the key and closes its open connections. Clean views leave; dirty views freeze with a downloadable draft.
+Share → Share this Paper → Can view / Can edit → Same network / This device / Internet → Create link. Same network opens on computers and phones connected to your Wi-Fi or local network. This device is for another browser on your computer. Internet creates a temporary Cloudflare HTTPS address. Copy link for a person, or Connect your agent for the endpoint and authorization key. Changing permission or sharing location replaces the link and invalidates its previous browser sessions. Copying or retrying an identical invitation keeps it valid. Stop sharing revokes the key and closes its open connections. Clean views leave; dirty views freeze with a downloadable draft.
 
 The invitation includes this Paper's artwork, assets, DESIGN.md and saved feedback. CONTEXT.md and file history stay private. Edit guests can change artwork/feedback; only the owner changes the guide and working context through the local note tools. Remote MCP exposes `paper_read` and `paper_read_feedback`; edit invitations also get `paper_save`, `paper_save_feedback` `paper_add_asset` (base64 images) and `paper_activity`. Feedback and artwork have independent revisions. No owner filesystem sourceFile is accepted by remote tools. It exposes no workspace browsing, filesystem paths, sourceFile, new-Paper creation or invitation controls.
 
@@ -16,7 +16,13 @@ Keys are 256-bit random capabilities, not short PINs. Anyone with the link has i
 
 Invitations stop with their server process. If the host started that process through MCP, quitting or reloading the host can stop it. For a session independent of the agent host, start the bundled Node CLI directly. Home → Servers lists the running owner server and its active invitations.
 
-For internet sharing, select an authorized HTTPS host or tunnel and use the direct CLI below. Only the separate sharing listener is forwarded; the owner listener stays local. Use a tunnel that supports Server-Sent Events for live updates. [Cloudflare Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations) supply a temporary HTTPS address without an account, but do not support SSE; they are not a qualified live-sharing route. Tunnel setup is explicit and is not started by creating a network invitation.
+Internet uses the optional `cloudflared` executable from PATH or its normal installation folder. On macOS, `brew install cloudflared` installs it once; other platforms use [Cloudflare's downloads](https://developers.cloudflare.com/tunnel/downloads/). No account, domain, login or background service is installed by Paper. Its temporary empty configuration does not change the owner's Cloudflare configuration. Creating a local/network invitation never starts a tunnel.
+
+One child process forwards only the separate invited-Paper listener. Several Internet invitations reuse it. Stop sharing revokes a key immediately; when the last Internet invitation stops, the child closes after a five-second grace for guests to see revocation. Stopping the owner server closes it immediately. Unexpected tunnel exits revoke its invitations. URLs change when a new tunnel is created, and the computer/server must stay running.
+
+[Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations) do not support SSE. Internet guests instead poll a scoped revision-and-presence endpoint every two seconds while visible; document saves, feedback, presence and optimistic conflicts keep the same data model. Local/network guests and the owner retain SSE. This is temporary sharing, without an uptime guarantee.
+
+For an already selected HTTPS host or named tunnel, the direct CLI below is still available. Forward only the separate sharing listener; the owner listener stays local.
 
 For a provider that forwards a public HTTPS origin to a local port, an owned direct server can be started with:
 

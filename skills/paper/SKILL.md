@@ -2,7 +2,7 @@
 name: paper
 description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the project and cloud snapshots in Notion. Use for Home, Paper files, Notion save/open, workspace setup and server controls.
 metadata:
-  version: "0.7.0-preview.6"
+  version: "0.7.0-preview.7"
 ---
 
 # Paper
@@ -41,6 +41,6 @@ Share exports selected artwork to PNG or HTML, the layer records to JSON, or the
 
 For Notion use the existing Share/Home UI or `paper_notion`: status, connect, pages, save, open and disconnect. Read the [Notion workflow](references/notion.md) for authentication, destination selection and cloud conflicts. The UI operates directly; it does not ask the person to prompt an agent for each save. Cloud open creates a local copy; explicit saves update its linked page. Prefer an existing matching Paper/page before creating a duplicate. The person controls account consent and publishing. Never copy connection credentials into a Paper or notes.
 
-Read [sharing](references/sharing.md) before configuring invitations, another agent or external hosting. Clean views receive live saves; conflicting edits are retained for reconciliation. A saved Notion snapshot and interactive preview do not turn Notion into the live editing server.
+Read [sharing](references/sharing.md) before configuring invitations, another agent or external hosting. Share → Internet uses optional cloudflared for a temporary HTTPS link, with no account or separate backend. Start public sharing only when the person requests it; never forward the owner server. Install the native CLI only when authorized; ordinary local use does not need it. Clean views receive live saves; conflicting edits are retained for reconciliation. A saved Notion snapshot and interactive preview do not turn Notion into the live editing server.
 
 `paper_home {}` also reports servers for the known collections. To stop one when requested, use `action:"stop"`, its `workspaceId` and current server `instance`. Stopping closes that server's browser connections and invitations; it preserves files. Use the listed identity, not a process-name search or blanket kill. Reopen with `paper_open` when needed. Browser Home offers the same operation under Servers.

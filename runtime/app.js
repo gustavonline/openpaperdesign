@@ -1,5 +1,5 @@
 import {setupPresence} from './presence.js?v=3a51591568af';
-import { setupSharing } from './sharing.js?v=40f15ce77f44';
+import { setupSharing } from './sharing.js?v=6f98f4d01e0b';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=c314dc581c2d';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers} from './editing-model.js?v=1d0049e52e98';
@@ -565,7 +565,7 @@ const FEEDBACK_BACKUP = `openpaperdesign-${paperId}-feedback-backup`;
 const feedback = { workspace: null, revision: null, last: 'null', pendingBytes: null, saving: null, timer: 0, error: null, conflict: false };
 const keepBackup = bytes => { try { bytes === null ? localStorage.removeItem(FEEDBACK_BACKUP) : localStorage.setItem(FEEDBACK_BACKUP, bytes); } catch { /* The visible status still says what is unsaved. */ } };
 async function loadFeedback() {
-  const response = await fetch(feedbackUrl, { cache: 'no-store' });
+  const response = await fetch(feedbackUrl, { cache: 'no-store',signal:AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
   feedback.revision = data.revision; feedback.workspace = data.workspace ?? null; feedback.last = JSON.stringify(feedback.workspace);
@@ -592,7 +592,7 @@ function flushFeedback() {
     try {
       // The file couldn't be read at open: read it now; notes already in it make this a conflict, never an overwrite.
       if (feedback.revision === null) {
-        const current = await fetch(feedbackUrl, { cache: 'no-store' }); if (!current.ok) throw new Error(`couldn’t read the notes file (HTTP ${current.status})`);
+        const current = await fetch(feedbackUrl, { cache: 'no-store',signal:AbortSignal.timeout(15000) }); if (!current.ok) throw new Error(`couldn’t read the notes file (HTTP ${current.status})`);
         const data = await current.json(); feedback.revision = data.revision; feedback.last = 'null';
         if (data.workspace != null) { feedback.conflict = true; return false; }
       }
@@ -1496,12 +1496,12 @@ function migrateFeedback() {
 // conflict that keeps them. A guide change re-reads DESIGN.md.
 const quiet = () => !pending && !saving && !saveError && !conflict && !textEdit && !liveEdit && titleInput.hidden && !gesture;
 let reloading = false;
-async function remotePaper(force = false,actor = null) {
+async function remotePaper(force = false,actor = null,silent=false) {
   if (conflict || reloading) return;
   if (!quiet()) { conflict = true; updateSaveState(); return; }
   reloading = true;
   try {
-    const response = await fetch(sceneUrl, { cache: 'no-store' }); if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const response = await fetch(sceneUrl, { cache: 'no-store',signal:AbortSignal.timeout(15000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const loaded = await response.json(), next = loaded.paper;
     if (loaded.revision === revision && !force) return true;
     if (!isPaperFormat(next?.format) || next.version !== 1 || !Array.isArray(next.pages) || !next.pages.length) throw new Error('unknown format');
@@ -1512,37 +1512,31 @@ async function remotePaper(force = false,actor = null) {
     selected = null; selection.clear();buildScene(); renderPages(); showTitle(); updateHistory();
     selectMany(keep.filter(key=>nodes.has(key)));
     designText = null; renderDesign(); paintCamera();presenceUI?.documentChanged(previous,next,actor);return true;
-  } catch (error) { message(`This Paper changed elsewhere, but couldn’t be reloaded (${error.message}).`); }
+  } catch (error) { if(!silent)message(`This Paper changed elsewhere, but couldn’t be reloaded (${error.message}).`);return false; }
   finally { reloading = false; }
 }
 let reloadingFeedback = false;
-async function remoteFeedback() {
+async function remoteFeedback(silent=false) {
   if (feedback.conflict) return;
   const dirty = () => feedback.saving || feedback.pendingBytes !== null || (editable(document.activeElement) && $('#mesurer-root').contains(document.activeElement));
   if (dirty()) { feedback.conflict = true; updateSaveState(); return; }
   if (reloadingFeedback) return;
   reloadingFeedback = true;
   try {
-    const response = await fetch(feedbackUrl, { cache: 'no-store' }); if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const response = await fetch(feedbackUrl, { cache: 'no-store',signal:AbortSignal.timeout(15000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     if (dirty()) { feedback.conflict = true; updateSaveState(); return; }
     if (data.revision === feedback.revision) return;
     feedback.revision = data.revision; feedback.workspace = data.workspace ?? null; feedback.last = JSON.stringify(feedback.workspace); feedback.error = null;
     if (mesurerLib && mesurer) { mesurerHost.startInDesign = mesurerHost.stableMode !== 'inspect'; mesurerLib.openMesurer($('#mesurer-root'), mesurerHost); }
     updateSaveState();
-  } catch (error) { message(`Notes changed elsewhere, but couldn’t be reloaded (${error.message}).`); }
+  } catch (error) { if(!silent)message(`Notes changed elsewhere, but couldn’t be reloaded (${error.message}).`);return false; }
   finally { reloadingFeedback = false; }
 }
 function listenForChanges() {
-  if (!window.EventSource) return;
-  const events = new EventSource(`/api/events${paperQuery}`);
-  const ours = e => { try { const d = JSON.parse(e.data); return d?.paperId === paperId && d.clientId !== clientId ? d : null; } catch { return null; } };
-  events.addEventListener('paper-changed', e => { const d = ours(e); if (d && d.revision !== revision) remotePaper(false,d.clientId); });
-  events.addEventListener('feedback-changed', e => { const d = ours(e); if (d && d.revision !== feedback.revision) remoteFeedback(); });
-  events.addEventListener('guide-changed', e => { if (ours(e)) { designText = null; renderDesign(); } });
-  for(const type of ['presence','presence-snapshot'])events.addEventListener(type,e=>{try{presenceUI?.receive(JSON.parse(e.data));}catch{}});
-  events.addEventListener('access-revoked', () => {
-    presenceUI?.stop();events.close();
+  let events,timer,stopped=false,guideRevision,failures=0,polling=false;
+  function revoked(){
+    stopped=true;clearTimeout(timer);presenceUI?.stop();events?.close();
     if (!(pending || saving || textEdit || liveEdit || gesture || feedback.saving || feedback.pendingBytes !== null)) { leaving = true; location.replace('/join'); return; }
     // Access can end while a guest is drawing or typing. Keep that draft downloadable, with editing
     // frozen, rather than replacing it with the join screen. The server has already revoked all writes.
@@ -1553,7 +1547,37 @@ function listenForChanges() {
     $('#title-text').disabled = true; $('[data-action="rename"]').disabled = true;
     showTitle(); const badge = $('.access-badge'); if (badge) badge.textContent = 'Access ended';
     updateSaveState();
-  });
+  }
+  // Quick Tunnels buffer SSE. One small, scoped revision/presence poll keeps internet
+  // guests live without a new collaboration service or another transport dependency.
+  if(access.poll){
+    async function poll(){
+      if(polling||stopped)return;polling=true;
+      try{
+        if(document.hidden)return;
+        const seen=revision,seenNotes=feedback.revision;
+        const response=await fetch(`/api/updates${paperQuery}`,{cache:'no-store',signal:AbortSignal.timeout(6000)});
+        if(stopped)return;if(response.status===401||response.status===403){revoked();return;}if(!response.ok)throw new Error('Connection unavailable');
+        const data=await response.json();if(stopped)return;
+        if(revision===seen&&data.revision!==seen&&quiet()&&await remotePaper(false,null,true)===false)throw new Error('Paper could not be refreshed');
+        if(feedback.revision===seenNotes&&data.feedbackRevision!==seenNotes&&!feedback.saving&&feedback.pendingBytes===null&&!(editable(document.activeElement)&&$('#mesurer-root').contains(document.activeElement))&&await remoteFeedback(true)===false)throw new Error('Feedback could not be refreshed');
+        if(guideRevision&&guideRevision!==data.guideRevision){designText=null;renderDesign();}guideRevision=data.guideRevision;
+        if(data.presence)presenceUI?.receive(data.presence);
+        if(failures>=3){const badge=$('.access-badge');if(badge)badge.textContent=canEdit?'Can edit':'View only';}failures=0;
+      }catch{if(!stopped&&++failures===3){const badge=$('.access-badge');if(badge)badge.textContent='Reconnecting…';message('Shared connection unavailable. Your local changes are kept. Ask the owner if the link has stopped.');}}
+      finally{polling=false;if(!stopped)timer=setTimeout(poll,failures>=3?10000:2000);}
+    }
+    window.addEventListener('pagehide',()=>{stopped=true;clearTimeout(timer);});
+    window.addEventListener('pageshow',e=>{if(e.persisted&&!accessRevoked){stopped=false;presenceUI?.changed();void poll();}});void poll();return;
+  }
+  if(!window.EventSource)return;
+  events=new EventSource(`/api/events${paperQuery}`);
+  const ours=e=>{try{const d=JSON.parse(e.data);return d?.paperId===paperId&&d.clientId!==clientId?d:null;}catch{return null;}};
+  events.addEventListener('paper-changed',e=>{const d=ours(e);if(d&&d.revision!==revision)remotePaper(false,d.clientId);});
+  events.addEventListener('feedback-changed',e=>{const d=ours(e);if(d&&d.revision!==feedback.revision)remoteFeedback();});
+  events.addEventListener('guide-changed',e=>{if(ours(e)){designText=null;renderDesign();}});
+  for(const type of ['presence','presence-snapshot'])events.addEventListener(type,e=>{try{presenceUI?.receive(JSON.parse(e.data));}catch{}});
+  events.addEventListener('access-revoked',revoked);
 }
 
 async function start() {
