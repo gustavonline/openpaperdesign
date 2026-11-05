@@ -267,10 +267,11 @@ cardMenu.addEventListener('click',async event=>{
 });
 // Dialog actions report errors in place and keep the dialog open so nothing is lost.
 async function confirmAction(dialog,problemNode,submit,task){
-  if(busy)return;busy=true;submit.disabled=true;problemNode.hidden=true;let done=false;
-  try{await task();done=true;dialog.close();}catch(error){problemNode.textContent=error.message;problemNode.hidden=false;}
+  if(busy)return;busy=true;submit.disabled=true;problemNode.hidden=true;let done=false,result;
+  try{result=await task();done=true;dialog.close();}catch(error){problemNode.textContent=error.message;problemNode.hidden=false;}
   finally{busy=false;submit.disabled=false;}
-  if(done)await load();
+  if(done){await load();return {value:result};}
+  return null;
 }
 document.getElementById('rename-form').addEventListener('submit',event=>{
   event.preventDefault();const p=chosen,name=renameName.value.trim().replace(/\s+/g,' ');
@@ -286,12 +287,14 @@ async function undo(workspaceId,trashId,paperId){
 }
 document.getElementById('confirm-trash').addEventListener('click',event=>{
   const p=chosen;if(!p)return;
-  void confirmAction(trashDialog,trashProblem,event.currentTarget,async()=>{
-    const moved=await request({action:'trash',workspaceId:p.workspaceId,paperId:p.id});
-    lastFocus=q;
-    // The card that opened the menu is gone, so Undo takes focus and stays reachable from the keyboard.
+  const submit=event.currentTarget;
+  void(async()=>{
+    const result=await confirmAction(trashDialog,trashProblem,submit,()=>request({action:'trash',workspaceId:p.workspaceId,paperId:p.id}));
+    if(!result)return;
+    const moved=result.value;lastFocus=q;
+    // Focus after closing the modal; modal focus restoration would otherwise take it away from Undo.
     notice(`Moved “${moved.name}” to Recently deleted.`,[['Undo',()=>undo(moved.workspaceId,moved.trashId,moved.paperId)],['View',openDeleted]]).focus({preventScroll:true});
-  });
+  })();
 });
 document.getElementById('cancel-trash').addEventListener('click',()=>trashDialog.close());
 
