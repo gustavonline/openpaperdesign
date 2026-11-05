@@ -31,6 +31,7 @@ function syncState(r) {
   if(r.remote==='changed')return 'conflict';
   if(r.remote==='denied')return 'no-access';
   if(r.remote==='unavailable')return 'offline';
+  if(r.remote==='unchecked')return 'refresh-needed';
   return r.changed?'local-changes':'saved';
 }
 function previewFiles(preview) {
@@ -87,7 +88,7 @@ function markup(managedId,remoteRevision,savedAt,files) {
 
 // Synchronous construction; all disk/network work is lazy and promise-based.
 export function createNotion({library,configDir,origin}) {
-  let client,folder,setup,closed=false,connectionError;
+  let client,statusClient,folder,setup,closed=false,connectionError;
   const pending=new Map(),inflight=new Set(),workspace=hex(library.workspace).slice(0,32);
   function currentOrigin() {
     let u;try{u=new URL(typeof origin==='function'?origin():origin);}catch{fail(500,'Notion needs the running workspace origin');}
@@ -99,14 +100,14 @@ export function createNotion({library,configDir,origin}) {
     if(!setup)setup=(async()=>{
       folder=await privateDirectory(configDir);
       if(folder===library.root||folder.startsWith(library.root+path.sep))fail(500,'Notion credentials must be stored outside Papers');
-      client=new NotionClient(folder);
+      client=new NotionClient(folder);statusClient=new NotionClient(folder,{refreshTokens:false});
     })().catch(e=>{setup=null;throw e;});
     await setup;
   }
   const linkFile=id=>path.join(folder,`notion-paper-${workspace}-${id}.json`);
   async function linked(id) {if(!ID.test(id||''))fail(400,'Invalid Paper identity');await library.folder(id);return readPrivate(linkFile(id),true);}
   async function authenticated() {await client.access();return client.auth();}
-  async function fetchPage(id) {return client.call('fetch',{id:pageId(id)});}
+  async function fetchPage(id,reader=client) {return reader.call('fetch',{id:pageId(id)});}
   async function remoteForSave(id) {
     try{return managed(await fetchPage(id));}
     catch(e){if(e.status===422)fail(409,'The remote Paper snapshot changed or is incomplete. Open it to compare; local and remote versions were preserved');throw e;}
@@ -161,9 +162,9 @@ export function createNotion({library,configDir,origin}) {
     let timer;
     const check=(async()=>{
       // A read may be repeated once after the client drops a cached session for a changed connection; writes never are.
-      const read=()=>fetchPage(state.link.pageId).catch(e=>e.status===503?fetchPage(state.link.pageId):Promise.reject(e));
+      const read=()=>fetchPage(state.link.pageId,statusClient).catch(e=>e.status===503?fetchPage(state.link.pageId,statusClient):Promise.reject(e));
       try{return differs(managed(await read()),state)?'changed':'current';}
-      catch(e){return e.status===422||e.status===409?'changed':e.status===401?'reconnect':e.status===403?'denied':'unavailable';}
+      catch(e){return e.code==='NOTION_REFRESH_REQUIRED'?'unchecked':e.status===422||e.status===409?'changed':e.status===401?'reconnect':e.status===403?'denied':'unavailable';}
     })();
     const limit=new Promise(resolve=>{timer=setTimeout(resolve,REMOTE_CHECK_MS,'unavailable');});
     try{return await Promise.race([check,limit]);}finally{clearTimeout(timer);}
@@ -245,7 +246,7 @@ export function createNotion({library,configDir,origin}) {
     },
     async disconnect() {
       await ready();if(inflight.size)fail(423,'A Paper is saving to Notion. Complete the save before disconnecting');pending.clear();connectionError=undefined;await withPrivateLock(folder,'notion-auth',()=>fs.rm(client.file,{force:true}));
-      client.close();client=new NotionClient(folder);return {connected:false};
+      client.close();statusClient.close();client=new NotionClient(folder);statusClient=new NotionClient(folder,{refreshTokens:false});return {connected:false};
     },
     async pages({query='',cursor}={}) {
       await ready();if(typeof query!=='string'||query.length>500||cursor!==undefined&&(typeof cursor!=='string'||cursor.length>4096))fail(400,'Invalid Notion page search');
@@ -327,7 +328,7 @@ export function createNotion({library,configDir,origin}) {
       }catch{fail(500,`Paper imported as ${imported.id}, but its private Notion link could not be stored. The imported Paper is safe; check dataHome permissions`);}
       return {id:imported.id,name:imported.name,href:imported.href};
     },
-    close(){closed=true;pending.clear();client?.close();}
+    close(){closed=true;pending.clear();client?.close();statusClient?.close();}
   };
   // Public errors never include fetch exceptions, OAuth codes, tokens or remote response bodies.
   return Object.fromEntries(Object.entries(methods).map(([name,method])=>[name,name==='close'?method:async(...args)=>{

@@ -67,6 +67,19 @@ async function harness(t,{auth={client_id:'client-a',workspaceId:'ws-a',name:'Wo
 }
 const saveFirst=h=>h.notion.save(h.id,{parentId:'33333333333333333333333333333333',title:'Linked'});
 
+test('passive checks never rotate expired credentials or discard an offline login',async t=>{
+  const h=await harness(t);await saveFirst(h);
+  const file=path.join(h.folder,'notion-auth.json');
+  const auth=JSON.parse(await fs.readFile(file,'utf8'));
+  await h.writeAuth({...auth,expiresAt:Date.now()-1000,refresh_token:'retained-refresh-token'});
+  const before=await fs.readFile(file,'utf8');let requests=0;
+  globalThis.fetch=async()=>{requests++;throw new TypeError('offline');};
+  const status=await h.notion.status(h.id);
+  assert.equal(status.connected,true);assert.equal(status.syncState,'refresh-needed');
+  assert.equal(status.remote,'unchecked');assert.equal(requests,0);
+  assert.equal(await fs.readFile(file,'utf8'),before);
+});
+
 test('status distinguishes unlinked, saved and local changes without a remote write',async t=>{
   const h=await harness(t);
   assert.equal((await h.notion.status(h.id)).syncState,'unlinked');

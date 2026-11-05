@@ -112,8 +112,9 @@ export function setupNotion({
       const next = await status();
       if (!current(token, screenId) || mutating) return;
       const flipped = next.connected !== connectionState.connected;
+      const changed = JSON.stringify(next) !== JSON.stringify(connectionState);
       connectionState = next;
-      if (flipped || viewKind === 'saved') resume(token);
+      if (flipped || viewKind === 'saved' && changed) resume(token);
       else connectionControl();
     } catch { /* A failed passive check keeps what is shown; explicit actions report errors. */ }
   }
@@ -331,12 +332,14 @@ export function setupNotion({
       body.append(note(`${time ? `Last saved: ${time}. ` : ''}${changed ? 'This Paper has local changes since then.' : 'No local changes since then.'}`));
       body.append(actions(...(state === 'other-account' ? [] : [recheck()]), ...open));
       body.append(actions(...(state === 'offline' ? [] : [elsewhere()])));
+      body.querySelector('button,a[href]')?.focus();
       return;
     }
     body.append(justSaved ?
       live(changed ? 'Saved to Notion. You edited this Paper while it was saving; those edits are not in Notion yet.' : 'Saved to Notion.') :
       note('Save changes adds the latest version to this same Notion page. Earlier versions are kept.'));
     body.append(note(time ? `Last saved: ${time}` : 'No last-saved time is available.'));
+    if (state === 'refresh-needed') body.append(note('The Notion page has not been checked. Saving refreshes your connection and checks the page before writing.'));
     if (!justSaved) body.append(note(changed ? 'This Paper has local changes since its last Notion save.' : 'No local changes since its last Notion save.'));
     const save = button(changed ? 'Save changes' : 'Save again', () => savePaper(token), changed ? 'notion-primary' : '');
     body.append(actions(save, ...open));

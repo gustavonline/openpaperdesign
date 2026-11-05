@@ -10,7 +10,7 @@ Each local copy records its last cloud snapshot. A cloud version that changed si
 
 ## Sync behavior
 
-Only an explicit Save writes to the linked page, and nothing is written in the background. Status reads are safe to repeat and never write. Opening the Notion dialog, and returning focus to it (at most every five seconds), re-reads the stored connection, compares the Paper with its last saved snapshot, and fetches the linked page once to compare its managed section with the last known revision. A failed or slow check (about ten seconds) is reported as a state, not an error, and does not block local work. Open always fetches the page fresh. Each Paper reports one `syncState` from `paper_notion` status or `GET /api/notion/status?paper=ID`, in this order:
+Only an explicit Save writes to the linked page, and nothing is written in the background. Status checks never upload, save or rotate refresh credentials. An expired or nearly expired token leaves the remote page unchecked until an explicit Save/Open/Pages action refreshes the connection. Opening the Notion dialog, and returning focus to it (at most every five seconds), re-reads the stored connection, compares the Paper with its last saved snapshot, and fetches the linked page once to compare its managed section with the last known revision. A failed or slow check (about ten seconds) is reported as a state, not an error, and does not block local work. Open always fetches the page fresh. Each Paper reports one `syncState` from `paper_notion` status or `GET /api/notion/status?paper=ID`, in this order:
 
 - `not-connected` / `reconnect`: no login, or a login that expired, was revoked or was refused (401). The saved link and local Paper are kept; Connect again.
 - `unlinked`: connected, with no Notion page chosen yet.
@@ -20,6 +20,7 @@ Only an explicit Save writes to the linked page, and nothing is written in the b
 - `conflict`: the page's managed snapshot changed or is incomplete. Save refuses with 409. Open the Notion version as a separate local Paper, or save this Paper to a separate page; neither copy is overwritten.
 - `no-access`: Notion denied access to the linked page (403).
 - `offline`: Notion could not be reached or answered with an error. Save is withheld in the dialog; local edits remain.
+- `refresh-needed`: the remote page was not checked because a credential refresh is needed. The stored login is preserved; an explicit Save refreshes it and checks the page before any write.
 - `local-changes` / `saved`: connected and current; `changed` says whether the Paper differs from its last saved snapshot.
 
 Disconnect, an expired login and reconnecting to a different workspace all discard the cached Notion session. A link remembers the workspace id only when Notion reports one, so reconnecting the same workspace never reads as an account switch. Credentials and connection state are owner-only; invited guests and shared sessions never reach these routes.

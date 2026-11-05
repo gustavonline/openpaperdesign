@@ -142,7 +142,7 @@ export function toolResult(result) {
 }
 
 export class NotionClient {
-  constructor(folder) {this.folder=folder;this.file=path.join(folder,'notion-auth.json');this.seq=0;this.session=null;this.protocol='2025-06-18';this.tools=null;this.initializing=null;this.boundClientId=null;this.abort=new AbortController();}
+  constructor(folder,{refreshTokens=true}={}) {this.refreshTokens=refreshTokens;this.folder=folder;this.file=path.join(folder,'notion-auth.json');this.seq=0;this.session=null;this.protocol='2025-06-18';this.tools=null;this.initializing=null;this.boundClientId=null;this.abort=new AbortController();}
   async auth(){return plain(this.file,true);}
   async store(auth){await writePrivate(this.file,auth);}
   async access() {
@@ -152,6 +152,7 @@ export class NotionClient {
       if(this.boundClientId&&this.boundClientId!==a.client_id){this.boundClientId=a.client_id;this.tools=null;this.session=null;fail(503,'Notion was reconnected in another workspace. Try this action again to use the new connection');}
       this.boundClientId=a.client_id;
       if(!a.expiresAt||a.expiresAt>Date.now()+60000)return a.access_token;
+      if(!this.refreshTokens){const error=new PaperError(409,'Notion needs an explicit action to refresh its connection');error.code='NOTION_REFRESH_REQUIRED';throw error;}
       if(!a.refresh_token){await this.store({...a,reconnect:true});fail(401,'Notion authorization expired. Connect Notion again');}
       // Intent survives a crash/timeout so a rotated refresh token is never blindly reused.
       await this.store({...a,refreshing:true});

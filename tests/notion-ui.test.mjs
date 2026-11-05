@@ -33,6 +33,7 @@ globalThis.history={replaceState(){}};
 const {setupNotion}=await import('../runtime/notion-ui.js');
 
 const paper='p1',link={pageId:'11111111111111111111111111111111',url:'https://www.notion.so/11111111111111111111111111111111',savedAt:'2026-11-05T10:00:00.000Z'};
+const controllers=new Set();
 function harness(statuses,{access,save}={}) {
   const calls=[],queue=[...statuses];
   const request=async(path,{method='GET'}={})=>{
@@ -42,7 +43,7 @@ function harness(statuses,{access,save}={}) {
     if(path.startsWith('/api/notion/connection'))return {connected:false};
     throw new Error(`unexpected ${path}`);
   };
-  const ui=setupNotion({paperId:paper,access,request});
+  const ui=setupNotion({paperId:paper,access,request});controllers.add(ui);
   const dialog=()=>document.body.children.at(-1);
   const text=()=>dialog().textContent;
   const buttons=()=>dialog().querySelectorAll('button').map(b=>b.textContent.trim());
@@ -51,7 +52,7 @@ function harness(statuses,{access,save}={}) {
 }
 const connected={connected:true,name:'Workspace',link,paperName:'P'};
 const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
-test.afterEach(()=>{document.body.children=[];});
+test.afterEach(()=>{for(const ui of controllers)ui.destroy();controllers.clear();document.body.children=[];});
 
 test('guests and shared sessions never reach the owner Notion routes',async()=>{
   for(const access of [{role:'editor',shared:true},{role:'owner',shared:true},{role:'viewer',shared:false}]) {
@@ -68,6 +69,7 @@ test('each sync state renders its own message and withholds unsafe saves',async(
   const cases=[
     [{...connected,syncState:'saved',changed:false},/No local changes/,'Save again'],
     [{...connected,syncState:'local-changes',changed:true},/local changes since its last Notion save/,'Save changes'],
+    [{...connected,syncState:'refresh-needed',remote:'unchecked',changed:true},/has not been checked/,'Save changes'],
     [{...connected,syncState:'conflict',changed:true,remote:'changed'},/changed in Notion since your last save/,null],
     [{...connected,syncState:'offline',changed:true,remote:'unavailable'},/could not be reached/,null],
     [{...connected,syncState:'no-access',remote:'denied'},/denied access to the linked page/,null],
@@ -112,6 +114,17 @@ test('a save that finishes after a local edit reports the edit as still unsaved'
   await h.ui.save();h.press('Save changes');await settle();await settle();
   assert.match(h.text(),/edited this Paper while it was saving/);
   assert.ok(h.buttons().includes('Save changes'));
+});
+
+test('an unchanged focus refresh keeps the existing keyboard target',async()=>{
+  const state={...connected,syncState:'offline',remote:'unavailable'};
+  const h=harness([state,state]);const now=Date.now;
+  try{
+    await h.ui.save();
+    const button=document.body.children.at(-1).querySelectorAll('button').find(b=>b.textContent==='Check again');
+    button.focus();Date.now=()=>now()+6000;windowEvents.fire('focus');await settle();
+    assert.equal(document.activeElement,button);assert.equal(button.isConnected,true);
+  }finally{Date.now=now;h.ui.destroy();}
 });
 
 test('disconnect clears the connected view and the next open re-reads status',async()=>{
