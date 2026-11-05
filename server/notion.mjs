@@ -71,7 +71,7 @@ function markup(managedId,remoteRevision,savedAt,files) {
 
 // Synchronous construction; all disk/network work is lazy and promise-based.
 export function createNotion({library,configDir,origin}) {
-  let client,folder,setup,closed=false;
+  let client,folder,setup,closed=false,connectionError;
   const pending=new Map(),inflight=new Set(),workspace=hex(library.workspace).slice(0,32);
   function currentOrigin() {
     let u;try{u=new URL(typeof origin==='function'?origin():origin);}catch{fail(500,'Notion needs the running workspace origin');}
@@ -146,7 +146,7 @@ export function createNotion({library,configDir,origin}) {
     async status(paperId) {
       await ready();const a=await client.auth();
       const connected=Boolean(a?.access_token&&!a.reconnect&&!a.refreshing&&(!a.expiresAt||a.expiresAt>Date.now()||a.refresh_token));
-      const result={connected,...(connected&&a.name?{name:a.name}:{})};
+      const result={connected,...(connected&&a.name?{name:a.name}:{}),...(connectionError?{connectionError}:{})};
       if(paperId) {
         const state=await linked(paperId);
         if(state?.link) {
@@ -158,6 +158,7 @@ export function createNotion({library,configDir,origin}) {
       return result;
     },
     async connect({returnTo}={}) {
+      connectionError=undefined;
       await ready();const now=Date.now();for(const [state,p] of pending)if(p.expires<=now)pending.delete(state);
       let destination;
       if(returnTo!==undefined){
@@ -186,6 +187,7 @@ export function createNotion({library,configDir,origin}) {
     async callback(value) {
       await ready();let url;try{url=new URL(value);}catch{fail(400,'Invalid Notion callback URL');}
       const states=url.searchParams.getAll('state'),p=states.length===1?pending.get(states[0]):null;
+      try{
       if(p)pending.delete(states[0]);
       if(!p||p.expires<Date.now()||!p.clientId)fail(400,'Notion connection expired or was already used. Start Connect again');
       if(inflight.size)fail(423,'A Paper is saving to Notion. Complete the save, then Connect again');
@@ -199,6 +201,7 @@ export function createNotion({library,configDir,origin}) {
         await client.store(tokens(value,{client_id:p.clientId}));
       });
       client.tools=null;client.session=null;client.boundClientId=null;pending.clear();return {connected:true,...(p.returnTo?{returnTo:p.returnTo}:{})};
+      }catch(error){if(p?.returnTo){error.returnTo=p.returnTo;connectionError='Notion sign-in did not complete. Try connecting again.';}throw error;}
     },
     async disconnect() {
       await ready();if(inflight.size)fail(423,'A Paper is saving to Notion. Complete the save before disconnecting');pending.clear();await withPrivateLock(folder,'notion-auth',()=>fs.rm(client.file,{force:true}));

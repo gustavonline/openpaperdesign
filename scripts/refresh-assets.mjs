@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 const root=new URL('../runtime/',import.meta.url);
 const hash=async name=>createHash('sha256').update(await fs.readFile(new URL(name,root))).digest('hex').slice(0,12);
+for(const name of ['app.js','home.js','notion-ui.js']){const file=new URL(name,root);let code=await fs.readFile(file,'utf8');code=code.replace(/from '\.\/surface\.js(?:\?v=[a-zA-Z0-9_-]+)?'/g,`from './surface.js?v=${await hash('surface.js')}'`);await fs.writeFile(file,code);}
 const appFile=new URL('app.js',root);let app=await fs.readFile(appFile,'utf8');
 const matcher=/import\('\.\/mesurer\.js(?:\?v=[a-zA-Z0-9_-]+)?'\)/g;
 if([...app.matchAll(matcher)].length!==1)throw new Error('Expected one embedded Mesurer import');

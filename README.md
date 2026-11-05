@@ -22,6 +22,8 @@ codex plugin add openpaperdesign@openpaperdesign
 
 After installing or updating, quit and reopen Codex to reload its sidebar Home and local tools. Then open **OpenPaperDesign** in the desktop sidebar, or ask your agent to open Home.
 
+Home, Papers and the Notion picker use the same plugin window. Use the Paper menu in the upper-left corner → **All Papers** to return Home. Notion sign-in opens separately; its picker stays in Paper.
+
 **Claude Code**
 
 ```text

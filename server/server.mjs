@@ -90,7 +90,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         if(pathname==='/api/notion/callback'&&req.method==='GET'){
           let destination;
           try{destination=(await notion.callback(url)).returnTo||'/home.html#notion';}
-          catch{destination='/home.html?notion_error=1#notion';}
+          catch(error){destination=error.returnTo==='/home.html?notion_connected=1'?'/home.html?notion_connected=1&notion_error=1':'/home.html?notion_error=1#notion';}
           res.writeHead(303,{'Location':destination,'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});res.end();return;
         }
         if(pathname==='/api/notion/status'&&req.method==='GET')return json(res,200,await notion.status(url.search?paperId(url):undefined));
@@ -137,6 +137,10 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       }
       if(pathname.startsWith('/api/'))throw new PaperError(404,'Unknown API action');
       if(!['GET','HEAD'].includes(req.method))throw new PaperError(405,'Method not allowed');
+      if(pathname==='/home.html'&&url.searchParams.get('notion_connected')==='1'){
+        const failed=url.searchParams.get('notion_error')==='1';res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",'Referrer-Policy':'no-referrer'});
+        res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Notion — Paper</title><style>body{font:15px system-ui;margin:15vh auto;max-width:420px;padding:24px;line-height:1.6}h1{font-size:22px}</style><h1>${failed?'Sign-in did not complete':'Notion connected'}</h1><p>Return to OpenPaperDesign.${failed?' Choose Connect to Notion to try again.':' You can close this tab.'}</p></html>`);return;
+      }
       if(pathname.startsWith('/Paper/')){
         const [, ,id,...parts]=pathname.split('/'),folder=await library.folder(id),relative=parts.join('/');
         if(!['paper.json','DESIGN.md','CONTEXT.md','feedback.json'].includes(relative)&&!relative.startsWith('assets/'))throw new PaperError(404,'Not found');
@@ -192,7 +196,7 @@ export const TOOLS=[
 ];
 export async function serveStdio() {
   // An installed version can be pruned while this process is still attached to its host.
-  const editor=await loadRuntime(RUNTIME),homeView=await homeResource(editor);
+  const editor=await loadRuntime(RUNTIME);
   const apps=new Map(),agentClient=randomBytes(16).toString('hex');let active=null;
   const getApp=async root=>{
     const previous=apps.get(root);if(previous&&(previous.closed||!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance))apps.delete(root);
@@ -277,8 +281,8 @@ export async function serveStdio() {
       else if(request.method==='resources/list')result={resources:[{uri:HOME_URI,name:'OpenPaperDesign Home',mimeType:HOME_MIME}]};
       else if(request.method==='resources/read'){
         // Existing desktop entries can retain the older template URI across an update.
-        if(![HOME_URI,'ui://openpaperdesign/home','ui://openpaperdesign/home/0.7.0-preview.4','ui://openpaperdesign/home/0.7.0-preview.5','ui://openpaperdesign/home/0.7.0-preview.6'].includes(request.params?.uri))throw new PaperError(404,'Unknown resource');
-        result={contents:[{...homeView,uri:request.params.uri}]};
+        if(![HOME_URI,'ui://openpaperdesign/home','ui://openpaperdesign/home/0.7.0-preview.4','ui://openpaperdesign/home/0.7.0-preview.5','ui://openpaperdesign/home/0.7.0-preview.6','ui://openpaperdesign/home/0.7.0-preview.7'].includes(request.params?.uri))throw new PaperError(404,'Unknown resource');
+        result={contents:[{...await homeResource(editor),uri:request.params.uri}]};
       }
       else if(request.method==='tools/call'){
         try{const value=await call(request.params?.name,request.params?.arguments);result=request.params?.name==='paper_home'?{_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI},structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:{content:[{type:'text',text:JSON.stringify(value)}]};}

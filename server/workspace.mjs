@@ -6,6 +6,7 @@ import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
 import {VERSION} from './runtime.mjs';
 const digest=workspace=>createHash('sha256').update(workspace).digest('hex');
+export function workspacePorts(workspace){const first=20000+parseInt(digest(workspace).slice(0,6),16)%35000;return Array.from({length:4},(_,slot)=>first+slot);}
 const registry=(workspace,legacy=false)=>path.join(os.tmpdir(),(legacy?'osm-paper-':'openpaperdesign-')+digest(workspace).slice(0,32));
 async function probe(url,workspace,instance,compatible=true){
   const response=await fetch(url+'/api/status',{signal:AbortSignal.timeout(1500)}),status=await response.json();
@@ -50,9 +51,7 @@ export async function registerWorkspace(workspace,url){
 }
 export async function openWorkspaceServer(workspace,start){
   const existing=await discoverWorkspace(workspace);if(existing)return existing;
-  const first=20000+parseInt(digest(workspace).slice(0,6),16)%35000;
-  for(let slot=0;slot<4;slot++){
-    const port=first+slot;
+  for(const port of workspacePorts(workspace)){
     try{return await start(port);}catch(error){if(error.code!=='EADDRINUSE')throw error;}
     // Another MCP process can bind just before publishing its instance; do not spawn a second host.
     for(let attempt=0;attempt<10;attempt++){

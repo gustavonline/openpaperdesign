@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {createHash, randomBytes} from 'node:crypto';
 import {PaperLibrary, PaperError, ID} from './library.mjs';
-import {inspectWorkspace,stopWorkspace} from './workspace.mjs';
+import {inspectWorkspace,stopWorkspace,workspacePorts} from './workspace.mjs';
 import {VERSION} from './runtime.mjs';
 
 export const HOME_URI=`ui://openpaperdesign/home/${VERSION}`;
@@ -74,10 +74,18 @@ export function createHome(open){
   };
 }
 export async function homeResource(editor){
-  let html=editor.text('home.html'),css=editor.text('chrome.css');
-  // A single inline resource shares the browser Home, without localhost fetches or nested frames.
-  css=css.replace(/@font-face\{[^}]*\}/g,'');
-  const script=editor.text('home.js');
-  html=html.replace('<html lang="en">','<html lang="en" data-mcp="true">').replace(/<link rel="stylesheet" href="chrome\.css[^\"]*">/,`<style>${css}</style>`).replace(/<link rel="stylesheet" href="notion\.css[^\"]*">/,'').replace(/<script type="module" src="home\.js[^\"]*"><\/script>/,()=>`<script type="module">${script}</script>`);
-  return {uri:HOME_URI,mimeType:HOME_MIME,text:html,_meta:{ui:{csp:{connectDomains:[],resourceDomains:[]},prefersBorder:false},'openai/ui':{preferredDisplayMode:'fullscreen',availableDisplayModes:['fullscreen']}}};
+  // Reuse the complete web app in one fullscreen surface. Only known workspaces'
+  // exact loopback origins are embeddable; no wildcard ports or remote pages.
+  const origins=new Set();
+  for(const entry of await workspaces()){
+    if(entry.unavailable)continue;
+    for(const port of workspacePorts(entry.root))origins.add(`http://127.0.0.1:${port}`);
+    try{const live=await inspectWorkspace(entry.root);if(live)origins.add(new URL(live.url).origin);}catch{}
+  }
+  const frameDomains=[...origins];
+  const css=editor.text('chrome.css').replace(/@font-face\{[^}]*\}/g,'');
+  const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenPaperDesign</title><style>${css}
+html,body{height:100%;margin:0;overflow:hidden}#paper-surface{width:100%;height:100%;border:0;display:block}#paper-surface[hidden]{display:none}#surface-status{position:fixed;inset:0;display:grid;place-content:center;gap:14px;padding:28px;background:var(--surface);color:var(--text);font-size:13px}#surface-status[hidden]{display:none}#surface-message{max-width:460px;margin:0;line-height:1.5}#surface-retry{justify-self:start;padding:7px 12px;border:1px solid var(--edge-strong);border-radius:6px;background:var(--field);color:var(--text)}
+</style></head><body><iframe id="paper-surface" name="openpaperdesign" title="OpenPaperDesign" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals" allow="clipboard-write" hidden></iframe><div id="surface-status" role="status"><p id="surface-message">Opening your Papers…</p><button id="surface-retry" type="button" hidden>Open Home</button></div><script id="paper-origins" type="application/json">${JSON.stringify(frameDomains)}</script><script type="module">${editor.text('home-host.js')}</script></body></html>`;
+  return {uri:HOME_URI,mimeType:HOME_MIME,text:html,_meta:{ui:{csp:{connectDomains:[],resourceDomains:[],frameDomains},permissions:{clipboardWrite:{}},prefersBorder:false},'openai/ui':{preferredDisplayMode:'fullscreen',availableDisplayModes:['fullscreen']}}};
 }
