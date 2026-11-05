@@ -1,14 +1,25 @@
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Mesurer, createLocalStoragePersistence } from 'mesurer';
+import { Mesurer as Inspection, createLocalStoragePersistence } from 'mesurer';
 
-// Personal settings (toolbar placement, pen, theme) stay in Mesurer's own browser-local settings key. The
+// Personal toolbar settings stay in the browser. The
 // workspace (notes, comments, guides, measurements) is the Paper's feedback: when the host supplies
 // `feedback` it is read from and written to the Paper's files through it (the native persistence
 // interface, native snapshot schema, unchanged); otherwise it stays browser-local under `persistKey`.
 // A saved toolbar position, dock and orientation are respected; only when none is saved yet does the
 // toolbar start snapped to the bottom centre.
-const LEGACY_PERSIST_KEY = 'paper-inspection', SETTINGS_KEY = 'mesurer-settings';
+const LEGACY_PERSIST_KEY = 'paper-inspection', SETTINGS_KEY = 'paper-inspection-settings';
+// Preserve browser preferences and pre-file feedback from earlier releases.
+function migrateSettings(persistKey){try{
+  if(localStorage.getItem(SETTINGS_KEY)===null){const old=localStorage.getItem('mesurer-settings');if(old!==null)localStorage.setItem(SETTINGS_KEY,old);}
+  if(localStorage.getItem(persistKey)===null&&persistKey.endsWith('-inspection')){
+    const old=localStorage.getItem(persistKey.replace(/-inspection$/,'-mesurer'));if(old!==null)localStorage.setItem(persistKey,old);
+  }
+}catch{}}
+export function readLegacyWorkspace(paperId){
+  for(const key of [`openpaperdesign-${paperId}-inspection`,`openpaperdesign-${paperId}-mesurer`,`osm-paper-${paperId}-mesurer`]){const value=readLocalWorkspace(key);if(value)return value;}
+  return null;
+}
 let root;
 const VIEW_FIELDS = ['enabled', 'minimized', 'xrayVisible', 'toolMode', 'rulersVisible', 'guideOrientation'];
 const PAGE_VIEW_FIELDS = ['selectedGuideIds', 'selectedArrowIds', 'selectedPenStrokeIds', 'selectedTextIds', 'activeMeasurement', 'heldDistances'];
@@ -30,7 +41,7 @@ function withPersonalView(shared, local) {
 }
 
 // Three derived facts, no extra state engine:
-// - Mesurer owns input whenever any native tool, menu, panel, comment placement or capture is on (artwork
+// - Inspection owns input whenever any native tool, menu, panel, comment placement or capture is on (artwork
 //   editing pauses);
 // - an Inspect tool is on (inspect/select, guides or rulers, X-ray, the colour sampler);
 // - the mode shown is Inspect while an Inspect tool other than a one-off sample is on, or while anything
@@ -44,7 +55,7 @@ const inspectToolOn = ({ tools, colorPicker, enabled, minimized }) =>
 const sampleOnly = ({ tools, colorPicker, enabled }) =>
   !!colorPicker?.active && !(!!enabled && (tools.mode === 'select' || tools.mode === 'guides' || tools.xrayVisible || tools.rulersVisible));
 
-// The snapdom Mesurer already bundles (its review capture), reused by the editor's PNG export.
+// Shared capture implementation, reused by the editor’s PNG export.
 export { snapdom } from '@zumer/snapdom';
 
 // A workspace kept browser-local by an earlier version (native record format, read by the native adapter),
@@ -60,7 +71,7 @@ const FrameIcon = () => (
   </svg>
 );
 
-// The Edit segment, first in the native mode switch. It also reports Mesurer's live state to the host and
+// The Edit segment, first in the native mode switch. It also reports the live tool state to the host and
 // gives it the native controls it may use (never synthetic clicks or keys).
 function DesignMode({ host, api, design }) {
   const { tools, colorPicker, enabled, minimized, onRestore, cancelTransient, nativeBusy } = api, first = useRef(true);
@@ -101,10 +112,11 @@ function DesignTools({ host, vertical }) {
   return <div ref={ref} className="paper-design-slot" data-vertical={vertical ? 'true' : 'false'} />;
 }
 
-export function openMesurer(container, host) {
+export function openInspection(container, host) {
   root?.unmount();
   root = createRoot(container);
   const persistKey = typeof host.persistKey === 'string' && host.persistKey ? host.persistKey : LEGACY_PERSIST_KEY;
+  migrateSettings(persistKey);
   const base = createLocalStoragePersistence(window, persistKey, SETTINGS_KEY), feedback = host.feedback;
   const withPlacement = settings => {
     settings = { ...(settings ?? {}) };
@@ -141,7 +153,7 @@ export function openMesurer(container, host) {
       tools: api.minimized ? null : <DesignTools key="paper-design-tools" host={host} vertical={api.vertical} />,
     };
   }, { bounds: host.bounds });
-  root.render(<Mesurer portalTarget={container} persistKey={persistKey} persistence={persistence} shortcutsEnabled
+  root.render(<Inspection portalTarget={container} persistKey={persistKey} persistence={persistence} shortcutsEnabled
     initialState={{ enabled: false, minimized: false, toolMode: 'none' }} features={{ responsive: false }} toolbarExtra={extra} />);
   return () => { root?.unmount(); root = undefined; };
 }

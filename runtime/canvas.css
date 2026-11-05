@@ -50,10 +50,10 @@ body:not(.right-open) #right-bar{right:5px;width:auto;padding-right:8px}
 .menu-row .reset{width:auto!important;height:24px!important;padding:0 8px!important;color:var(--text-2)!important}
 .menu-label{padding:4px 8px 6px;max-width:240px;font-size:11px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-/* Design tools. Shown inside Mesurer's native toolbar while Design is the current mode (sample-only
-   slot), and on their own only while Mesurer is minimised or unavailable. 32px buttons, 16px icons. */
+/* Design tools. Shown inside Inspection's native toolbar while Design is the current mode (sample-only
+   slot), and on their own only while Inspection is minimised or unavailable. 32px buttons, 16px icons. */
 #rail{display:none;position:fixed;z-index:25;left:calc(var(--lw) + 8px);top:50%;transform:translateY(-50%);padding:4px;flex-direction:column;gap:1px}
-body.rail-standalone:not(.mesurer-ready) #rail,body.mesurer-ready.mesurer-minimized #rail,body.mesurer-docked #rail{display:flex}
+body.rail-standalone:not(.paper-inspection-ready) #rail,body.paper-inspection-ready.paper-inspection-minimized #rail,body.paper-inspection-docked #rail{display:flex}
 #rail .ibtn{width:32px;height:32px;color:var(--text)}
 #rail .ibtn[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
 .family{position:relative;display:flex}
@@ -64,52 +64,52 @@ body.rail-standalone:not(.mesurer-ready) #rail,body.mesurer-ready.mesurer-minimi
    tints (as every native tool button below). */
 .paper-design-slot{display:flex;align-items:center;justify-content:center;padding:4px 0}
 .paper-design-slot[data-vertical=true]{padding:4px 0}
-body.mesurer-docked #rail{position:static;transform:none;padding:0;gap:4px;border:0;background:none;box-shadow:none}
+body.paper-inspection-docked #rail{position:static;transform:none;padding:0;gap:4px;border:0;background:none;box-shadow:none}
 .paper-design-slot[data-vertical=false] #rail{flex-direction:row}
-body.mesurer-docked #rail .ibtn{width:32px;height:32px;border-radius:var(--msr-radius-control,5px);color:var(--msr-color-ink-900,var(--text));background:transparent}
-body.mesurer-docked #rail .ibtn .icon{width:20px;height:20px;stroke-width:.8}
-body.mesurer-docked #rail .ibtn:hover{background:var(--hover)}
-body.mesurer-docked #rail .ibtn[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
-body.mesurer-docked #rail .ibtn:focus-visible{outline:1px solid var(--msr-color-ink-500,var(--accent));outline-offset:1px}
+body.paper-inspection-docked #rail .ibtn{width:32px;height:32px;border-radius:var(--msr-radius-control,5px);color:var(--msr-color-ink-900,var(--text));background:transparent}
+body.paper-inspection-docked #rail .ibtn .icon{width:20px;height:20px;stroke-width:.8}
+body.paper-inspection-docked #rail .ibtn:hover{background:var(--hover)}
+body.paper-inspection-docked #rail .ibtn[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
+body.paper-inspection-docked #rail .ibtn:focus-visible{outline:1px solid var(--msr-color-ink-500,var(--accent));outline-offset:1px}
 /* Edit is the first group of the native tool track [Edit | Inspect]: the same stage-size and track-offset
    rules the native groups use. At rest the stage shows one group; the native group motion (build.mjs)
    animates between them. Capture, comments and settings follow in both modes, after the native divider. */
-#mesurer-root .mesurer-toolbar-tool-slot[data-group=design],#mesurer-root .mesurer-toolbar-tool-stage[data-group=design]{width:var(--msr-design-size,auto)}
-#mesurer-root .mesurer-toolbar-tool-stage[data-group=inspect]:has([data-group=design]) .mesurer-toolbar-tool-track{transform:translateX(calc(-1 * var(--msr-design-size,0px)))}
-#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-slot[data-group=design],#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-stage[data-group=design]{width:auto;height:var(--msr-design-size,auto)}
-#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-stage[data-group=inspect]:has([data-group=design]) .mesurer-toolbar-tool-track{transform:translateY(calc(-1 * var(--msr-design-size,0px)))}
+#paper-inspection-root .paper-inspection-toolbar-tool-slot[data-group=design],#paper-inspection-root .paper-inspection-toolbar-tool-stage[data-group=design]{width:var(--msr-design-size,auto)}
+#paper-inspection-root .paper-inspection-toolbar-tool-stage[data-group=inspect]:has([data-group=design]) .paper-inspection-toolbar-tool-track{transform:translateX(calc(-1 * var(--msr-design-size,0px)))}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-orientation=vertical] .paper-inspection-toolbar-tool-slot[data-group=design],#paper-inspection-root .paper-inspection-toolbar-motion[data-orientation=vertical] .paper-inspection-toolbar-tool-stage[data-group=design]{width:auto;height:var(--msr-design-size,auto)}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-orientation=vertical] .paper-inspection-toolbar-tool-stage[data-group=inspect]:has([data-group=design]) .paper-inspection-toolbar-tool-track{transform:translateY(calc(-1 * var(--msr-design-size,0px)))}
 /* Native tool buttons: the editor's hover and its selected tint with accent ink, not the solid accent. */
-#mesurer-root .mesurer-toolbar-motion [data-tool-id]>button:not([aria-pressed=true]):hover{background:var(--hover)}
-#mesurer-root .mesurer-toolbar-motion [data-tool-id]>button[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
+#paper-inspection-root .paper-inspection-toolbar-motion [data-tool-id]>button:not([aria-pressed=true]):hover{background:var(--hover)}
+#paper-inspection-root .paper-inspection-toolbar-motion [data-tool-id]>button[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
 /* Corner chevrons (as OPD): a menu's caret is a small chevron in its button's corner, lower right on a
    horizontal bar and the canvas-side lower corner on a vertical one, pointing where the menu opens. It is
    still its own focusable button; the guide caret's slot takes no room. Same for the shapes chevron. */
-#mesurer-root .mesurer-toolbar-caret-anchor{position:relative;margin:0}
-#mesurer-root .mesurer-toolbar-caret-anchor:not(:has([data-tool-id])){flex:0 0 0;width:0;min-width:0;align-self:stretch;margin-left:-4px}
-#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-caret-anchor{width:auto}
-#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-caret-anchor:not(:has([data-tool-id])){width:auto;height:0;min-height:0;margin:-4px 0 0}
-#mesurer-root .mesurer-toolbar-caret-btn,.family .chev{position:absolute;z-index:1;right:0;left:auto;bottom:0;display:flex;align-items:flex-end;justify-content:flex-end;width:14px;height:14px;padding:0 1px 1px 0;border:0;border-radius:3px;background:transparent;color:var(--text-2)}
-#mesurer-root .mesurer-toolbar-caret-btn:hover,#mesurer-root .mesurer-toolbar-caret-btn[aria-expanded=true],.family .chev:hover,.family .chev[aria-expanded=true]{color:var(--text);background:var(--hover)}
-#mesurer-root .mesurer-toolbar-caret-btn:focus-visible,.family .chev:focus-visible{outline:1px solid var(--accent);outline-offset:0}
-#mesurer-root .mesurer-toolbar-motion[data-column-side=right] .mesurer-toolbar-caret-btn,.mesurer-toolbar-motion[data-column-side=right] .family .chev{right:auto;left:0;justify-content:flex-start;padding:0 0 1px 1px}
-#mesurer-root .mesurer-toolbar-caret,.family .chev .icon{width:8px;height:8px}
-#mesurer-root .mesurer-toolbar-motion[data-orientation=horizontal][data-edge=bottom] .mesurer-toolbar-caret,.mesurer-toolbar-motion[data-orientation=horizontal][data-edge=bottom] .family .chev .icon{transform:rotate(180deg)}
-.mesurer-toolbar-motion[data-column-side=left] .family .chev .icon,body:not(.mesurer-docked) .family .chev .icon{transform:rotate(-90deg)}
-.mesurer-toolbar-motion[data-column-side=right] .family .chev .icon{transform:rotate(90deg)}
-#mesurer-root .mesurer-toolbar-motion[data-shape-side=top] .family .chev .icon{transform:rotate(180deg)}
-#mesurer-root .mesurer-toolbar-motion[data-shape-side=bottom] .family .chev .icon{transform:rotate(0deg)}
-#mesurer-root .mesurer-toolbar-motion[data-shape-side=right] .family .chev .icon{transform:rotate(-90deg)}
-#mesurer-root .mesurer-toolbar-motion[data-shape-side=left] .family .chev .icon{transform:rotate(90deg)}
-#mesurer-root .mesurer-toolbar-caret-btn[data-menu-side=top] .mesurer-toolbar-caret{transform:rotate(180deg)}
-#mesurer-root .mesurer-toolbar-caret-btn[data-menu-side=bottom] .mesurer-toolbar-caret{transform:rotate(0deg)}
-#mesurer-root .mesurer-toolbar-caret-btn[data-menu-side=right] .mesurer-toolbar-caret{transform:rotate(-90deg)}
-#mesurer-root .mesurer-toolbar-caret-btn[data-menu-side=left] .mesurer-toolbar-caret{transform:rotate(90deg)}
-#mesurer-root [role=menu] [role^=menuitem]:hover{background:var(--hover);color:var(--text)}
-#mesurer-root [role=menu] [role^=menuitem][aria-checked=true]{background:var(--selected);color:var(--accent-ink)}
+#paper-inspection-root .paper-inspection-toolbar-caret-anchor{position:relative;margin:0}
+#paper-inspection-root .paper-inspection-toolbar-caret-anchor:not(:has([data-tool-id])){flex:0 0 0;width:0;min-width:0;align-self:stretch;margin-left:-4px}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-orientation=vertical] .paper-inspection-toolbar-caret-anchor{width:auto}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-orientation=vertical] .paper-inspection-toolbar-caret-anchor:not(:has([data-tool-id])){width:auto;height:0;min-height:0;margin:-4px 0 0}
+#paper-inspection-root .paper-inspection-toolbar-caret-btn,.family .chev{position:absolute;z-index:1;right:0;left:auto;bottom:0;display:flex;align-items:flex-end;justify-content:flex-end;width:14px;height:14px;padding:0 1px 1px 0;border:0;border-radius:3px;background:transparent;color:var(--text-2)}
+#paper-inspection-root .paper-inspection-toolbar-caret-btn:hover,#paper-inspection-root .paper-inspection-toolbar-caret-btn[aria-expanded=true],.family .chev:hover,.family .chev[aria-expanded=true]{color:var(--text);background:var(--hover)}
+#paper-inspection-root .paper-inspection-toolbar-caret-btn:focus-visible,.family .chev:focus-visible{outline:1px solid var(--accent);outline-offset:0}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-column-side=right] .paper-inspection-toolbar-caret-btn,.paper-inspection-toolbar-motion[data-column-side=right] .family .chev{right:auto;left:0;justify-content:flex-start;padding:0 0 1px 1px}
+#paper-inspection-root .paper-inspection-toolbar-caret,.family .chev .icon{width:8px;height:8px}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-orientation=horizontal][data-edge=bottom] .paper-inspection-toolbar-caret,.paper-inspection-toolbar-motion[data-orientation=horizontal][data-edge=bottom] .family .chev .icon{transform:rotate(180deg)}
+.paper-inspection-toolbar-motion[data-column-side=left] .family .chev .icon,body:not(.paper-inspection-docked) .family .chev .icon{transform:rotate(-90deg)}
+.paper-inspection-toolbar-motion[data-column-side=right] .family .chev .icon{transform:rotate(90deg)}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-shape-side=top] .family .chev .icon{transform:rotate(180deg)}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-shape-side=bottom] .family .chev .icon{transform:rotate(0deg)}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-shape-side=right] .family .chev .icon{transform:rotate(-90deg)}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-shape-side=left] .family .chev .icon{transform:rotate(90deg)}
+#paper-inspection-root .paper-inspection-toolbar-caret-btn[data-menu-side=top] .paper-inspection-toolbar-caret{transform:rotate(180deg)}
+#paper-inspection-root .paper-inspection-toolbar-caret-btn[data-menu-side=bottom] .paper-inspection-toolbar-caret{transform:rotate(0deg)}
+#paper-inspection-root .paper-inspection-toolbar-caret-btn[data-menu-side=right] .paper-inspection-toolbar-caret{transform:rotate(-90deg)}
+#paper-inspection-root .paper-inspection-toolbar-caret-btn[data-menu-side=left] .paper-inspection-toolbar-caret{transform:rotate(90deg)}
+#paper-inspection-root [role=menu] [role^=menuitem]:hover{background:var(--hover);color:var(--text)}
+#paper-inspection-root [role=menu] [role^=menuitem][aria-checked=true]{background:var(--selected);color:var(--accent-ink)}
 /* Edit is the first segment of the native mode switch (Edit | Inspect). */
 .paper-toolbar-grip{display:flex;align-items:center;justify-content:center;flex:0 0 10px;color:var(--msr-color-ink-500);cursor:grab}
 .paper-toolbar-grip:hover{color:var(--msr-color-ink-700)}
-.mesurer-toolbar-motion[data-orientation=vertical] .paper-toolbar-grip svg{transform:rotate(90deg)}
+.paper-inspection-toolbar-motion[data-orientation=vertical] .paper-toolbar-grip svg{transform:rotate(90deg)}
 .paper-design-mode{display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--msr-color-ink-700,currentColor)}
 .paper-design-mode[aria-pressed=true]{color:var(--msr-color-ink-900,currentColor)}
 .paper-design-mode:not([aria-pressed=true]):hover{background:color-mix(in srgb,var(--msr-color-ink-200,currentColor) 50%,transparent)}
@@ -117,17 +117,17 @@ body.mesurer-docked #rail .ibtn:focus-visible{outline:1px solid var(--msr-color-
 .paper-design-mode:focus-visible{outline:1px solid var(--msr-color-ink-500,currentColor);outline-offset:1px}
 /* The native pill marks the current mode and slides with its native transition: one 30px step per 28px
    segment and 2px gap (build.mjs guards the native step), Edit first. */
-#mesurer-root .mesurer-toolbar-tool-switch:has(.paper-design-mode) .mesurer-toolbar-tool-switch-pill{transform:translate(0)}
-#mesurer-root .mesurer-toolbar-tool-switch:has(.paper-design-mode)[data-value=inspect] .mesurer-toolbar-tool-switch-pill{transform:translate(30px)}
-#mesurer-root .mesurer-toolbar-motion[data-orientation=vertical] .mesurer-toolbar-tool-switch:has(.paper-design-mode)[data-value=inspect] .mesurer-toolbar-tool-switch-pill{transform:translateY(30px)}
+#paper-inspection-root .paper-inspection-toolbar-tool-switch:has(.paper-design-mode) .paper-inspection-toolbar-tool-switch-pill{transform:translate(0)}
+#paper-inspection-root .paper-inspection-toolbar-tool-switch:has(.paper-design-mode)[data-value=inspect] .paper-inspection-toolbar-tool-switch-pill{transform:translate(30px)}
+#paper-inspection-root .paper-inspection-toolbar-motion[data-orientation=vertical] .paper-inspection-toolbar-tool-switch:has(.paper-design-mode)[data-value=inspect] .paper-inspection-toolbar-tool-switch-pill{transform:translateY(30px)}
 /* Let native overlay, toolbar and popovers use their individual z-indexes. Editor chrome stays above
    the inspection overlay, native popovers above chrome. Their containing block remains the viewport.
    The bar's surface is the side panels' own token. */
-#mesurer-root>.mesurer-root{position:static;z-index:auto;--msr-accent:var(--accent);--msr-surface:var(--surface);font-family:Inter,system-ui,sans-serif}
-#mesurer-root .mesurer-toolbar-chrome{outline:1px solid var(--edge)}
+#paper-inspection-root>.paper-inspection-root{position:static;z-index:auto;--msr-accent:var(--accent);--msr-surface:var(--surface);font-family:Inter,system-ui,sans-serif}
+#paper-inspection-root .paper-inspection-toolbar-chrome{outline:1px solid var(--edge)}
 /* The whole bar is the drag handle (native); show it as one, while buttons keep the default cursor. */
-#mesurer-root .mesurer-toolbar-motion{cursor:grab}
-#mesurer-root .mesurer-toolbar-motion button{cursor:default}
+#paper-inspection-root .paper-inspection-toolbar-motion{cursor:grab}
+#paper-inspection-root .paper-inspection-toolbar-motion button{cursor:default}
 
 /* Save status: a separate small note just left of the right corner bar, on the top row's centre line;
    app.js places it and moves it below a toolbar docked on top. Problems keep their action. */
@@ -281,7 +281,7 @@ body.inspecting #stage{cursor:crosshair}
 #sharing-dialog #share-primary{background:var(--selected);color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 22%,var(--line));min-height:36px}#sharing-dialog #share-new,#sharing-dialog .share-stop{border:0;background:transparent;color:var(--text-2);padding:6px 0;margin-top:10px;justify-content:flex-start}#sharing-dialog #share-new:hover,#sharing-dialog .share-stop:hover{color:var(--text)}
 #share-agent-panel{border-top:1px solid var(--line);padding-top:16px;margin-top:16px}#share-agent-panel h3{font-size:15px;margin:0}#share-agent-panel details{margin-top:14px;color:var(--text-2);font-size:13px}#share-agent-panel summary{cursor:pointer}#sharing-dialog textarea{width:100%;height:112px;margin-top:12px;font:12px/1.5 ui-monospace,monospace;resize:vertical}
 @media(max-width:480px){#sharing-dialog{padding:18px;width:calc(100vw - 20px)}.share-row-actions{width:100%}.share-row-actions>button{flex:1}.share-reach{gap:12px}}
-body.shared-paper [aria-label="Clear feedback…"],body.read-only [data-mesurer-comment-ui]{display:none!important}
+body.shared-paper [aria-label="Clear feedback…"],body.read-only [data-paper-inspection-comment-ui]{display:none!important}
 body.read-only .paper-design-mode{opacity:.4;cursor:default}
 
 .access-badge{font-size:12px;white-space:nowrap;color:var(--text-2);padding:0 4px}

@@ -1,4 +1,4 @@
-// Rebuilds the embedded Mesurer bundle. Compatibility patch on Mesurer 0.2.7's native toolbar,
+// Rebuilds the embedded inspection tools. Compatibility patch on the pinned upstream toolbar,
 // through an optional `toolbarExtra` hook:
 // - Two modes, Edit and Inspect. The host's Edit segment leads the native switch (its pill moves over it);
 //   the native Annotate segment and drawing tools are not offered (saved notes still show). The host's
@@ -190,7 +190,7 @@ const guards = [
 
 let patched = false;
 const slot = {
-  name: 'mesurer-toolbar-slot',
+  name: 'paper-inspection-toolbar-slot',
   setup(b) {
     b.onLoad({ filter: /[\\/]node_modules[\\/]mesurer[\\/]dist[\\/]index\.js$/ }, async ({ path }) => {
       let source = await readFile(path, 'utf8');
@@ -201,6 +201,8 @@ const slot = {
         if (count !== 1) throw new Error(`toolbar slot anchor found ${count}x: ${JSON.stringify(find.slice(0, 70))}`);
         source = source.replace(find, () => replace);
       }
+      // Namespace the embedded selectors without changing the upstream source or its licence.
+      source = source.replaceAll('mesurer-', 'paper-inspection-').replaceAll('Mesurer review', 'Paper review').replaceAll('Show Mesurer toolbar', 'Show toolbar');
       patched = true;
       return { contents: source, loader: 'js' };
     });
@@ -210,12 +212,12 @@ const slot = {
 await build({
   entryPoints: [new URL('./entry.jsx', import.meta.url).pathname],
   bundle: true, minify: true, format: 'esm', target: 'es2022',
-  outfile: new URL('../../runtime/mesurer.js', import.meta.url).pathname,
+  outfile: new URL('../../runtime/inspection.js', import.meta.url).pathname,
   define: { 'process.env.NODE_ENV': '"production"' },
-  banner: { js: `/*! Mesurer ${PINNED} (MIT, assets/MESURER-LICENSE.txt) with a integrated toolbar adapter (vendor/mesurer/build.mjs); React 19.2 (MIT, assets/REACT-LICENSE.txt); @zumer/snapdom 3.7 (MIT, bundled by Mesurer). */` },
+  banner: { js: `/*! Mesurer ${PINNED} (MIT, assets/MESURER-LICENSE.txt) with an integrated toolbar adapter (vendor/inspection/build.mjs); React 19.2 (MIT, assets/REACT-LICENSE.txt); @zumer/snapdom 3.7 (MIT, bundled by Mesurer). */` },
   legalComments: 'eof',
   plugins: [slot],
 });
 if (!patched) throw new Error('mesurer dist was not patched');
 await import('../../scripts/refresh-assets.mjs');
-console.log('mesurer.js built with the pinned toolbar adapter');
+console.log('inspection.js built with the pinned toolbar adapter');

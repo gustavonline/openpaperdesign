@@ -29,7 +29,7 @@ if (access.shared) { for (const item of document.querySelectorAll(inPaperSurface
 if(access.shared&&!inPaperSurface)$('#home').hidden=true;
 if(!canEdit)for(const item of document.querySelectorAll('[data-action="rename"],#undo,#redo'))item.hidden=true;
 if (!canEdit) { for (const field of form.querySelectorAll('input,textarea,select')) field.disabled = true; $('[data-action="rename"]').disabled = true; $('#title-text').disabled = true; }
-const sharingUI=setupSharing({paperId,access,closeMenu,onCancel:()=>{if(mesurerHost.stableMode==='edit')setTool('select');else mesurerHost.api?.resetInspect();}});
+const sharingUI=setupSharing({paperId,access,closeMenu,onCancel:()=>{if(inspectionHost.stableMode==='edit')setTool('select');else inspectionHost.api?.resetInspect();}});
 const notionUI=setupNotion({paperId,access,beforeSave:async()=>{commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your local changes before continuing.');},preview:paperPreview,onOpen:async href=>{if(!await flushSave()||!await flushFeedback())throw new Error('Save your current Paper before opening another.');leaving=true;location.assign(href);},message});
 $('#notion-share-icon').innerHTML=notionIcon;
 $('#save-notion').addEventListener('click',()=>{closeMenu();notionUI.save();});
@@ -40,7 +40,7 @@ const clientHeaders = { 'X-Paper-Client': clientId };
 const LIMIT = 1e6, VIEW_KEY = scoped('paper:view:2'), PANEL_KEY = scoped('paper:panels:1'), ROW_CAP = 200;
 let scene, revision, selected = null, gesture, frameRequest, saveTimer, viewTimer, toastTimer, textEdit, fieldBefore;
 const selection = new Set();
-// `inspection`: Mesurer owns input (any native tool, menu or utility; artwork editing pauses).
+// `inspection`: Inspection owns input (any native tool, menu or utility; artwork editing pauses).
 // `inspectMode`: the mode shown is Inspect. A utility or menu opened from Edit pauses editing but keeps Edit shown.
 let inspection = false, inspectMode = false, spaceHeld = false, mode = 'select', leaving = false;
 let pending = false, saving = null, saveError = null, conflict = false, lastSaved = '';
@@ -489,7 +489,7 @@ function placeStatus() {
   Object.assign(statusEl.style, { right: `${Math.round(innerWidth - anchor + 8)}px`, top: '8px', maxWidth: `${Math.max(160, Math.round(anchor - stage.getBoundingClientRect().left - 16))}px` });
   // Never under a toolbar docked along the top row, or the floating Paper bar on a narrow window.
   const s = statusEl.getBoundingClientRect(), hits = r => r && r.width && !(r.right < s.left || r.left > s.right || r.bottom < s.top || r.top > s.bottom);
-  const toolbar = document.querySelector('#mesurer-root .mesurer-toolbar-motion')?.getBoundingClientRect();
+  const toolbar = document.querySelector('#paper-inspection-root .paper-inspection-toolbar-motion')?.getBoundingClientRect();
   const paperBar = body.classList.contains('left-open') ? null : $('#left-bar').getBoundingClientRect();
   if (hits(toolbar) || hits(paperBar)) statusEl.style.top = `${Math.round(Math.max(toolbar?.bottom || 0, paperBar?.bottom || 0, 40) + 6)}px`;
 }
@@ -559,7 +559,7 @@ async function recoverPaper() {
   updateSaveState();
 }
 
-// Feedback (Mesurer's notes, comments, guides and measurements) is the Paper's own file, read before the
+// Feedback (Inspection's notes, comments, guides and measurements) is the Paper's own file, read before the
 // toolbar mounts and written behind it: the native workspace snapshot, unchanged, revision-checked like the
 // document. Identical snapshots are not re-sent. Until a save succeeds the latest snapshot is also kept in
 // this browser as a backup; a conflict or failure stays visible with a download, and nothing is overwritten.
@@ -741,7 +741,7 @@ function finishGesture() {
   saveView();
 }
 // Edit's five tools, with short names (the mode says they change the artwork): Select, Hand, Shapes (one
-// corner chevron: rectangle, ellipse, arrow), Text and Pencil. Choosing an Edit tool pauses Mesurer (editing
+// corner chevron: rectangle, ellipse, arrow), Text and Pencil. Choosing an Edit tool pauses Inspection (editing
 // owns input) and makes Edit the stable mode again.
 const TOOL = { select: ['Select', 'V', 'pointer'], hand: ['Hand', 'H', 'hand'], rect: ['Rectangle', 'R', 'rect'], ellipse: ['Ellipse', 'O', 'ellipse'], connector: ['Arrow', 'A', 'arrow'], stroke: ['Pencil', 'P', 'pencil'], text: ['Text', 'T', 'text'] };
 const FAMILIES = { select: ['select'], hand: ['hand'], shapes: ['rect', 'ellipse', 'connector'], text: ['text'], pencil: ['stroke'] };
@@ -758,8 +758,8 @@ function setTool(value) {
   if (!canEdit && value !== 'select' && value !== 'hand') { message('This Paper is view-only.'); return; }
   mode = value; current[familyOf(value)] = value; closeMenu();
   if(value!=='connector'){connectFrom=null;$('#connect-hint').hidden=true;}
-  mesurerHost.stableMode = 'edit';
-  if (inspection) mesurer?.pause();
+  inspectionHost.stableMode = 'edit';
+  if (inspection) inspector?.pause();
   paintRail();
 }
 function newNode(b, x, y) {
@@ -876,8 +876,8 @@ stage.addEventListener('pointermove', e => {
 });
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(name, finishGesture);
 // Middle button (wheel click) pans while held over the canvas in both modes, Edit and Inspect.
-// It is taken in the window's capture phase, before Mesurer's own document handlers, only over the owned
-// canvas (never over panels, bars, toolbars, menus or Mesurer's own panels); it changes only the camera.
+// It is taken in the window's capture phase, before Inspection's own document handlers, only over the owned
+// canvas (never over panels, bars, toolbars, menus or Inspection's own panels); it changes only the camera.
 // Release, cancel or a lost window focus end it, so the next left click works normally.
 const middlePan = e => gesture?.middle && e.pointerId === gesture.pointerId;
 window.addEventListener('pointerdown', e => {
@@ -901,14 +901,14 @@ stage.addEventListener('dblclick', e => {
   const element = e.target.closest('.node-text'); if (element) startTextEdit(element.dataset.nodeKey);
 });
 
-// Wheel and pinch: captured on window before Mesurer, but only over the owned canvas. Panels, dialogs
-// and Mesurer's own controls or scroll areas keep their native input (browser zoom included).
-const mesurerRoot = $('#mesurer-root');
-function mesurerOwns(e) {
+// Wheel and pinch: captured on window before Inspection, but only over the owned canvas. Panels, dialogs
+// and Inspection's own controls or scroll areas keep their native input (browser zoom included).
+const inspectionRoot = $('#paper-inspection-root');
+function inspectionOwns(e) {
   const path = e.composedPath ? e.composedPath() : [];
-  if (!path.includes(mesurerRoot)) return false;
+  if (!path.includes(inspectionRoot)) return false;
   for (const el of path) {
-    if (el === mesurerRoot) break;
+    if (el === inspectionRoot) break;
     if (!(el instanceof Element)) continue;
     if (el.matches('input,textarea,select,button,a,dialog,[role=dialog],[role=menu],[role=toolbar],[contenteditable]')) return true;
     const s = getComputedStyle(el);
@@ -918,7 +918,7 @@ function mesurerOwns(e) {
 }
 function overCanvas(e) {
   const r = stage.getBoundingClientRect();
-  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom && !e.target.closest?.('#left-panel,#right-panel,#library-panel,.topbar,#rail,.menu,dialog,#status') && !mesurerOwns(e);
+  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom && !e.target.closest?.('#left-panel,#right-panel,#library-panel,.topbar,#rail,.menu,dialog,#status') && !inspectionOwns(e);
 }
 window.addEventListener('wheel', e => {
   const zoom = e.ctrlKey || e.metaKey;
@@ -981,13 +981,13 @@ function onKey(e) {
   else if (!e.shiftKey && tools[k]) setTool(tools[k]);
 }
 document.addEventListener('keydown', onKey);
-// While design editing owns input and Mesurer is loaded (paused), design keys are taken before Mesurer's
+// While design editing owns input and Inspection is loaded (paused), design keys are taken before Inspection's
 // own capture-phase shortcuts see them, so its global hotkeys can't steal drawing shortcuts. Fields,
-// dialogs, the layer tree and Mesurer's own panels keep their keys. In Mesurer mode, Mesurer owns them.
+// dialogs, the layer tree and Inspection's own panels keep their keys. In Inspection mode, Inspection owns them.
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') return; // One capture handler below owns cancellation in both modes.
-  if (!mesurer || inspection || editable(e.target) || e.target.closest?.('dialog,#layer-tree')) return;
-  if (e.target.closest?.('.mesurer-root') && !e.target.closest('#rail,.menu')) return;
+  if (!inspector || inspection || editable(e.target) || e.target.closest?.('dialog,#layer-tree')) return;
+  if (e.target.closest?.('.paper-inspection-root') && !e.target.closest('#rail,.menu')) return;
   const mod = e.metaKey || e.ctrlKey;
   const design = (!mod && !e.altKey && e.key.length === 1) || (mod && /^[zyacdvxgbi]$/i.test(e.key)) || ['Escape', 'Delete', 'Backspace'].includes(e.key);
   if (!design) return;
@@ -1077,7 +1077,7 @@ function closeMenu(refocus = false) {
   openMenuEl = menuTrigger = null;
 }
 function menuKeys(e) {
-  if (e.key === 'Escape') { e.preventDefault(); closeMenu(true); if (mesurerHost.stableMode === 'edit') setTool('select'); else mesurerHost.api?.resetInspect(); return true; }
+  if (e.key === 'Escape') { e.preventDefault(); closeMenu(true); if (inspectionHost.stableMode === 'edit') setTool('select'); else inspectionHost.api?.resetInspect(); return true; }
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return false;
   const items = menuItems(openMenuEl), i = items.indexOf(document.activeElement), down = e.key === 'ArrowDown', n = items.length;
   e.preventDefault(); items[i < 0 ? (down ? 0 : n - 1) : (i + (down ? 1 : n - 1)) % n]?.focus(); return true;
@@ -1088,7 +1088,7 @@ document.addEventListener('click', e => { const z = e.target.closest('[data-zoom
 $('#zoom').addEventListener('click', e => { const r = e.currentTarget.getBoundingClientRect(); toggleMenu($('#zoom-menu'), e.currentTarget, e.detail === 0, w => ({ x: r.right - w, y: r.bottom + 6 })); });
 
 // Export: one artboard as the browser renders it, at its own size, without editor chrome (labels,
-// selection, camera, canvas background, annotations): a PNG through the snapdom Mesurer already bundles,
+// selection, camera, canvas background, annotations): a PNG through the snapdom Inspection already bundles,
 // or a self-contained HTML file (inline styles, images and Inter as data URLs). The whole Paper stays
 // available as its own JSON file. The artboard is the selected layer's, or the only one shown; with
 // several shown and none selected nothing is guessed: PNG and HTML wait for a selection.
@@ -1105,8 +1105,8 @@ $('#export').addEventListener('click', e => {
   $('#export-target').textContent = b ? b.node.name : 'Select a design to export';
   $('#export-target').title = b ? `${b.node.name} · ${b.page.name}` : '';
   $('#export-size').textContent = b ? `${boardSize(b).w} × ${boardSize(b).h}` : '';
-  exportMenu.querySelector('[data-export="png"]').disabled = !b || !mesurerLib?.snapdom;
-  exportMenu.querySelector('[data-export="png"]').title = mesurerLib?.snapdom ? '' : 'PNG export needs the toolbar bundle, which hasn’t loaded';
+  exportMenu.querySelector('[data-export="png"]').disabled = !b || !inspectionLib?.snapdom;
+  exportMenu.querySelector('[data-export="png"]').title = inspectionLib?.snapdom ? '' : 'PNG export needs the toolbar bundle, which hasn’t loaded';
   exportMenu.querySelector('[data-export="html"]').disabled = !b;
   toggleMenu(exportMenu, e.currentTarget, e.detail === 0, w => ({ x: r.right - w, y: r.bottom + 6 }));
 });
@@ -1189,7 +1189,7 @@ async function exportArtboard(kind) {
     await document.fonts.ready;
     await Promise.all([...clone.querySelectorAll('img')].map(img => img.decode()));
     if (kind === 'png') {
-      const capture = await mesurerLib.snapdom(clone, { width: w, height: h, dpr: 1, embedFonts: true, backgroundColor: null });
+      const capture = await inspectionLib.snapdom(clone, { width: w, height: h, dpr: 1, embedFonts: true, backgroundColor: null });
       download(await pngCredits(await capture.toBlob({ format: 'png', width: w, height: h })), `${slug(name)}.png`);
     } else download(new Blob([await standaloneHtml(clone, name, w, h)], { type: 'text/html' }), `${slug(name)}.html`);
     message(`Exported “${name}” as ${kind.toUpperCase()} (${w} × ${h})`);
@@ -1197,8 +1197,8 @@ async function exportArtboard(kind) {
   finally { holder.remove(); }
 }
 
-// Design tools: the shapes chevron is the one flyout. While docked it lives in Mesurer's UI root, which
-// Mesurer treats as its own (so inspection never takes its clicks).
+// Design tools: the shapes chevron is the one flyout. While docked it lives in Inspection's UI root, which
+// Inspection treats as its own (so inspection never takes its clicks).
 const flyout = $('#tool-flyout'), rail = $('#rail'), railHome = rail.parentElement;
 rail.addEventListener('click', e => {
   const chev = e.target.closest('[data-family-chev]'), main = e.target.closest('[data-family-main]');
@@ -1208,7 +1208,7 @@ rail.addEventListener('click', e => {
       b.type = 'button'; b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', String(current.shapes === tool)); b.dataset.pick = tool;
       b.innerHTML = `<svg class="icon"><use href="#i-${icon}"/></svg><span>${label}</span><kbd>${key}</kbd>`; return b;
     }));
-    const home = chev.closest('.mesurer-root') || body; if (flyout.parentElement !== home) home.append(flyout);
+    const home = chev.closest('.paper-inspection-root') || body; if (flyout.parentElement !== home) home.append(flyout);
     const r = chev.getBoundingClientRect(), vertical = rail.closest('.paper-design-slot')?.dataset.vertical !== 'false';
     toggleMenu(flyout, chev, e.detail === 0, (w, h) => vertical ? { x: r.left > innerWidth / 2 ? r.left - w - 6 : r.right + 6, y: r.top - 4 }
       : { x: r.left - 8, y: r.top > innerHeight / 2 ? r.top - h - 6 : r.bottom + 6 });
@@ -1267,7 +1267,7 @@ titleInput.addEventListener('keydown', e => {
 });
 titleInput.addEventListener('blur', () => endRename(true));
 
-// Canvas view menu: right-click on empty canvas (not on a board, a layer, editable text or Mesurer).
+// Canvas view menu: right-click on empty canvas (not on a board, a layer, editable text or Inspection).
 const canvasMenu = $('#canvas-menu');
 function paintCanvasMenu() {
   for (const b of canvasMenu.querySelectorAll('[data-pattern]')) b.setAttribute('aria-checked', String(b.dataset.pattern === canvasView.pattern));
@@ -1366,15 +1366,15 @@ async function renderDesign() {
   $('#design-guide').hidden = !designText; $('#design-missing').hidden = !!designText;
 }
 
-// Mesurer: loaded once the canvas has painted, so its native toolbar (with its own drag, dock and
+// Inspection: loaded once the canvas has painted, so its native toolbar (with its own drag, dock and
 // orientation) is the one bar, in two modes: Edit (changes the artwork) and native Inspect (measures; pauses
-// editing), with capture, comments and settings in both. Native tools are driven only through Mesurer's own
+// editing), with capture, comments and settings in both. Native tools are driven only through Inspection's own
 // toolbar API, never synthetic events. Notes saved by the earlier Annotate tools still show and can be deleted.
-let mesurer = null, mesurerLib = null, loading = null, unmountMesurer = null, toolbarStatusObserver = null;
+let inspector = null, inspectionLib = null, loading = null, unmountInspection = null, toolbarStatusObserver = null;
 // Pressing anywhere in the left panel (Paper or Design) is editing context: it returns to Edit with Select.
 $('#left-panel').addEventListener('pointerdown', () => { if (inspection) setTool('select'); }, true);
 const TOP_CHROME = 40; // the 40px panel rows; the floating corner bars (top 2, 36px) end inside it
-const mesurerHost = {
+const inspectionHost = {
   readOnly: !canEdit,
   theme(value) {
     if (value === 'light' || value === 'dark') document.documentElement.dataset.theme = value;
@@ -1383,7 +1383,7 @@ const mesurerHost = {
   },
   startInDesign: true,
   // Toolbar settings stay in this browser; this Paper's notes are its feedback file (see `feedback`).
-  persistKey: `openpaperdesign-${paperId}-mesurer`,
+  persistKey: `openpaperdesign-${paperId}-inspection`,
   // Native docking resolves within the free canvas between the side panels. One rectangle for every edge and
   // orientation, decided from the bar's horizontal size and frozen by the native hook for a whole drag (no
   // drop previews; the bar lands where it snaps): if the horizontal bar fits centred between the floating
@@ -1403,16 +1403,16 @@ const mesurerHost = {
     subscribe(onChange) { const observer = new ResizeObserver(() => onChange()); observer.observe(stage); return () => observer.disconnect(); },
   },
   ready() {
-    body.classList.add('mesurer-ready'); toolbarStatusObserver?.disconnect();
-    const toolbar = $('#mesurer-root .mesurer-toolbar-container');
+    body.classList.add('paper-inspection-ready'); toolbarStatusObserver?.disconnect();
+    const toolbar = $('#paper-inspection-root .paper-inspection-toolbar-container');
     if (toolbar) {
       toolbarStatusObserver = new MutationObserver(() => { if (!statusEl.hidden) placeStatus(); });
       toolbarStatusObserver.observe(toolbar, { attributes: true, attributeFilter: ['style'] });
     }
   },
-  minimized(on) { mesurerHost.isMinimized = on; body.classList.toggle('mesurer-minimized', on); },
-  dock(slot) { if (slot && rail.parentElement !== slot) slot.append(rail); body.classList.add('mesurer-docked'); },
-  undock() { if (openMenuEl === flyout) closeMenu(); if (rail.parentElement !== railHome) railHome.append(rail); if (flyout.parentElement !== body) body.append(flyout); body.classList.remove('mesurer-docked'); },
+  minimized(on) { inspectionHost.isMinimized = on; body.classList.toggle('paper-inspection-minimized', on); },
+  dock(slot) { if (slot && rail.parentElement !== slot) slot.append(rail); body.classList.add('paper-inspection-docked'); },
+  undock() { if (openMenuEl === flyout) closeMenu(); if (rail.parentElement !== railHome) railHome.append(rail); if (flyout.parentElement !== body) body.append(flyout); body.classList.remove('paper-inspection-docked'); },
   // The Paper's feedback file, prefetched before mount; every native workspace save is queued to it.
   feedback: { get workspace() { return feedback.workspace; }, save: workspace => queueFeedback(workspace) },
   // The mode the user chose: 'edit' (the Edit segment, an Edit tool, the side panels) or 'inspect' (an Inspect
@@ -1421,33 +1421,33 @@ const mesurerHost = {
   isMinimized: false,
   // Entering Edit, from its segment or the side panels, starts with Select.
   enterDesign() { setTool('select'); },
-  // `owner`: Mesurer owns input. `inspecting`: an Inspect tool is on.
+  // `owner`: Inspection owns input. `inspecting`: an Inspect tool is on.
   sync(owner, enabled, inspecting) {
-    if (inspecting && !mesurerHost.state?.sampleOnly) mesurerHost.stableMode = 'inspect';
-    if (mesurerHost.isMinimized) mesurerHost.stableMode = 'edit';
+    if (inspecting && !inspectionHost.state?.sampleOnly) inspectionHost.stableMode = 'inspect';
+    if (inspectionHost.isMinimized) inspectionHost.stableMode = 'edit';
     // Every Inspect tool off (and nothing else running) while Inspect is the chosen mode: back to its select.
-    if (!owner && mesurerHost.stableMode === 'inspect') { mesurerHost.api?.inspect(); return; }
-    const shown = owner && mesurerHost.stableMode === 'inspect';
+    if (!owner && inspectionHost.stableMode === 'inspect') { inspectionHost.api?.inspect(); return; }
+    const shown = owner && inspectionHost.stableMode === 'inspect';
     if (owner !== inspection) {
       inspection = owner;
       if (owner) { finishGesture(); commitFields(); stopTextEdit(); endRename(true); closeMenu(); spaceHeld = false; }
-      else { if (enabled) mesurerHost.api?.pause(); mode = 'select'; }
-    } else if (!owner && enabled) mesurerHost.api?.pause();
+      else { if (enabled) inspectionHost.api?.pause(); mode = 'select'; }
+    } else if (!owner && enabled) inspectionHost.api?.pause();
     if (shown !== inspectMode) { inspectMode = shown; body.classList.toggle('inspecting', shown); }
     paintRail(); updateSaveState();
   },
 };
-// Escape in Inspect, before Mesurer's own handlers: cancel the transient tool (the colour sampler included)
+// Escape in Inspect, before Inspection's own handlers: cancel the transient tool (the colour sampler included)
 // and return to Inspect's select, or clear Inspect's selection; Escape again is a no-op (never the native
 // double-Escape minimise). If the sample was a one-off from Edit, Escape returns to Edit. Typing, the
 // host's menus, dialogs and any native menu, panel or comment that is open keep their own Escape. Plain
-// keys that would start an Annotate drawing tool (removed from the toolbar) are not passed to Mesurer.
+// keys that would start an Annotate drawing tool (removed from the toolbar) are not passed to Inspection.
 const ANNOTATE_KEYS = new Set(['2', 's', 'd', 'n', 't']);
 window.addEventListener('keydown', e => {
-  if (!mesurer || e.defaultPrevented) return;
+  if (!inspector || e.defaultPrevented) return;
   if (e.key === 'Escape' && $('#sharing-dialog').open) {
     e.preventDefault(); e.stopImmediatePropagation(); $('#sharing-dialog').close();
-    if (mesurerHost.stableMode === 'edit') setTool('select'); else mesurerHost.api?.resetInspect();
+    if (inspectionHost.stableMode === 'edit') setTool('select'); else inspectionHost.api?.resetInspect();
     stage.focus({ preventScroll: true }); return;
   }
   if (editable(e.target) || e.target.closest?.('dialog,[role=dialog]')) return;
@@ -1456,30 +1456,30 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (!canEdit && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === 'm') { e.preventDefault(); e.stopImmediatePropagation(); return; }
-  const s = mesurerHost.state || {}, api = mesurerHost.api;
+  const s = inspectionHost.state || {}, api = inspectionHost.api;
   if (e.key === 'Escape') {
     e.preventDefault(); e.stopImmediatePropagation();
     if(!$('#library-panel').hidden){libraryUI.close(true);return;}
-    if (mesurerHost.stableMode === 'edit') { window.__paperCancelSample?.(); api?.closeSurfaces(); cancelGesture(); setTool('select'); stage.focus({ preventScroll: true }); return; }
+    if (inspectionHost.stableMode === 'edit') { window.__paperCancelSample?.(); api?.closeSurfaces(); cancelGesture(); setTool('select'); stage.focus({ preventScroll: true }); return; }
     if (s.busy && !s.sampling) { api?.closeSurfaces(); return; }
     if (s.sampling || s.xray || s.rulers || s.mode !== 'select') api?.resetInspect(); else api?.clearSelection();
     return;
   }
-  if (inspection && !e.metaKey && !e.ctrlKey && !e.altKey && ANNOTATE_KEYS.has(e.key.toLowerCase()) && !e.target.closest?.('.mesurer-root input,.mesurer-root textarea')) { e.preventDefault(); e.stopImmediatePropagation(); }
+  if (inspection && !e.metaKey && !e.ctrlKey && !e.altKey && ANNOTATE_KEYS.has(e.key.toLowerCase()) && !e.target.closest?.('.paper-inspection-root input,.paper-inspection-root textarea')) { e.preventDefault(); e.stopImmediatePropagation(); }
 }, true);
-function loadMesurer(inspect = false) {
-  if (mesurer) { if (inspect) mesurer.inspect(); return Promise.resolve(); }
+function loadInspection(inspect = false) {
+  if (inspector) { if (inspect) inspector.inspect(); return Promise.resolve(); }
   if (loading) return loading;
-  mesurerHost.startInDesign = !inspect;
-  loading = import('./mesurer.js?v=59e4ec992c1b').then(library => {
+  inspectionHost.startInDesign = !inspect;
+  loading = import('./inspection.js?v=ed3d4f87b774').then(library => {
     if(!surfaceAlive())return;
-    mesurerLib = library; migrateFeedback(); unmountMesurer = library.openMesurer($('#mesurer-root'), mesurerHost);
-    mesurer = { inspect: () => mesurerHost.api?.inspect(), pause: () => mesurerHost.api?.pause() };
+    inspectionLib = library; migrateFeedback(); unmountInspection = library.openInspection($('#paper-inspection-root'), inspectionHost);
+    inspector = { inspect: () => inspectionHost.api?.inspect(), pause: () => inspectionHost.api?.pause() };
   }).catch(error => { body.classList.add('rail-standalone'); message(`Inspect is unavailable: ${error.message}`); })
     .finally(() => { loading = null; });
   return loading;
 }
-function toggleInspect() { if (!mesurer) return loadMesurer(true); inspection ? setTool('select') : mesurer.inspect(); }
+function toggleInspect() { if (!inspector) return loadInspection(true); inspection ? setTool('select') : inspector.inspect(); }
 // Import this Paper's own earlier browser feedback when its saved feedback file is empty.
 const MIGRATED = `openpaperdesign-${paperId}-feedback-migrated`;
 function migrateFeedback() {
@@ -1487,9 +1487,9 @@ function migrateFeedback() {
   try { if (localStorage.getItem(MIGRATED)) return; } catch { return; }
   const done = () => { try { localStorage.setItem(MIGRATED, '1'); } catch { /* Migration is optional. */ } };
   if (feedback.workspace !== null) { done(); return; }
-  const local = mesurerLib.readLocalWorkspace(`openpaperdesign-${paperId}-mesurer`) ?? mesurerLib.readLocalWorkspace(`osm-paper-${paperId}-mesurer`);
+  const local = inspectionLib.readLegacyWorkspace(paperId);
   if (!local) { done(); return; }
-  queueFeedback(mesurerLib.sharedWorkspace(local));
+  queueFeedback(inspectionLib.sharedWorkspace(local));
   flushFeedback().then(ok => { if (ok) done(); });
 }
 
@@ -1522,7 +1522,7 @@ async function remotePaper(force = false,actor = null,silent=false) {
 let reloadingFeedback = false;
 async function remoteFeedback(silent=false) {
   if (feedback.conflict) return;
-  const dirty = () => feedback.saving || feedback.pendingBytes !== null || (editable(document.activeElement) && $('#mesurer-root').contains(document.activeElement));
+  const dirty = () => feedback.saving || feedback.pendingBytes !== null || (editable(document.activeElement) && $('#paper-inspection-root').contains(document.activeElement));
   if (dirty()) { feedback.conflict = true; updateSaveState(); return; }
   if (reloadingFeedback) return;
   reloadingFeedback = true;
@@ -1532,7 +1532,7 @@ async function remoteFeedback(silent=false) {
     if (dirty()) { feedback.conflict = true; updateSaveState(); return; }
     if (data.revision === feedback.revision) return;
     feedback.revision = data.revision; feedback.workspace = data.workspace ?? null; feedback.last = JSON.stringify(feedback.workspace); feedback.error = null;
-    if (mesurerLib && mesurer && surfaceAlive()) { mesurerHost.startInDesign = mesurerHost.stableMode !== 'inspect'; unmountMesurer = mesurerLib.openMesurer($('#mesurer-root'), mesurerHost); }
+    if (inspectionLib && inspector && surfaceAlive()) { inspectionHost.startInDesign = inspectionHost.stableMode !== 'inspect'; unmountInspection = inspectionLib.openInspection($('#paper-inspection-root'), inspectionHost); }
     updateSaveState();
   } catch (error) { if(!silent)message(`Notes changed elsewhere, but couldn’t be reloaded (${error.message}).`);return false; }
   finally { reloadingFeedback = false; }
@@ -1546,7 +1546,7 @@ function listenForChanges() {
     // frozen, rather than replacing it with the join screen. The server has already revoked all writes.
     commitFields(); stopTextEdit(); endRename(true); finishGesture();
     canEdit = false; accessRevoked = true; clearTimeout(saveTimer); clearTimeout(feedback.timer);
-    body.classList.add('read-only'); mesurerHost.readOnly = true; setTool('select');
+    body.classList.add('read-only'); inspectionHost.readOnly = true; setTool('select');
     for (const field of form.querySelectorAll('input,textarea,select')) field.disabled = true;
     $('#title-text').disabled = true; $('[data-action="rename"]').disabled = true;
     showTitle(); const badge = $('.access-badge'); if (badge) badge.textContent = 'Access ended';
@@ -1564,7 +1564,7 @@ function listenForChanges() {
         if(stopped)return;if(response.status===401||response.status===403){revoked();return;}if(!response.ok)throw new Error('Connection unavailable');
         const data=await response.json();if(stopped)return;
         if(revision===seen&&data.revision!==seen&&quiet()&&await remotePaper(false,null,true)===false)throw new Error('Paper could not be refreshed');
-        if(feedback.revision===seenNotes&&data.feedbackRevision!==seenNotes&&!feedback.saving&&feedback.pendingBytes===null&&!(editable(document.activeElement)&&$('#mesurer-root').contains(document.activeElement))&&await remoteFeedback(true)===false)throw new Error('Feedback could not be refreshed');
+        if(feedback.revision===seenNotes&&data.feedbackRevision!==seenNotes&&!feedback.saving&&feedback.pendingBytes===null&&!(editable(document.activeElement)&&$('#paper-inspection-root').contains(document.activeElement))&&await remoteFeedback(true)===false)throw new Error('Feedback could not be refreshed');
         if(guideRevision&&guideRevision!==data.guideRevision){designText=null;renderDesign();}guideRevision=data.guideRevision;
         if(data.presence)presenceUI?.receive(data.presence);
         if(failures>=3){const badge=$('.access-badge');if(badge)badge.textContent=canEdit?'Can edit':'View only';}failures=0;
@@ -1630,11 +1630,11 @@ async function start() {
   openDeepLink();
   viewReady = true;
   // The toolbar arrives after the first paint; the standalone design rail shows only if it doesn't.
-  requestAnimationFrame(() => setTimeout(() => loadMesurer(!canEdit), 0));
-  setTimeout(() => { if (!body.classList.contains('mesurer-ready')) body.classList.add('rail-standalone'); }, 2000);
+  requestAnimationFrame(() => setTimeout(() => loadInspection(!canEdit), 0));
+  setTimeout(() => { if (!body.classList.contains('paper-inspection-ready')) body.classList.add('rail-standalone'); }, 2000);
 }
 beforeSurfaceLeave(async()=>{saveViewNow();commitFields();stopTextEdit();endRename(true);finishGesture();if(!await flushSave()||!await flushFeedback())throw new Error('Save or download your changes before leaving this Paper.');});
-onSurfaceDispose(()=>{unmountMesurer?.();presenceUI?.stop();notionUI.destroy();sharingUI.destroy();toolbarStatusObserver?.disconnect();});
+onSurfaceDispose(()=>{unmountInspection?.();presenceUI?.stop();notionUI.destroy();sharingUI.destroy();toolbarStatusObserver?.disconnect();});
 start().then(() => {
   surfaceReady();
   const url=new URL(location.href);

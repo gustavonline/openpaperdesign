@@ -4,7 +4,7 @@ OpenPaperDesign — copyright 2026 Gustav Online.
 
 This repository's code is licensed under Apache-2.0. Bundled third-party work keeps its original licence:
 
-- Mesurer 0.2.7, React 19.2.0 and Snapdom: MIT. The shipped Mesurer bundle includes local integration changes; the source adapter and pinned rebuild dependencies are in `vendor/mesurer/`. Notices are in `runtime/assets/*-LICENSE.txt`.
+- Mesurer 0.2.7, React 19.2.0 and Snapdom: MIT. The shipped inspection bundle includes local integration changes; the source adapter and pinned rebuild dependencies are in `vendor/inspection/`. Notices are in `runtime/assets/*-LICENSE.txt`.
 - Inter fonts: SIL Open Font License, in `runtime/assets/OFL.txt`.
 - Notion brand mark: [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/notion.svg), CC0-1.0. The mark identifies the optional Notion connection.
 - Kubernetes community icons: CC BY 4.0; licence, provenance and source link are in `runtime/assets/kubernetes/`.
