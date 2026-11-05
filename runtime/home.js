@@ -1,5 +1,5 @@
 import {surfaceReady,surfaceStopped,onSurfaceDispose,inPaperSurface} from './surface.js?v=da065f7b280e';
-const VERSION='0.7.0-preview.9';
+const VERSION='0.7.0-preview.10';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper');
 let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='',serverVersion=null;
 
@@ -40,7 +40,7 @@ function card(p){
   a.querySelector('.meta').textContent=paperMeta(p);
   a.addEventListener('click',async event=>{
     if(busy){event.preventDefault();return;}
-    if(runningURL(p.workspaceId,p.id))return;
+    if(!inPaperSurface&&runningURL(p.workspaceId,p.id))return;
     event.preventDefault();await opening(()=>targetURL(p.workspaceId,p.id).then(navigate));
   });
   return a;

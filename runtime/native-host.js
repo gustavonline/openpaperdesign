@@ -1,5 +1,5 @@
 import {createScope} from './native-scope.js';
-const VERSION='0.7.0-preview.9',pending=new Map();let sequence=0,scope,current,activeTransport,booted=false,input,output,invoked,handled=false,navigating=false,queued,downloadMode;
+const VERSION='0.7.0-preview.10',pending=new Map();let sequence=0,scope,current,activeTransport,booted=false,input,output,invoked,handled=false,navigating=false,queued,downloadMode;
 const invocation=new Promise(resolve=>invoked=resolve),nativeFetch=globalThis.fetch.bind(globalThis),nativeAdd=globalThis.addEventListener.bind(globalThis);
 function rpc(method,params={}){return new Promise((resolve,reject)=>{const id=`paper-native-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(new Error('Paper did not respond. Try again.'));},method==='tools/call'?90000:15000);pending.set(id,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id,method,params},'*');});}
 async function tool(name,args){const result=await rpc('tools/call',{name,arguments:args});if(result.isError)throw new Error(result.content?.find(c=>c.type==='text')?.text||'Paper could not complete the request.');return result.structuredContent||JSON.parse(result.content.find(c=>c.type==='text').text);}
