@@ -127,6 +127,18 @@ test('an unchanged focus refresh keeps the existing keyboard target',async()=>{
   }finally{Date.now=now;h.ui.destroy();}
 });
 
+test('the first refresh after saving preserves the Open in Notion target',async()=>{
+  const savedLink={...link,savedAt:'2026-11-05T11:00:00.000Z'};
+  const h=harness([{...connected,syncState:'local-changes',changed:true},{...connected,link:savedLink,syncState:'saved',changed:false,remote:'current'}],{save:async()=>({pageId:link.pageId,link:savedLink,changed:false})});
+  const now=Date.now;
+  try{
+    await h.ui.save();h.press('Save changes');await settle();await settle();
+    const target=document.body.children.at(-1).querySelector('a[href]');
+    target.focus();Date.now=()=>now()+6000;windowEvents.fire('focus');await settle();
+    assert.equal(document.activeElement,target);assert.equal(target.isConnected,true);
+  }finally{Date.now=now;h.ui.destroy();}
+});
+
 test('disconnect clears the connected view and the next open re-reads status',async()=>{
   const h=harness([{...connected,syncState:'saved'},{connected:false,syncState:'not-connected'}]);
   await h.ui.save();h.press('Disconnect');await settle();

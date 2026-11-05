@@ -83,12 +83,7 @@ jobs:
         env:
           TAG: ${{ steps.plan.outputs.tag }}
         run: node scripts/check.mjs --tag "$TAG"
-      - run: npm ci --no-audit --no-fund
-      - run: npm ci --prefix vendor/inspection --no-audit --no-fund
-      - name: Assets rebuild exactly from lockfiles
-        run: node scripts/verify-assets.mjs
-      - name: Tests, including the unpacked archive
-        run: node --test "tests/*.mjs"
+      # Freeze and upload the exact Git archive before dependency lifecycle scripts run.
       - name: Package the tag
         env:
           TAG: ${{ steps.plan.outputs.tag }}
@@ -101,6 +96,12 @@ jobs:
             dist/*.zip.sha256
           if-no-files-found: error
           retention-days: 30
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --prefix vendor/inspection --no-audit --no-fund
+      - name: Assets rebuild exactly from lockfiles
+        run: node scripts/verify-assets.mjs
+      - name: Tests, including the unpacked archive
+        run: node --test "tests/*.mjs"
 
   publish:
     name: Publish GitHub release

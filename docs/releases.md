@@ -27,7 +27,7 @@ Run the same locally: `npm run check && npm test`, and `npm ci && npm ci --prefi
 
 `node scripts/package.mjs` writes `dist/openpaperdesign-<version>.zip` and `.zip.sha256` (add `--ref <commit>` for another commit, `--out <dir>` to choose where, `--tag vX` to assert the version).
 
-- It packs committed files from an exact Git commit, never the working folder. The allowlist is the plugin (`server`, `runtime`, `skills`, `commands`, `assets`, manifests, `package.json`) plus `LICENSE`, `NOTICE.md`, `README.md`, `scripts` and `vendor/inspection`. Papers, credentials, tests, fixtures and `node_modules` are not on it, and a deny-list stops them if they were ever committed under an allowed folder.
+- It packs committed files from an exact Git commit, never the working folder. The exact allowlist is `ALLOW` in `scripts/package.mjs`, including the shipped release guide, project design guide, lockfile and marketplace metadata. Papers, credentials, tests, fixtures and `node_modules` are not on it, and a deny-list stops them if they were ever committed under an allowed folder.
 - Entries are sorted, stored without compression and stamped with the commit time, so the same commit gives the same bytes on any machine. The SHA256 identifies the archive.
 - `PACKAGE-INFO.json` inside the archive, and the ZIP comment, name the source commit.
 - Users need only Node.js 22 or later: unpack, then `node <folder>/server/server.mjs`. `node <folder>/scripts/check.mjs` and `node <folder>/scripts/smoke.mjs <folder>` verify an unpacked copy; neither needs `npm install`.

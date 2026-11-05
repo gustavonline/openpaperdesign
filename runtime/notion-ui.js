@@ -112,7 +112,8 @@ export function setupNotion({
       const next = await status();
       if (!current(token, screenId) || mutating) return;
       const flipped = next.connected !== connectionState.connected;
-      const changed = JSON.stringify(next) !== JSON.stringify(connectionState);
+      const visible = state => JSON.stringify([state.connected === true, state.reconnect === true, state.syncState, state.changed === true, state.link?.savedAt, state.link?.url, state.link?.pageId, state.paperName, state.needsReview === true, state.saving === true, state.reviewUrl, state.connectionError]);
+      const changed = visible(next) !== visible(connectionState);
       connectionState = next;
       if (flipped || viewKind === 'saved' && changed) resume(token);
       else connectionControl();
