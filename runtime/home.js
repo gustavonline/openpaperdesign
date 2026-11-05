@@ -1,7 +1,7 @@
 import {surfaceReady,surfaceStopped,onSurfaceDispose,inPaperSurface} from './surface.js?v=da065f7b280e';
 const VERSION='0.7.0-preview.12';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper'),cardMenu=document.getElementById('card-menu');
-let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='',serverVersion=null;
+let menuCard=null,selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,optionsKey='',serverVersion=null;
 
 async function request(args={}){
   const response=await fetch('/api/home',{cache:'no-store',signal:AbortSignal.timeout(15000),...(Object.keys(args).length?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)}:{})});
@@ -25,7 +25,7 @@ function fail(error,retry=()=>load(true),kind='action'){
   problem.dataset.kind=kind;problem.hidden=false;
 }
 async function opening(action,text='Opening Paper…'){
-  if(busy)return;busy=true;problem.hidden=true;activity.textContent=text;activity.hidden=false;
+  if(busy)return;busy=true;problem.hidden=true;clearTimeout(noticeTimer);activity.textContent=text;activity.hidden=false;
   try{await action();}catch(error){activity.hidden=true;fail(error,()=>opening(action,text));}finally{busy=false;activity.hidden=true;if(!cards.length)void load();}
 }
 const plural=(n,word)=>`${n} ${word}${n===1?'':'s'}`;
@@ -33,22 +33,40 @@ const ago=ms=>{const seconds=Math.max(0,(Date.now()-ms)/1000);return seconds<60?
 // Grid cards show only the preview and name; list rows keep a short edited time.
 const paperMeta=p=>p.error||[selected==='all'?p.workspaceName:null,Number.isFinite(p.modified)?`Edited ${ago(p.modified)}`:null].filter(Boolean).join(' · ');
 const openPaper=p=>opening(()=>targetURL(p.workspaceId,p.id).then(navigate));
+// A preview is a bounded picture of the saved Paper, or an honest note about why there is none.
+const previewNotes={empty:'Empty Paper',hidden:'Only hidden layers',unavailable:'Preview unavailable'};
+function drawPreview(thumb,p){
+  const state=p.error?'unavailable':p.preview?.state||(p.thumbnail?'art':'unavailable'),note=(text,icon=true)=>{
+    const box=document.createElement('div');box.className='placeholder';box.innerHTML=icon?'<svg class="icon" aria-hidden="true"><use href="#i-page"/></svg>':'';box.append(Object.assign(document.createElement('span'),{textContent:text}));return box;
+  };
+  thumb.replaceChildren();thumb.dataset.preview=state;
+  if(!p.thumbnail||p.error){thumb.append(note(p.error?'Cannot open':previewNotes[state]||previewNotes.unavailable));return;}
+  const img=new Image();img.alt='';img.decoding='async';img.src=p.thumbnail;img.onerror=()=>thumb.replaceChildren(note(previewNotes.unavailable));thumb.append(img);
+  if(state==='empty')thumb.append(Object.assign(document.createElement('span'),{className:'thumb-note',textContent:'Empty'}));
+}
+const cardKey=p=>`${p.workspaceId}/${p.id}`;
 function card(p){
-  const el=document.createElement('div'),a=document.createElement('a'),more=document.createElement('button');el.className='card-wrap';a.className=p.error?'card broken':'card';a.title=p.name;
+  const el=document.createElement('div'),a=document.createElement('a'),more=document.createElement('button');el.className='card-wrap';
   a.innerHTML='<div class="thumb"></div><svg class="icon row-icon"><use href="#i-page"/></svg><div style="min-width:0;flex:1"><p class="name"></p><p class="meta"></p></div>';
   Object.assign(more,{type:'button',className:'ibtn card-more',innerHTML:'<svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>'});
-  more.setAttribute('aria-label',`More actions for ${p.name}`);more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');
-  const thumb=a.querySelector('.thumb'),placeholder=()=>{const box=document.createElement('div');box.className='placeholder';box.innerHTML='<svg class="icon" aria-hidden="true"><use href="#i-page"/></svg>';return box;};
-  if(p.thumbnail){const img=new Image();img.alt='';img.src=p.thumbnail;img.onerror=()=>img.replaceWith(placeholder());thumb.append(img);}else thumb.append(placeholder());
-  a.querySelector('.name').textContent=p.name;
-  a.querySelector('.meta').textContent=paperMeta(p);
+  more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');
+  const thumb=a.querySelector('.thumb'),c={p,key:cardKey(p),el,a,more,sig:'',preview:''};
+  // Only what changed is redrawn, so a refresh never replaces a focused card or restarts a loaded preview.
+  c.update=next=>{
+    const sig=JSON.stringify(next);if(sig===c.sig)return;c.sig=sig;c.p=next;
+    a.className=next.error?'card broken':'card';a.title=next.name;more.setAttribute('aria-label',`More actions for ${next.name}`);
+    a.querySelector('.name').textContent=next.name;a.querySelector('.meta').textContent=paperMeta(next);
+    const preview=`${next.preview?.state}|${next.preview?.revision}|${next.thumbnail?.length}|${next.error||''}`;
+    if(preview!==c.preview){c.preview=preview;drawPreview(thumb,next);}
+  };
+  c.update(p);
   // The native surface has no real navigation; always call location.assign there.
   a.addEventListener('click',async event=>{
     if(busy){event.preventDefault();return;}
-    if(!inPaperSurface&&runningURL(p.workspaceId,p.id))return;
-    event.preventDefault();await openPaper(p);
+    if(!inPaperSurface&&runningURL(c.p.workspaceId,c.p.id))return;
+    event.preventDefault();await openPaper(c.p);
   });
-  const c={p,el,a,more};el.append(a,more);
+  el.append(a,more);
   more.addEventListener('click',()=>{const r=more.getBoundingClientRect();showCardMenu(c,r.right,r.bottom+4,true);});
   el.addEventListener('contextmenu',event=>{event.preventDefault();const r=more.getBoundingClientRect();event.clientX||event.clientY?showCardMenu(c,event.clientX,event.clientY):showCardMenu(c,r.right,r.bottom+4,true);});
   return c;
@@ -67,8 +85,12 @@ function choose(id){selected=id;const url=new URL(location.href);if(id==='person
 function render(data){
   serverVersion=data.version||null;
   projects=data.projects||[];if(selected!=='all'&&!projects.some(p=>p.id===selected))selected='personal';
-  const nextCards=JSON.stringify(data.papers||[]),nextOptions=JSON.stringify(projects.map(p=>[p.id,p.name]));
-  if(nextCards!==cardsKey){cardsKey=nextCards;if(cardMenu.matches(':popover-open'))cardMenu.hidePopover();cards=(data.papers||[]).map(card);list.replaceChildren(...cards.map(c=>c.el));}
+  const nextOptions=JSON.stringify(projects.map(p=>[p.id,p.name])),known=new Map(cards.map(c=>[c.key,c]));
+  cards=(data.papers||[]).map(p=>{const old=known.get(cardKey(p));if(old){old.update(p);return old;}return card(p);});
+  if(menuCard&&!cards.includes(menuCard)&&cardMenu.matches(':popover-open'))cardMenu.hidePopover();
+  // Existing cards stay in place; only missing, new or reordered ones move.
+  const wanted=new Set(cards.map(c=>c.el));for(const child of [...list.children])if(!wanted.has(child))child.remove();
+  cards.forEach((c,i)=>{if(list.children[i]!==c.el)list.insertBefore(c.el,list.children[i]||null);});
   for(const {p,a} of cards)a.href=runningURL(p.workspaceId,p.id)?.href||'#';
   if(nextOptions!==optionsKey){
     optionsKey=nextOptions;const select=document.getElementById('workspace-filter');select.replaceChildren();
@@ -195,7 +217,7 @@ document.getElementById('home-sharing').addEventListener('click',async()=>{if(!d
 document.getElementById('sharing-close').addEventListener('click',()=>sharingDialog.close());
 
 // Card actions: Open, Rename, Show in folder and reversible Move to Trash.
-let menuCard=null,menuClosed={c:null,at:0};
+let menuClosed={c:null,at:0};
 const platform=navigator.userAgentData?.platform||navigator.platform||'';
 cardMenu.querySelector('[data-act=reveal]').textContent=/mac/i.test(platform)?'Show in Finder':/win/i.test(platform)?'Show in Explorer':'Show in folder';
 function showCardMenu(c,x,y,fromButton=false){
@@ -220,15 +242,26 @@ for(const menu of [cardMenu,openMenu])menu.addEventListener('keydown',event=>{
 const renameDialog=document.getElementById('rename-dialog'),renameName=document.getElementById('rename-name'),renameProblem=document.getElementById('rename-problem');
 const trashDialog=document.getElementById('trash-dialog'),trashProblem=document.getElementById('trash-problem');
 let chosen=null;
-function notice(text,label,action){
-  activity.replaceChildren(text,Object.assign(document.createElement('button'),{type:'button',textContent:label,onclick:action}));activity.hidden=false;
+// The status floats at a fixed spot (see .activity), so it never shifts the library. Hovering or focusing it
+// keeps it up; otherwise it leaves after a while. Recently deleted still holds the Paper afterwards.
+let noticeTimer;
+function dismissNotice(){clearTimeout(noticeTimer);if(activity.contains(document.activeElement))(document.body.contains(lastFocus)?lastFocus:q).focus({preventScroll:true});activity.hidden=true;}
+let lastFocus=document.body;
+function notice(text,buttons){
+  clearTimeout(noticeTimer);
+  const close=Object.assign(document.createElement('button'),{type:'button',textContent:'✕',title:'Dismiss',onclick:dismissNotice});close.setAttribute('aria-label','Dismiss');
+  activity.replaceChildren(Object.assign(document.createElement('span'),{textContent:text}),...buttons.map(([label,action])=>Object.assign(document.createElement('button'),{type:'button',textContent:label,onclick:action})),close);
+  activity.hidden=false;
+  const arm=()=>{clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>{if(!activity.matches(':hover,:focus-within'))dismissNotice();else arm();},15000);};arm();
+  return activity.querySelector('button');
 }
+activity.addEventListener('keydown',event=>{if(event.key==='Escape'&&activity.querySelector('button'))dismissNotice();});
 cardMenu.addEventListener('click',async event=>{
   const act=event.target.closest('button')?.dataset.act,c=menuCard;if(!act||!c||busy)return;
   cardMenu.hidePopover();chosen=c.p;
   if(act==='open')return openPaper(c.p);
   if(act==='rename'){renameName.value=c.p.name;renameProblem.hidden=true;renameDialog.showModal();renameName.select();return;}
-  if(act==='trash'){document.getElementById('trash-help').textContent=`“${c.p.name}” moves to Open → Recently deleted, where you can restore it. Any sharing links for it stop first.`;trashProblem.hidden=true;trashDialog.showModal();document.getElementById('cancel-trash').focus();return;}
+  if(act==='trash'){document.getElementById('trash-help').textContent=`“${c.p.name}” moves to Recently deleted, where you can restore it. Its sharing links stop first.`;trashProblem.hidden=true;trashDialog.showModal();document.getElementById('cancel-trash').focus();return;}
   busy=true;problem.hidden=true;
   try{await request({action:'reveal',workspaceId:c.p.workspaceId,paperId:c.p.id});}catch(error){fail(error);}finally{busy=false;}
 });
@@ -245,16 +278,19 @@ document.getElementById('rename-form').addEventListener('submit',event=>{
   void confirmAction(renameDialog,renameProblem,document.getElementById('save-rename'),()=>request({action:'rename',workspaceId:p.workspaceId,paperId:p.id,name}));
 });
 document.getElementById('cancel-rename').addEventListener('click',()=>renameDialog.close());
-async function undo(workspaceId,trashId){
-  if(busy)return;busy=true;problem.hidden=true;
-  try{await request({action:'restore',workspaceId,trashId});activity.hidden=true;}catch(error){fail(error);}finally{busy=false;}
+async function undo(workspaceId,trashId,paperId){
+  if(busy)return;busy=true;problem.hidden=true;let restored=false;
+  try{await request({action:'restore',workspaceId,trashId});restored=true;dismissNotice();}catch(error){fail(error);}finally{busy=false;}
   await load();
+  if(restored){const back=cards.find(c=>c.p.workspaceId===workspaceId&&c.p.id===paperId);if(back&&!back.el.hidden)back.a.focus({preventScroll:false});}
 }
 document.getElementById('confirm-trash').addEventListener('click',event=>{
   const p=chosen;if(!p)return;
   void confirmAction(trashDialog,trashProblem,event.currentTarget,async()=>{
     const moved=await request({action:'trash',workspaceId:p.workspaceId,paperId:p.id});
-    notice(`Moved “${moved.name}” to Recently deleted. `,'Undo',()=>undo(moved.workspaceId,moved.trashId));
+    lastFocus=q;
+    // The card that opened the menu is gone, so Undo takes focus and stays reachable from the keyboard.
+    notice(`Moved “${moved.name}” to Recently deleted.`,[['Undo',()=>undo(moved.workspaceId,moved.trashId,moved.paperId)],['View',openDeleted]]).focus({preventScroll:true});
   });
 });
 document.getElementById('cancel-trash').addEventListener('click',()=>trashDialog.close());
@@ -269,8 +305,19 @@ async function renderDeleted(){
     catch(error){deletedMessage.textContent=error.message;b.disabled=false;b.textContent='Restore';}
     finally{busy=false;deletedMessage.hidden=false;void load();}
   })])):[help('Nothing here. Papers you move to Trash appear here until you restore them.')]));
+  // The pressed Restore button is gone after a refresh; keep keyboard focus inside the dialog.
+  if(deletedDialog.open&&!deletedDialog.contains(document.activeElement)||document.activeElement===document.getElementById('deleted-close'))(area.querySelector('button')||document.getElementById('deleted-close')).focus();
 }
-document.getElementById('open-deleted').addEventListener('click',()=>{openMenu.hidePopover();deletedMessage.hidden=true;deletedDialog.showModal();void renderDeleted();});
+let deletedOpener=null;
+function openDeleted(){
+  if(deletedDialog.open)return;
+  deletedOpener=activity.contains(document.activeElement)||openMenu.contains(document.activeElement)?null:document.activeElement;
+  if(openMenu.matches(':popover-open'))openMenu.hidePopover();
+  dismissNotice();deletedMessage.hidden=true;deletedDialog.showModal();void renderDeleted();
+}
+deletedDialog.addEventListener('close',()=>{const target=deletedOpener&&document.body.contains(deletedOpener)?deletedOpener:document.getElementById('open-deleted-tool');deletedOpener=null;target.focus();});
+document.getElementById('open-deleted').addEventListener('click',openDeleted);
+document.getElementById('open-deleted-tool').addEventListener('click',openDeleted);
 document.getElementById('deleted-close').addEventListener('click',()=>deletedDialog.close());
 
 // Native hosts can join without adding a second MCP server or saving the invitation key.

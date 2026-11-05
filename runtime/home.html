@@ -23,10 +23,10 @@ h1{margin:0;font-size:22px;line-height:1.2;font-weight:600}.library-heading{disp
 .grid .card:not(.broken) .meta{display:none}
 .list .card{padding-right:44px}.list .card-more{top:8px;right:8px;border-color:transparent;background:transparent}
 .home-open-menu .danger{color:var(--danger)}.home-open-menu button:disabled{opacity:.45}.home-open-menu hr{margin:4px 2px;border:0;border-top:1px solid var(--line)}
-.thumb{aspect-ratio:1.6;border-radius:8px;background:var(--field);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;padding:8px;overflow:hidden}
+.thumb{position:relative;aspect-ratio:1.6;border-radius:8px;background:var(--field);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;padding:8px;overflow:hidden}
 .card:hover .thumb{border-color:var(--edge-strong)}
 .card:focus-visible{outline:none}.card:focus-visible .thumb{outline:1.5px solid var(--accent);outline-offset:-1.5px}
-.thumb img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.thumb img{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;display:block}
 .thumb .icon{width:28px;height:28px;color:var(--text-2)}
 .name{margin:8px 0 1px;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .meta{margin:0;font-size:13px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -42,11 +42,14 @@ h1{margin:0;font-size:22px;line-height:1.2;font-weight:600}.library-heading{disp
 .primary{height:var(--control-h);padding:0 14px;border:0;border-radius:6px;background:var(--text);color:var(--surface);font-size:13px;font-weight:500}
 .primary:hover{background:color-mix(in srgb,var(--text) 88%,var(--surface))}
 .primary:disabled{opacity:.55}
-.placeholder{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--text-2);font-size:13px;font-variant-numeric:tabular-nums}
+.placeholder{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--text-2);font-size:12px;text-align:center}
+.thumb-note{position:absolute;left:8px;bottom:8px;padding:1px 6px;border-radius:4px;background:var(--popover);border:1px solid var(--line);color:var(--text-2);font-size:11px;line-height:16px;pointer-events:none}
 .problem{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 12px;font-size:12px;color:var(--danger)}
 .problem button{height:24px;padding:0 8px;border:1px solid currentColor;border-radius:5px;background:transparent;color:inherit;font-size:12px}
-.problem input{flex-basis:100%;min-width:0;padding:6px 8px;font-size:12px}.activity{margin:0 0 12px;color:var(--text-2);font-size:12px}.activity input{display:block;width:100%;margin-top:6px;padding:6px 8px;font:inherit}
-@media(max-width:640px){.bar{padding:8px 16px}.content{padding:20px 16px}.home-actions{gap:5px}.mark{font-size:12px}.tools{flex-wrap:wrap;height:auto}.search{min-width:110px}#workspace-filter{min-width:110px;max-width:140px}.server-control{padding:0 8px}.primary{padding:0 10px}.library-heading{margin-bottom:18px}}
+.problem input{flex-basis:100%;min-width:0;padding:6px 8px;font-size:12px}
+/* Status and Undo float over the library, so showing or hiding them never moves the cards. */
+.activity{position:fixed;left:50%;bottom:calc(20px + var(--safe-bottom,0px));transform:translateX(-50%);z-index:30;display:flex;align-items:center;gap:6px;max-width:min(520px,calc(100vw - 32px));margin:0;padding:6px 8px 6px 12px;border:1px solid var(--edge-strong);border-radius:8px;background:var(--popover);color:var(--text);box-shadow:var(--shadow);font-size:12px}.activity span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(148px,1fr))}.bar{padding:8px 16px}.content{padding:20px 16px}.home-actions{gap:5px}.mark{font-size:12px}.tools{flex-wrap:wrap;height:auto}.search{min-width:110px}#workspace-filter{min-width:110px;max-width:140px}.server-control{padding:0 8px}.primary{padding:0 10px}.library-heading{margin-bottom:18px}}
 .file-dialog{width:min(400px,calc(100vw - 32px));padding:24px;border:1px solid var(--edge-strong);border-radius:12px;background:var(--popover);color:var(--text);box-shadow:var(--shadow)}.file-dialog::backdrop{background:rgb(0 0 0/.35)}.file-dialog h2{font-size:16px;margin:0 0 12px}.file-dialog p{font-size:13px;color:var(--text-2);line-height:1.5}.file-dialog>div{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
 .home-actions{display:flex;align-items:center;gap:8px}.server-control{height:var(--control-h);padding:0 10px;border:1px solid var(--edge-strong);border-radius:6px;background:transparent;color:var(--text-2)}
 .list-dialog{width:min(480px,calc(100vw - 32px));max-height:80vh;overflow:auto;padding:20px;border:1px solid var(--edge-strong);border-radius:12px;background:var(--popover);color:var(--text);box-shadow:var(--shadow)}
@@ -54,7 +57,7 @@ h1{margin:0;font-size:22px;line-height:1.2;font-weight:600}.library-heading{disp
 .list-dialog h3{margin:20px 0 4px;font-size:12px;font-weight:600;color:var(--text-2)}
 .server-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:60px;border-top:1px solid var(--line)}.server-row>div:first-child{min-width:0}.server-name{font-weight:500;overflow:hidden;text-overflow:ellipsis}.server-status{margin-top:2px;color:var(--text-2);font-size:13px}.row-actions{display:flex;gap:6px;flex:0 0 auto}.server-stop{height:26px;padding:0 10px;border:1px solid var(--edge-strong);border-radius:5px;background:transparent;color:var(--text);white-space:nowrap}.server-stop:hover{border-color:var(--text-2)}.server-stop.danger:hover{color:var(--danger);border-color:currentColor}.server-stop:disabled{opacity:.5}
 .invite-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:40px;padding-left:12px;font-size:12px}.invite-row .server-status{margin:0}
-.activity button{height:24px;margin-left:4px;padding:0 8px;border:1px solid var(--edge-strong);border-radius:5px;background:transparent;color:var(--text);font-size:12px}
+.activity button{flex:0 0 auto;height:24px;padding:0 8px;border:1px solid var(--edge-strong);border-radius:5px;background:transparent;color:var(--text);font-size:12px}
 #server-message,#deleted-message,#sharing-message{margin:12px 0 0;font-size:12px;color:var(--text-2)}
 .file-dialog form>div{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}.file-dialog .problem{margin:10px 0 0;color:var(--danger)}.file-dialog input{width:100%;height:32px;margin-top:4px;font-size:13px}.file-dialog .danger,.file-dialog .danger:hover{background:var(--danger);color:#fff}
 </style><link rel="stylesheet" href="notion.css?v=0b98163e185d"></head>
@@ -64,6 +67,7 @@ h1{margin:0;font-size:22px;line-height:1.2;font-weight:600}.library-heading{disp
   <symbol id="i-list" viewBox="0 0 16 16"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></symbol>
   <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></symbol>
   <symbol id="i-page" viewBox="0 0 16 16"><path d="M3.5 1.8h6l3 3v9.4h-9z"/><path d="M9.5 1.8v3h3"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></symbol>
   <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/></symbol>
 </svg>
 <main>
@@ -73,12 +77,13 @@ h1{margin:0;font-size:22px;line-height:1.2;font-weight:600}.library-heading{disp
   <div class="content">
     <div class="library-heading"><div><h1>Personal</h1></div><button class="primary" id="new-paper" type="button" title="Create a blank Paper and open it">New Paper</button></div>
     <p class="problem" id="problem" role="alert" hidden></p>
-    <p class="activity" id="activity" role="status" hidden></p>
+    <p class="activity" id="activity" role="status" aria-live="polite" hidden></p>
     <div class="tools">
       <select id="workspace-filter" class="field" aria-label="Library"><option value="personal">Personal</option></select>
       <label class="search"><span class="sr-only">Search Papers</span><svg class="icon"><use href="#i-search"/></svg><input id="q" class="field" type="search" placeholder="Search Papers" autocomplete="off"></label>
       <button class="ibtn" id="as-list" type="button" aria-pressed="false" title="List" aria-label="List"><svg class="icon"><use href="#i-list"/></svg></button>
       <button class="ibtn" id="as-grid" type="button" aria-pressed="true" title="Grid" aria-label="Grid"><svg class="icon"><use href="#i-grid"/></svg></button>
+      <button class="ibtn" id="open-deleted-tool" type="button" title="Recently deleted" aria-label="Recently deleted" aria-haspopup="dialog"><svg class="icon"><use href="#i-trash"/></svg></button>
     </div>
     <nav id="projects" class="grid" aria-label="Papers"></nav>
     <p id="none" class="empty" hidden>No Papers match your search. Press Escape to clear it.</p>
