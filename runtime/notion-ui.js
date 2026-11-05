@@ -80,7 +80,7 @@ export function setupNotion({
   let dialog, title, body, alert, connection, disconnect, cancel, returnFocus;
   let destroyed = false, session = 0, view = 0, mode = 'open';
   let connectionState = { connected: false }, mutating = false;
-  let searchTimer;
+  let searchTimer, viewKind = 'other', lastRefresh = 0, onReturn;
 
   const owner = () => access?.role === 'owner' && !access.shared;
   const alive = token => !destroyed && dialog?.open && token === session;
@@ -100,6 +100,22 @@ export function setupNotion({
 
   function stopTimers() {
     clearTimeout(searchTimer);
+  }
+
+  // Focus returning to an open dialog re-validates the connection and linked page; it never writes.
+  // Only state-driven views are redrawn, so a half-filled picker keeps its input.
+  async function refresh() {
+    if (destroyed || !dialog?.open || mutating || document.hidden || !owner() || Date.now() - lastRefresh < 5000) return;
+    lastRefresh = Date.now();
+    const token = session, screenId = view;
+    try {
+      const next = await status();
+      if (!current(token, screenId) || mutating) return;
+      const flipped = next.connected !== connectionState.connected;
+      connectionState = next;
+      if (flipped || viewKind === 'saved') resume(token);
+      else connectionControl();
+    } catch { /* A failed passive check keeps what is shown; explicit actions report errors. */ }
   }
 
 
@@ -136,6 +152,9 @@ export function setupNotion({
     footer.append(control, cancel);
     dialog.append(header, body, alert, footer);
     dialog.addEventListener('close', closed);
+    onReturn = () => { void refresh(); };
+    window.addEventListener('focus', onReturn);
+    document.addEventListener('visibilitychange', onReturn);
     dialog.addEventListener('cancel', event => {
       event.preventDefault();
       dialog.close();
@@ -160,8 +179,9 @@ export function setupNotion({
     disconnect.disabled = mutating || connectionState.saving===true;
   }
 
-  function screen() {
+  function screen(kind = 'other') {
     view++;
+    viewKind = kind;
     clearTimeout(searchTimer);
     body.replaceChildren();
     alert.replaceChildren();
@@ -198,6 +218,7 @@ export function setupNotion({
     session++;
     stopTimers();
     mode = nextMode;
+    lastRefresh = Date.now();
     const token = session;
     title.textContent = mode === 'save' ? 'Save to Notion' : 'Open from Notion';
     screen();
@@ -249,9 +270,11 @@ export function setupNotion({
   }
 
   function connectView(token) {
-    const screenId = screen();
-    body.append(note('Sign in to Notion and choose your workspace. You can then open Papers saved there. A local copy stays on this device.'));
-    const connect = button('Connect to Notion', () => connectNotion(token, screenId, connect), 'notion-primary');
+    const screenId = screen('connect');
+    const again = connectionState.reconnect === true;
+    body.append(note(again ? 'Your Notion sign-in expired or was revoked. Sign in again to continue; local Papers and their saved Notion links are kept.' :
+      'Sign in to Notion and choose your workspace. You can then open Papers saved there. A local copy stays on this device.'));
+    const connect = button(again ? 'Reconnect to Notion' : 'Connect to Notion', () => connectNotion(token, screenId, connect), 'notion-primary');
     body.append(actions(connect));
     connect.focus();
   }
@@ -291,27 +314,44 @@ export function setupNotion({
   }
 
   function savedView(token, justSaved) {
-    screen();
-    const link = connectionState.link;
-    body.append(justSaved ? live('Saved to Notion.') : note('Save changes adds the latest version to this same Notion page. Earlier versions are kept.'));
+    const link = connectionState.link, state = connectionState.syncState;
+    if (!justSaved && state === 'conflict') { conflictView(token, { data: { link } }); return; }
+    screen('saved');
     const time = savedTime(link?.savedAt);
-    body.append(note(time ? `Last saved: ${time}` : 'No last-saved time is available.'));
-    if(connectionState.changed===true)body.append(note('This Paper has local changes since its last Notion save.'));
     const url = notionURL(link?.url);
-    const save = button('Save changes', () => savePaper(token), 'notion-primary');
-    body.append(actions(save, ...(url ? [externalLink('Open in Notion', url)] : [])));
-    body.append(actions(button('Save elsewhere…', () => picker(token, true), 'notion-quiet')));
+    const changed = connectionState.changed === true;
+    const open = url ? [externalLink('Open in Notion', url)] : [];
+    const recheck = () => button('Check again', () => launch(mode), 'notion-quiet');
+    const elsewhere = () => button('Save elsewhere…', () => picker(token, true), 'notion-quiet');
+    if (state === 'offline' || state === 'no-access' || state === 'other-account') {
+      // Saving is withheld until the linked page can be validated; the local Paper is untouched.
+      body.append(live(state === 'offline' ? 'Notion could not be reached, so the saved page was not checked. Your local Paper is safe.' :
+        state === 'no-access' ? 'Notion denied access to the linked page. Check its permissions or the connected workspace.' :
+        'This Paper is linked to a different Notion workspace than the one connected. Nothing was written.'));
+      body.append(note(`${time ? `Last saved: ${time}. ` : ''}${changed ? 'This Paper has local changes since then.' : 'No local changes since then.'}`));
+      body.append(actions(...(state === 'other-account' ? [] : [recheck()]), ...open));
+      body.append(actions(...(state === 'offline' ? [] : [elsewhere()])));
+      return;
+    }
+    body.append(justSaved ?
+      live(changed ? 'Saved to Notion. You edited this Paper while it was saving; those edits are not in Notion yet.' : 'Saved to Notion.') :
+      note('Save changes adds the latest version to this same Notion page. Earlier versions are kept.'));
+    body.append(note(time ? `Last saved: ${time}` : 'No last-saved time is available.'));
+    if (!justSaved) body.append(note(changed ? 'This Paper has local changes since its last Notion save.' : 'No local changes since its last Notion save.'));
+    const save = button(changed ? 'Save changes' : 'Save again', () => savePaper(token), changed ? 'notion-primary' : '');
+    body.append(actions(save, ...open));
+    body.append(actions(elsewhere()));
     save.focus();
   }
   function savingView(token){
-    const screenId=screen(),previousSave=connectionState.link?.savedAt;body.append(live('Saving to Notion… You can close this window; the save will continue.'));cancel.textContent='Close';
+    const screenId=screen('saving'),previousSave=connectionState.link?.savedAt;body.append(live('Saving to Notion… You can close this window; the save will continue.'));cancel.textContent='Close';
     const check=button('Check status',poll,'notion-quiet');body.append(actions(check));
     async function poll(){clearTimeout(searchTimer);if(!current(token,screenId))return;check.disabled=true;try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(!next.saving){if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview)savedView(token,true);else{resume(token);if(!next.needsReview)showError('The save was not confirmed. Your local Paper is safe.');}return;}}catch(error){if(current(token,screenId))showError(failure(error));}finally{check.disabled=false;if(current(token,screenId))searchTimer=setTimeout(poll,2000);}}
     searchTimer=setTimeout(poll,1500);
   }
 
   function picker(token, elsewhere = false) {
-    const screenId = screen();
+    const screenId = screen('picker');
     let pages = [], cursor = null, selected = null, query = '', listRequest = 0, loading = false;
     body.append(note(mode === 'save' ? 'Create a new Notion page for this Paper. Choose its name and where it belongs.' : 'Choose a Notion page containing a saved Paper. It opens as a local copy with its editable layers and files.'));
     let pageTitle;
@@ -465,14 +505,15 @@ export function setupNotion({
       } });
       if (!result || typeof result.pageId !== 'string' || !result.pageId) throw new Error('Notion did not return the saved Paper page.');
       if (!current(token, screenId)) return;
-      connectionState = { ...connectionState, link: result.link||result,changed:result.changed===true,needsReview:false };
+      const changed = result.changed === true;
+      connectionState = { ...connectionState, link: result.link||result, changed, needsReview: false, saving: false, remote: 'current', syncState: changed ? 'local-changes' : 'saved' };
       mutating = false;
       savedView(token, true);
       notify('Paper saved to Notion.');
     } catch (error) {
       if (!current(token, screenId)) return;
       mutating = false;
-      try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(next.saving){savingView(token);return;}if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview){savedView(token,true);return;}if(next.needsReview){resume(token);return;}}catch{/* Preserve the original failure if status is unavailable too. */}
+      try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(next.saving){savingView(token);return;}if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview){savedView(token,true);return;}if(next.needsReview||!next.connected){resume(token);if(!next.connected)showError(failure(error));return;}}catch{/* Preserve the original failure if status is unavailable too. */}
       if (errorStatus(error) === 409) conflictView(token, error);
       else {
         releaseBusy(progress);
@@ -484,9 +525,9 @@ export function setupNotion({
   }
 
   function conflictView(token, error) {
-    screen();
+    screen('saved');
     body.append(live('This Paper changed in Notion since your last save. Nothing was overwritten.'));
-    body.append(note('Keep your local Paper and open the Notion version as a separate local Paper to compare them.'));
+    body.append(note('Keep your local Paper and open the Notion version as a separate local Paper to compare them. To keep your version in Notion, save it to a separate page.'));
     const link = error?.data?.link || connectionState.link;
     const pageId = error?.data?.pageId || link?.pageId;
     const url = notionURL(link?.url || error?.data?.url);
@@ -494,6 +535,7 @@ export function setupNotion({
       if (typeof pageId === 'string' && pageId) openPaper(token, pageId);
       else { mode = 'open'; title.textContent = 'Open from Notion'; picker(token); }
     }, 'notion-primary'), ...(url ? [externalLink('Open in Notion', url)] : [])));
+    body.append(actions(button('Save my Paper elsewhere…', () => picker(token, true), 'notion-quiet'), button('Check again', () => launch(mode), 'notion-quiet')));
     body.querySelector('button')?.focus();
   }
 
@@ -579,6 +621,8 @@ export function setupNotion({
     if (destroyed) return;
     destroyed = true;
     stopTimers();
+    window.removeEventListener('focus', onReturn);
+    document.removeEventListener('visibilitychange', onReturn);
     if (dialog?.open) dialog.close();
     dialog?.remove();
   }
