@@ -3,11 +3,16 @@ import path from 'node:path';
 import os from 'node:os';
 import {createHash, randomBytes} from 'node:crypto';
 import {PaperLibrary, PaperError, ID} from './library.mjs';
-import {inspectWorkspace,stopWorkspace,workspacePorts} from './workspace.mjs';
+import {inspectWorkspace,stopWorkspace} from './workspace.mjs';
 import {VERSION} from './runtime.mjs';
 
-export const HOME_URI=`ui://openpaperdesign/home/${VERSION}`;
+export const HOME_URI=`ui://openpaperdesign/home/${VERSION}/${randomBytes(8).toString('hex')}`;
 export const HOME_MIME='text/html;profile=mcp-app';
+export function isHomeResource(uri){
+  if(typeof uri!=='string')return false;
+  const base=`ui://openpaperdesign/home/${VERSION}/`;
+  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||['ui://openpaperdesign/home',...[4,5,6,7,8,9].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
+}
 export function dataHome(){
   if(process.env.PAPER_HOME){if(!path.isAbsolute(process.env.PAPER_HOME))throw new Error('PAPER_HOME must be an absolute folder');return process.env.PAPER_HOME;}
   if(process.platform==='darwin')return path.join(os.homedir(),'Library','Application Support','OpenPaperDesign');
@@ -34,6 +39,10 @@ async function workspaces(){
     }catch{roots.push({id:file.name.slice(0,-5),name:'Unavailable project',unavailable:true});}
   }
   return roots;
+}
+export async function runningHomeWorkspace(id){
+  const entry=(await workspaces()).find(entry=>entry.id===id);if(!entry||entry.unavailable)throw new PaperError(404,'This Paper library is unavailable.');
+  return {...entry,server:await inspectWorkspace(entry.root)};
 }
 export function createHome(open){
   return async(args={})=>{
@@ -73,19 +82,9 @@ export function createHome(open){
     return {url:`${app.url}/${args.paperId?`?paper=${encodeURIComponent(args.paperId)}`:'home.html'}`,workspace:entry.root,storageRoot:app.library.root};
   };
 }
-export async function homeResource(editor){
-  // Reuse the complete web app in one fullscreen surface. Only known workspaces'
-  // exact loopback origins are embeddable; no wildcard ports or remote pages.
-  const origins=new Set();
-  for(const entry of await workspaces()){
-    if(entry.unavailable)continue;
-    for(const port of workspacePorts(entry.root))origins.add(`http://127.0.0.1:${port}`);
-    try{const live=await inspectWorkspace(entry.root);if(live)origins.add(new URL(live.url).origin);}catch{}
-  }
-  const frameDomains=[...origins];
+export async function homeResource(editor,uiKey){
   const css=editor.text('chrome.css').replace(/@font-face\{[^}]*\}/g,'');
-  const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenPaperDesign</title><style>${css}
-html,body{height:100%;margin:0;overflow:hidden}#paper-surface{width:100%;height:100%;border:0;display:block}#paper-surface[hidden]{display:none}#surface-status{position:fixed;inset:0;display:grid;place-content:center;gap:14px;padding:28px;background:var(--surface);color:var(--text);font-size:13px}#surface-status[hidden]{display:none}#surface-message{max-width:460px;margin:0;line-height:1.5}#surface-retry{justify-self:start;padding:7px 12px;border:1px solid var(--edge-strong);border-radius:6px;background:var(--field);color:var(--text)}
-</style></head><body><iframe id="paper-surface" name="openpaperdesign" title="OpenPaperDesign" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals" allow="clipboard-write" hidden></iframe><div id="surface-status" role="status"><p id="surface-message">Opening your Papers…</p><button id="surface-retry" type="button" hidden>Open Home</button></div><script id="paper-origins" type="application/json">${JSON.stringify(frameDomains)}</script><script type="module">${editor.text('home-host.js')}</script></body></html>`;
-  return {uri:HOME_URI,mimeType:HOME_MIME,text:html,_meta:{ui:{csp:{connectDomains:[],resourceDomains:[],frameDomains},permissions:{clipboardWrite:{}},prefersBorder:false},'openai/ui':{preferredDisplayMode:'fullscreen',availableDisplayModes:['fullscreen']}}};
+  const script=('const __paperUIKey='+JSON.stringify(uiKey)+';\n'+editor.text('native.js')).replace(/<\/script/gi,'<\\/script');
+  const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenPaperDesign</title><style id="paper-view-style">${css}</style><style>#paper-native-status{position:fixed;inset:0;z-index:2147483640;display:grid;place-content:center;gap:12px;padding:28px;background:var(--surface);color:var(--text);font:13px/1.5 system-ui}#paper-native-status p{max-width:460px;margin:0}#paper-native-status button{justify-self:start;padding:7px 12px;border:1px solid var(--edge-strong);border-radius:6px;background:var(--field);color:var(--text)}</style></head><body><div id="paper-native-status" role="status"><p>Opening your Papers…</p></div><script type="module">${script}</script></body></html>`;
+  return {uri:HOME_URI,mimeType:HOME_MIME,text:html,_meta:{ui:{csp:{connectDomains:[],resourceDomains:['data:','blob:']},permissions:{clipboardWrite:{}},prefersBorder:false},'openai/ui':{preferredDisplayMode:'fullscreen',availableDisplayModes:['fullscreen']}}};
 }

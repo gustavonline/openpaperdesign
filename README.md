@@ -66,6 +66,8 @@ A Paper contains `paper.json`, assets, a `DESIGN.md` guide and brief notes in `C
 
 To run it without a plugin, clone this repository and run `node server/server.mjs`. Add `--workspace /absolute/path/to/project` to open a project library. The command prints the browser address. `node server/server.mjs --list` lists known Papers without opening a server.
 
+The browser and plugin use the same renderer. For UI development, install the development dependencies and run `npm run build:ui` after changing the renderer; commit `runtime/native.js` with the source changes. Installed plugins use the included build and need no npm installation.
+
 ## Credits
 
 - [Michael Shimeles’ Sketch / paper-rs](https://github.com/michaelshimeles/sketch) for canvas and editor inspiration.

@@ -1,5 +1,5 @@
-import {surfaceReady,surfaceStopped} from './surface.js?v=e7e41130c67a';
-const VERSION='0.7.0-preview.8';
+import {surfaceReady,surfaceStopped,onSurfaceDispose,inPaperSurface} from './surface.js?v=da065f7b280e';
+const VERSION='0.7.0-preview.9';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper');
 let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='',serverVersion=null;
 
@@ -93,7 +93,7 @@ let saved;try{saved=localStorage.getItem(key);}catch{}layout(saved==='list'?'lis
 const initial=load();initial.finally(surfaceReady);addEventListener('focus',load);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
 setInterval(()=>{if(!document.hidden&&!disconnected)load();},15000);
 
-let notionHome;
+let notionHome;onSurfaceDispose(()=>notionHome?.destroy());
 const openMenu=document.getElementById('home-open-menu'),openButton=document.getElementById('open-paper');
 openButton.addEventListener('click',()=>{if(openMenu.matches(':popover-open'))openMenu.hidePopover();else{openMenu.showPopover();const r=openButton.getBoundingClientRect();Object.assign(openMenu.style,{top:`${r.bottom+6}px`,left:`${Math.max(8,Math.min(innerWidth-openMenu.offsetWidth-8,r.right-openMenu.offsetWidth))}px`});openButton.setAttribute('aria-expanded','true');openMenu.querySelector('button').focus();}});
 openMenu.addEventListener('toggle',event=>openButton.setAttribute('aria-expanded',String(event.newState==='open')));
@@ -101,7 +101,7 @@ async function openFromNotion(){
   openMenu.hidePopover();
   await opening(async()=>{const workspaceId=selected==='all'?'personal':selected,url=await targetURL(workspaceId);
     if(url.origin!==location.origin){url.searchParams.set('collection',workspaceId);url.hash='notion';return navigate(url.href);}
-    if(!notionHome){const module=await import('./notion-ui.js?v=44b092710f55');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
+    if(!notionHome){const module=await import('./notion-ui.js?v=0eb3e5f4ec47');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
     await notionHome.open();
   },'Opening Notion…');
 }
@@ -137,7 +137,7 @@ function renderServers(){
         if(busy)return;busy=true;stop.disabled=true;stop.textContent='Stopping…';serverMessage.hidden=true;
         try{
           const result=await request({action:'stop',workspaceId:project.id,instance:server.instance});
-          disconnected=result.url===location.origin;
+          disconnected=!inPaperSurface&&result.url===location.origin;
           if(disconnected){
             for(const p of projects)if(p.server?.url===result.url)p.server={state:'stopped'};
             create.disabled=true;openButton.disabled=true;serverMessage.textContent='Server stopped. Reopen Home through the plugin to start it again.';problem.textContent='Server stopped. Your Papers are saved. Reopen Home through the plugin to continue.';problem.hidden=false;surfaceStopped();

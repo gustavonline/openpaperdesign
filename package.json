@@ -1,6 +1,6 @@
 {
   "name": "openpaperdesign",
-  "version": "0.7.0-preview.8",
+  "version": "0.7.0-preview.9",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,12 +8,16 @@
   },
   "scripts": {
     "start": "node server/server.mjs",
-    "mcp": "node server/server.mjs --stdio"
+    "mcp": "node server/server.mjs --stdio",
+    "build:ui": "node scripts/refresh-assets.mjs && node scripts/build-native.mjs"
   },
   "license": "Apache-2.0",
   "description": "Lightweight local design and diagram Papers",
   "repository": {
     "type": "git",
     "url": "https://github.com/gustavonline/openpaperdesign.git"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

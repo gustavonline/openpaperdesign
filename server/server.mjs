@@ -15,7 +15,8 @@ import {createNotion} from './notion.mjs';
 import { json, readBody, staticFile } from './http.mjs';
 import { createSharing } from './sharing.mjs';
 import { complete, protocolError } from './mcp.mjs';
-import {createHome, homeResource, HOME_URI, HOME_MIME, personalWorkspace, rememberWorkspace,dataHome} from './home.mjs';
+import {createHome, homeResource, isHomeResource, HOME_URI, HOME_MIME, personalWorkspace, rememberWorkspace,dataHome} from './home.mjs';
+import {createUI} from './ui.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RUNTIME = path.resolve(HERE,'../runtime');
@@ -76,6 +77,10 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         json(res,200,{stopping:true});setImmediate(()=>app.close().catch(error=>process.stderr.write(`Paper shutdown: ${error.message}\n`)));return;
       }
       if(pathname==='/api/access'&&req.method==='GET')return json(res,200,{role:'owner',shared:false});
+      if(pathname==='/api/updates'&&req.method==='GET'){
+        const id=paperId(url),[paper,feedback,notes]=await Promise.all([library.read(id),library.read(id,'feedback'),library.notes(id)]);
+        return json(res,200,{revision:paper.revision,feedbackRevision:feedback.revision,guideRevision:notes['DESIGN.md'].revision,presence:presence.snapshot(id)});
+      }
       if(pathname==='/api/bundle'&&req.method==='GET'){
         const id=paperId(url),bytes=await exportBundle(library,id);res.writeHead(200,{'Content-Type':'application/zip','Content-Length':bytes.length,'Content-Disposition':`attachment; filename="${id}.paper.zip"`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(bytes);return;
       }
@@ -180,6 +185,7 @@ async function connectWorkspace(root,agentClient){
 
 const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:['paper_list','paper_read','paper_read_feedback'].includes(name),destructiveHint:false,openWorldHint:false}});
 export const TOOLS=[
+  {...tool('paper_ui','Use the owner API for the selected Paper library from the native app.',{key:string,workspaceId:string,origin:string,instance:string,path:string,method:{type:'string',enum:['GET','POST','PUT','DELETE']},headers:{type:'object',additionalProperties:{type:'string'}},body:string},['key','workspaceId','origin','instance','path']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},_meta:{ui:{visibility:['app']}}},
   {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop']},workspaceId:string,paperId:string,name:string,instance:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'}]}}},
   tool('paper_open','Open a Paper workspace. Omit workspace for the personal library; select an absolute project folder for project-local Papers.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
   tool('paper_list','List saved Papers in the opened workspace.',{}),
@@ -197,15 +203,17 @@ export const TOOLS=[
 export async function serveStdio() {
   // An installed version can be pruned while this process is still attached to its host.
   const editor=await loadRuntime(RUNTIME);
-  const apps=new Map(),agentClient=randomBytes(16).toString('hex');let active=null;
+  const apps=new Map(),openingApps=new Map(),agentClient=randomBytes(16).toString('hex');let active=null;
   const getApp=async root=>{
     const previous=apps.get(root);if(previous&&(previous.closed||!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance))apps.delete(root);
-    if(!apps.has(root))apps.set(root,await connectWorkspace(root,agentClient));return apps.get(root);
+    if(!apps.has(root)){if(!openingApps.has(root))openingApps.set(root,connectWorkspace(root,agentClient).then(app=>{apps.set(root,app);return app}).finally(()=>openingApps.delete(root)));return openingApps.get(root);}return apps.get(root);
   };
   const home=createHome(getApp);
+  const uiKey=randomBytes(32).toString('hex'),ui=createUI(uiKey,home);
   const rawCall=async(name,args={},peerId='agent-mcp')=>{
     if(!TOOLS.some(t=>t.name===name))throw new PaperError(400,'Unknown tool');
     if(name==='paper_home')return home(args);
+    if(name==='paper_ui')return ui(args);
     if(name==='paper_open'){
       const root=await projectWorkspace(args.workspace===undefined?await personalWorkspace():args.workspace);
       await rememberWorkspace(root);active=await getApp(root);
@@ -265,12 +273,14 @@ export async function serveStdio() {
   };
   let closing=false;const shutdown=async()=>{if(closing)return;closing=true;for(const app of apps.values())await app.close();};
   const terminate=()=>shutdown().then(()=>process.exit(0),error=>{process.stderr.write(`Paper shutdown: ${error.message}\n`);process.exit(1);});process.once('SIGTERM',terminate);process.once('SIGINT',terminate);
+  const uiCalls=new Set();let agentCalls=Promise.resolve();
   const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
   const respond=message=>process.stdout.write(JSON.stringify(message)+'\n');
   for await(const line of lines){
     if(!line.trim())continue;let request;
     try{
-      if(Buffer.byteLength(line)>MAX_PAPER_BYTES+65536)throw new PaperError(413,'MCP request is too large');request=JSON.parse(line);
+      const size=Buffer.byteLength(line);if(size>Math.ceil(MAX_BUNDLE_BYTES*4/3)+65536)throw new PaperError(413,'MCP request is too large');request=JSON.parse(line);
+      if(size>MAX_PAPER_BYTES+65536&&request.params?.name!=='paper_ui')throw new PaperError(413,'MCP request is too large');
       if(request.id===undefined)continue;
       const invalid=protocolError(request);if(invalid){respond({jsonrpc:'2.0',id:request.id,error:invalid});continue;}
       let result;
@@ -281,17 +291,19 @@ export async function serveStdio() {
       else if(request.method==='resources/list')result={resources:[{uri:HOME_URI,name:'OpenPaperDesign Home',mimeType:HOME_MIME}]};
       else if(request.method==='resources/read'){
         // Existing desktop entries can retain the older template URI across an update.
-        if(![HOME_URI,'ui://openpaperdesign/home','ui://openpaperdesign/home/0.7.0-preview.4','ui://openpaperdesign/home/0.7.0-preview.5','ui://openpaperdesign/home/0.7.0-preview.6','ui://openpaperdesign/home/0.7.0-preview.7'].includes(request.params?.uri))throw new PaperError(404,'Unknown resource');
-        result={contents:[{...await homeResource(editor),uri:request.params.uri}]};
+        if(!isHomeResource(request.params?.uri))throw new PaperError(404,'Unknown resource');
+        result={contents:[{...await homeResource(editor,uiKey),uri:request.params.uri}]};
       }
       else if(request.method==='tools/call'){
-        try{const value=await call(request.params?.name,request.params?.arguments);result=request.params?.name==='paper_home'?{_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI},structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:{content:[{type:'text',text:JSON.stringify(value)}]};}
-        catch(error){result={content:[{type:'text',text:error.message}],isError:true};}
+        const execute=async()=>{try{const value=await call(request.params?.name,request.params?.arguments);return request.params?.name==='paper_home'?{_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI},structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:request.params?.name==='paper_ui'?{structuredContent:value,content:[]}:{content:[{type:'text',text:JSON.stringify(value)}]};}catch(error){return {content:[{type:'text',text:error.message}],isError:true};}};
+        const operation=request.params?.name==='paper_ui'?execute():(agentCalls=agentCalls.then(execute,execute));
+        const task=operation.then(result=>respond({jsonrpc:'2.0',id:request.id,result:complete(request,result,SERVER_INFO)}));
+        uiCalls.add(task);void task.finally(()=>uiCalls.delete(task));continue;
       }else{respond({jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Method not found'}});continue;}
       respond({jsonrpc:'2.0',id:request.id,result:complete(request,result,SERVER_INFO)});
     }catch(error){respond({jsonrpc:'2.0',id:request?.id??null,error:{code:request?-32602:-32700,message:error.message}});}
   }
-  await shutdown();process.removeListener('SIGTERM',terminate);process.removeListener('SIGINT',terminate);
+  await Promise.allSettled(uiCalls);await Promise.allSettled(openingApps.values());await shutdown();process.removeListener('SIGTERM',terminate);process.removeListener('SIGINT',terminate);
 }
 async function main() {
   const args=process.argv.slice(2);if(args.includes('--stdio'))return serveStdio();

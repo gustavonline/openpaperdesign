@@ -81,6 +81,8 @@ curl -sS -X POST "$PAPER_BASE/api/assets?paper=$PAPER_ID" \
 
 The artwork save and feedback save each use their own read revision. A 423 means another writer is busy after a short bounded wait; retry deliberately. A 409 conflict means read current data, preserve both drafts and reconcile; do not retry with a forced overwrite. A stale revision never commits. Writes use a per-Paper lock, atomic replacement, and retained previous bytes.
 
+The owner also exposes scoped GET `/api/updates?paper=<id>` for native views. It returns artwork, feedback and guide revisions plus presence; ordinary browser owners continue using SSE.
+
 ## Invited agents and browsers
 
 See [sharing](sharing.md). Owner-controlled sharing starts a separate listener. A browser exchanges its invitation key at POST `/api/join` for an opaque HttpOnly session. Agents use the copied HTTP `/mcp` endpoint, retaining both Authorization and its automatically generated X-Paper-Client header so distinct agents get distinct anonymous identities, with `Authorization: Bearer <key>`, JSON Content-Type, and Accept containing `application/json, text/event-stream`. The key is private; never put it in a repo, document, screenshot or log.
@@ -109,11 +111,15 @@ SSE reconnect sends a fresh room snapshot. Only the selected Paper’s peers rea
 
 ## Home resource
 
-Owner stdio exposes `resources/list` and `resources/read` for `ui://openpaperdesign/home/<version>` (`text/html;profile=mcp-app`). Discover the exact URI from the resource list or `paper_home` tool metadata. Each release has its own URI so the host does not reuse an older Home. The process loads this immutable resource at startup; removing an old plugin cache cannot erase an already attached Home resource. `paper_home` carries the global `openai/ui` entrypoint and themed OpenPaperDesign icons. The resource inlines the same Home markup/CSS/script as the browser; MCP Apps requests go through host `tools/call`, with `ui/open-link` for the full editor. No localhost network permission or nested iframe is needed by the Home resource. Host UI/theme/safe-area messages are handled. This is desktop-local: a remote/cloud stdio host cannot expose this machine’s files.
+Owner stdio exposes `resources/list` and `resources/read` for `ui://openpaperdesign/home/<version>/<session>` (`text/html;profile=mcp-app`). The exact URI is in the resource list and `paper_home` metadata. The session suffix refreshes the temporary app connection after an MCP restart. Retained older URIs resolve to the current resource. The running process snapshots the shipped UI, so pruning a plugin cache cannot remove it.
 
-Personal data uses the native application data directory: `~/Library/Application Support/OpenPaperDesign` on macOS, `%LOCALAPPDATA%/OpenPaperDesign` on Windows, and `$XDG_DATA_HOME/openpaperdesign` (or `~/.local/share/openpaperdesign`) on Linux. `PAPER_HOME` overrides this with an absolute directory. `Paper/` holds personal files and `projects/<hash>.json` holds pointers to explicitly opened projects, without copying their designs. Missing project folders are shown as unavailable. Data is separate from the plugin cache and is not deleted on uninstall.
+Codex displays Home, Papers and the Notion picker in one MCP App document. It uses the same browser renderer, included as `runtime/native.js`; no local web page is framed or opened for navigation. Home reads the library through MCP without starting an HTTP server. Opening a Paper or Notion, creating a Paper or importing a file starts the selected workspace when needed. Stopping a server leaves Home usable and its background refresh never restarts that server.
 
-The Home frontend checks the host's `openLinks` capability after MCP Apps initialization. In Codex desktop (`hostInfo.client_type === "codex_desktop"`), it requests `codex://browser?url=<encoded-local-url>` through `ui/open-link`; Codex's ordinary external-link validator does not accept plain HTTP. Other hosts receive the validated local URL unchanged. Validation always applies to the original loopback URL, and failures expose that original address for copying. A successful protocol reply alone is not proof that a browser view opened: verify the actual host UI.
+`paper_ui` is an app-only transport. The resource supplies a temporary process-bound key; each data request also identifies the selected workspace's verified origin and instance. Requests use an explicit route/method/header allowlist and the existing owner API, including its revision guards and file limits. It cannot fetch arbitrary URLs. Home actions use the existing Home implementation directly; other requests only reach an already running matching server. UI requests and agent requests can progress independently, while stateful agent calls keep their order.
+
+The native view switches documents inside the same app surface. It flushes artwork and feedback before leaving, unmounts the toolbar and clears view listeners, timers, observers and reads. A failed save offers Keep editing and an explicit Leave without saving. Teardown waits briefly for saves before acknowledging closure. Images and fonts use local data/blob resources; provider sign-in opens through the host's Notion-only external-link bridge. The native document needs no HTTP network or iframe permission.
+
+This integration is desktop-local. A cloud stdio host cannot expose files on another machine. Claude Code uses the ordinary browser Home through the bundled command.
 
 ## Finding an existing Paper
 

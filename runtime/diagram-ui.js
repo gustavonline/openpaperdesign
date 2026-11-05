@@ -1,3 +1,4 @@
+import {paperAsset} from './surface.js?v=da065f7b280e';
 import {DIAGRAM_FAMILIES,makeSymbol,symbolPreview} from './diagram-library.js?v=e55bd274695a';
 import {captureSymbol} from './diagram-model.js?v=49ba16a33b90';
 const symbolId=()=>crypto.randomUUID?.()||Array.from(crypto.getRandomValues(new Uint8Array(16)),n=>n.toString(16).padStart(2,'0')).join('');
@@ -8,7 +9,7 @@ export function setupLibrary(host) {
   let category=DIAGRAM_FAMILIES[0].id;
   const builtinKeys=new Set(DIAGRAM_FAMILIES.flatMap(f=>f.items.map(i=>i.id)));
   let busy=false;
-  function image(src,alt=''){const img=document.createElement('img');img.src=src;img.alt=alt;img.draggable=false;return img;}
+  function image(src,alt=''){const img=document.createElement('img');img.src=paperAsset(src);img.alt=alt;img.draggable=false;return img;}
   function tile(item,custom=false){
     const wrap=document.createElement('div');wrap.className='symbol-tile';
     const b=document.createElement('button');b.type='button';b.className='symbol-button';b.dataset.symbol=item.id;b.dataset.custom=String(custom);b.draggable=host.canEdit();b.disabled=!host.canEdit();b.title=`${item.name} · click or drag to insert`;b.setAttribute('aria-label',`Insert ${item.name}`);

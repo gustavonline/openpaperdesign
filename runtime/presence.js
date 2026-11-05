@@ -1,6 +1,7 @@
 // One small, disposable overlay for people and agents. Artwork stays in paper.json.
 export function setupPresence(host){
   const layer=document.createElement('div'),roster=document.createElement('div');layer.id='presence-layer';layer.setAttribute('aria-hidden','true');roster.id='presence-roster';roster.setAttribute('aria-label','Participants');roster.setAttribute('role','group');host.stage.append(layer,roster);
+  const delay=window.__paperNative?500:100;
   const peers=new Map(),marks=new Map();let mine=null,stopped=false,cursor=null,pending=false,inflight=false,timer=null,rosterKey='',focus=null,flashes=[];
   const put=peer=>{peers.set(peer.id,{...peer,deadline:Date.now()+peer.ttl});};
   function receive(data){if(stopped||data.paperId!==host.paperId)return;if(data.peers){peers.clear();for(const p of data.peers)put(p);}else if(data.peer)put(data.peer);else peers.delete(data.id);paint();}
@@ -27,9 +28,9 @@ export function setupPresence(host){
     if(stopped||inflight||!pending)return;pending=false;inflight=true;
     try{const response=await fetch('/api/presence'+host.paperQuery,{method:'POST',headers:{...host.clientHeaders,'Content-Type':'application/json'},body:JSON.stringify(local()),signal:AbortSignal.timeout(4000)});if(response.ok){const data=await response.json();if(data.peer){if(mine!==data.peer.id){mine=data.peer.id;rosterKey='';}put(data.peer);paint();}}}
     catch{/* Presence is transient. Losing it never blocks artwork or creates a save error. */}
-    finally{inflight=false;if(pending&&!stopped)timer=setTimeout(()=>{timer=null;flush();},100);}
+    finally{inflight=false;if(pending&&!stopped)timer=setTimeout(()=>{timer=null;flush();},delay);}
   }
-  function changed(){if(stopped)return;pending=true;if(!inflight&&!timer)timer=setTimeout(()=>{timer=null;flush();},100);paint();}
+  function changed(){if(stopped)return;pending=true;if(!inflight&&!timer)timer=setTimeout(()=>{timer=null;flush();},delay);paint();}
   function move(e){if(!host.stage.contains(e.target))return;const r=host.stage.getBoundingClientRect();cursor={x:e.clientX-r.left,y:e.clientY-r.top};changed();}
   function down(e){if(!host.stage.contains(e.target))return;focus=host.hit(e.target);changed();}
   const up=()=>changed(),leave=()=>{cursor=null;changed();};

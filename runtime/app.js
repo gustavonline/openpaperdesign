@@ -1,10 +1,10 @@
-import {surfaceReady,inPaperSurface} from './surface.js?v=e7e41130c67a';
-import {setupPresence} from './presence.js?v=3a51591568af';
+import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
+import {setupPresence} from './presence.js?v=3d824c32d7dc';
 import { setupSharing } from './sharing.js?v=6f98f4d01e0b';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
-import { setupLibrary } from './diagram-ui.js?v=c314dc581c2d';
+import { setupLibrary } from './diagram-ui.js?v=7c38f23521a1';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers} from './editing-model.js?v=1d0049e52e98';
-import {setupNotion,notionIcon} from './notion-ui.js?v=44b092710f55';
+import {setupNotion,notionIcon} from './notion-ui.js?v=0eb3e5f4ec47';
 const $ = selector => document.querySelector(selector);
 const stage = $('#stage'), world = $('#world'), body = document.body, form = $('#properties'), tree = $('#layer-tree');
 // Which Paper this page edits, read once from the URL (`?paper=<id>`, exactly once; the server refuses an
@@ -31,7 +31,7 @@ setupSharing({paperId,access,closeMenu,onCancel:()=>{if(mesurerHost.stableMode==
 const notionUI=setupNotion({paperId,access,beforeSave:async()=>{commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your local changes before continuing.');},preview:paperPreview,onOpen:async href=>{if(!await flushSave()||!await flushFeedback())throw new Error('Save your current Paper before opening another.');leaving=true;location.assign(href);},message});
 $('#notion-share-icon').innerHTML=notionIcon;
 $('#save-notion').addEventListener('click',()=>{closeMenu();notionUI.save();});
-const assetUrl = path => paperBase + path;
+const assetUrl = path => paperAsset(paperBase + path);
 // This tab, so its own change events can be told from another tab's or an agent's.
 const clientId = (access.clientPrefix || '') + (crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
 const clientHeaders = { 'X-Paper-Client': clientId };
@@ -1123,7 +1123,7 @@ $('#paper-import').addEventListener('change',async event=>{
   try{if(file.size>50*1024*1024)throw new Error('Paper files must fit within 50 MB.');commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your changes before opening another Paper.');const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':/\.json$/i.test(file.name)?'application/json':'application/zip'},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'This Paper could not be opened.');leaving=true;location.assign(result.href);}catch(error){message(error.message);}
 });
 const slug = text => (text || 'artboard').normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toLowerCase().slice(0, 60) || 'artboard';
-function download(blob, name) { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+function download(blob, name) { if(inPaperSurface){void surfaceDownload(blob,name);return;}const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 const dataUrl = async url => {
   const response = await fetch(url); if (!response.ok) throw new Error(`${url} (${response.status})`);
   const blob = await response.blob();
@@ -1241,6 +1241,7 @@ async function newPaper() {
 }
 async function goHome() {
   saveViewNow();
+  if(inPaperSurface){leaving=true;location.href='./';return;}
   if (await flushSave() || confirm('Your latest changes are not saved to this Paper’s files. Leave anyway?')) { leaving = true; location.href = './'; }
 }
 
@@ -1368,7 +1369,7 @@ async function renderDesign() {
 // orientation) is the one bar, in two modes: Edit (changes the artwork) and native Inspect (measures; pauses
 // editing), with capture, comments and settings in both. Native tools are driven only through Mesurer's own
 // toolbar API, never synthetic events. Notes saved by the earlier Annotate tools still show and can be deleted.
-let mesurer = null, mesurerLib = null, loading = null, toolbarStatusObserver = null;
+let mesurer = null, mesurerLib = null, loading = null, unmountMesurer = null, toolbarStatusObserver = null;
 // Pressing anywhere in the left panel (Paper or Design) is editing context: it returns to Edit with Select.
 $('#left-panel').addEventListener('pointerdown', () => { if (inspection) setTool('select'); }, true);
 const TOP_CHROME = 40; // the 40px panel rows; the floating corner bars (top 2, 36px) end inside it
@@ -1470,7 +1471,8 @@ function loadMesurer(inspect = false) {
   if (loading) return loading;
   mesurerHost.startInDesign = !inspect;
   loading = import('./mesurer.js?v=59e4ec992c1b').then(library => {
-    mesurerLib = library; migrateFeedback(); library.openMesurer($('#mesurer-root'), mesurerHost);
+    if(!surfaceAlive())return;
+    mesurerLib = library; migrateFeedback(); unmountMesurer = library.openMesurer($('#mesurer-root'), mesurerHost);
     mesurer = { inspect: () => mesurerHost.api?.inspect(), pause: () => mesurerHost.api?.pause() };
   }).catch(error => { body.classList.add('rail-standalone'); message(`Inspect is unavailable: ${error.message}`); })
     .finally(() => { loading = null; });
@@ -1529,7 +1531,7 @@ async function remoteFeedback(silent=false) {
     if (dirty()) { feedback.conflict = true; updateSaveState(); return; }
     if (data.revision === feedback.revision) return;
     feedback.revision = data.revision; feedback.workspace = data.workspace ?? null; feedback.last = JSON.stringify(feedback.workspace); feedback.error = null;
-    if (mesurerLib && mesurer) { mesurerHost.startInDesign = mesurerHost.stableMode !== 'inspect'; mesurerLib.openMesurer($('#mesurer-root'), mesurerHost); }
+    if (mesurerLib && mesurer && surfaceAlive()) { mesurerHost.startInDesign = mesurerHost.stableMode !== 'inspect'; unmountMesurer = mesurerLib.openMesurer($('#mesurer-root'), mesurerHost); }
     updateSaveState();
   } catch (error) { if(!silent)message(`Notes changed elsewhere, but couldn’t be reloaded (${error.message}).`);return false; }
   finally { reloadingFeedback = false; }
@@ -1565,7 +1567,7 @@ function listenForChanges() {
         if(guideRevision&&guideRevision!==data.guideRevision){designText=null;renderDesign();}guideRevision=data.guideRevision;
         if(data.presence)presenceUI?.receive(data.presence);
         if(failures>=3){const badge=$('.access-badge');if(badge)badge.textContent=canEdit?'Can edit':'View only';}failures=0;
-      }catch{if(!stopped&&++failures===3){const badge=$('.access-badge');if(badge)badge.textContent='Reconnecting…';message('Shared connection unavailable. Your local changes are kept. Ask the owner if the link has stopped.');}}
+      }catch{if(!stopped&&++failures===3){const badge=$('.access-badge');if(badge)badge.textContent='Reconnecting…';message(access.shared?'Shared connection unavailable. Your local changes are kept. Ask the owner if the link has stopped.':'Paper server unavailable. Your changes stay here. Reopen Home when the server is running again.');}}
       finally{polling=false;if(!stopped)timer=setTimeout(poll,failures>=3?10000:2000);}
     }
     window.addEventListener('pagehide',()=>{stopped=true;clearTimeout(timer);});
@@ -1630,6 +1632,8 @@ async function start() {
   requestAnimationFrame(() => setTimeout(() => loadMesurer(!canEdit), 0));
   setTimeout(() => { if (!body.classList.contains('mesurer-ready')) body.classList.add('rail-standalone'); }, 2000);
 }
+beforeSurfaceLeave(async()=>{saveViewNow();commitFields();stopTextEdit();endRename(true);finishGesture();if(!await flushSave()||!await flushFeedback())throw new Error('Save or download your changes before leaving this Paper.');});
+onSurfaceDispose(()=>{unmountMesurer?.();presenceUI?.stop();notionUI.destroy();toolbarStatusObserver?.disconnect();});
 start().then(() => {
   surfaceReady();
   const url=new URL(location.href);
