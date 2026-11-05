@@ -2,7 +2,7 @@
 name: paper-design
 description: Create or revise visual direction and editable designs in Paper for websites, app screens, dashboards, banners and other graphics. Use when turning a brief or references into design alternatives, documenting a design system, or reviewing visual consistency.
 metadata:
-  version: "0.7.0-preview.13"
+  version: "0.7.0-preview.14"
 ---
 
 # Design in Paper

@@ -2,7 +2,7 @@
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {memoryFile} from './http.mjs';
-export const VERSION='0.7.0-preview.13';
+export const VERSION='0.7.0-preview.14';
 export const EDITOR_FILES = [
   'app.js','home.js','join.js','invitation.js','native.js','surface.js','sharing.js','diagram-model.js','diagram-library.js','diagram-ui.js','presence.js','editing-model.js','notion-ui.js','notion.css',
   'inspection.js','canvas.css','chrome.css','assets/Inter-Regular.ttf','assets/Inter-Bold.ttf',
