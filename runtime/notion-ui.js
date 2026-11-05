@@ -157,7 +157,7 @@ export function setupNotion({
     connection.textContent = connectionState.connected ?
       (connectionState.name ? `Connected: ${connectionState.name}` : 'Notion connected') : 'Not connected';
     disconnect.hidden = !connectionState.connected;
-    disconnect.disabled = mutating;
+    disconnect.disabled = mutating || connectionState.saving===true;
   }
 
   function screen() {
@@ -238,6 +238,7 @@ export function setupNotion({
   function resume(token) {
     if (!alive(token)) return;
     if (!connectionState.connected) connectView(token);
+    else if(mode==='save'&&connectionState.saving) savingView(token);
     else if(mode==='save'&&connectionState.needsReview){
       screen();body.append(live('The previous save could not be confirmed. Check its Notion page before saving again.'));
       const url=notionURL(connectionState.reviewUrl||connectionState.link?.url);
@@ -302,29 +303,34 @@ export function setupNotion({
     body.append(actions(button('Save elsewhere…', () => picker(token, true), 'notion-quiet')));
     save.focus();
   }
+  function savingView(token){
+    const screenId=screen(),previousSave=connectionState.link?.savedAt;body.append(live('Saving to Notion… You can close this window; the save will continue.'));cancel.textContent='Close';
+    const check=button('Check status',poll,'notion-quiet');body.append(actions(check));
+    async function poll(){clearTimeout(searchTimer);if(!current(token,screenId))return;check.disabled=true;try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(!next.saving){if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview)savedView(token,true);else{resume(token);if(!next.needsReview)showError('The save was not confirmed. Your local Paper is safe.');}return;}}catch(error){if(current(token,screenId))showError(failure(error));}finally{check.disabled=false;if(current(token,screenId))searchTimer=setTimeout(poll,2000);}}
+    searchTimer=setTimeout(poll,1500);
+  }
 
   function picker(token, elsewhere = false) {
     const screenId = screen();
     let pages = [], cursor = null, selected = null, query = '', listRequest = 0, loading = false;
-    body.append(note(mode === 'save' ?
-      (elsewhere ? 'Choose another parent page. A new page uses your Paper’s title; future saves update that page.' :
-        'Choose a parent page. A new page uses your Paper’s title. Your files stay on this device too.') :
-      'Choose a Notion page saved from Paper. It opens in this library as a new local Paper. Ordinary Notion pages are not Paper files.'));
-    const label = element('label', 'notion-search-label', 'Find an accessible Notion page');
+    body.append(note(mode === 'save' ? 'Create a new Notion page for this Paper. Choose its name and where it belongs.' : 'Choose a Notion page containing a saved Paper. It opens as a local copy with its editable layers and files.'));
+    let pageTitle;
+    if(mode==='save'){const titleLabel=element('label','notion-search-label','New page name');pageTitle=element('input','notion-search');pageTitle.type='text';pageTitle.maxLength=160;pageTitle.value=connectionState.paperName||'Untitled Paper';titleLabel.append(pageTitle);body.append(titleLabel);}
+    const label = element('label', 'notion-search-label', mode==='save'?'Save under':'Find a saved Paper');
     const search = element('input', 'notion-search');
     search.type = 'search';
-    search.placeholder = 'Search pages';
+    search.placeholder = mode==='save'?'Find a parent page':'Search Notion pages';
     search.autocomplete = 'off';
     label.append(search);
     const list = element('div', 'notion-pages');
     list.setAttribute('role', 'group');
     list.setAttribute('aria-label', 'Accessible Notion pages');
     const state = live('Loading pages…');
-    const more = button('Load more', () => load(true));
+    const more = button('Show more pages', () => load(true), 'notion-quiet');
     more.hidden = true;
-    const primary = button(mode === 'save' ? 'Save here' : 'Open Paper', () => {
+    const primary = button(mode === 'save' ? 'Create page & save' : 'Open Paper', () => {
       if (!selected || loading || mutating) return;
-      if (mode === 'save') savePaper(token, selected.id,elsewhere);
+      if (mode === 'save') savePaper(token, selected.id==='private'?undefined:selected.id,elsewhere,pageTitle.value.trim());
       else openPaper(token, selected.id);
     }, 'notion-primary');
     primary.disabled = true;
@@ -337,12 +343,13 @@ export function setupNotion({
         const row = button('', () => {
           selected = page;
           for (const item of list.children) item.setAttribute('aria-pressed', String(item === row));
-          primary.disabled = loading || mutating;
+          primary.disabled = loading || mutating || mode==='save'&&!pageTitle.value.trim();
+          state.textContent=mode==='save'?`A new page will be created in “${page.title||'Untitled page'}”.`:page.title||'Selected Paper';
           alert.hidden = true;
         }, 'notion-page');
         row.setAttribute('aria-pressed', String(selected?.id === page.id));
         row.append(element('span', 'notion-page-title', page.title || 'Untitled page'));
-        if (typeof page.url === 'string') row.append(element('span', 'notion-page-url', page.url));
+        row.title=page.title||'Untitled page';
         row.disabled = mutating;
         list.append(row);
       }
@@ -368,11 +375,12 @@ export function setupNotion({
           throw new Error('Notion returned an invalid page list.');
         }
         const unique = new Map((append ? pages : []).map(page => [page.id, page]));
+        if(mode==='save'&&result.canCreatePrivate===true){unique.set('private',{id:'private',title:'Private pages'});if(!selected&&!query)selected=unique.get('private');}
         for (const page of result.pages) unique.set(page.id, page);
         pages = [...unique.values()];
         cursor = typeof result.cursor === 'string' && result.cursor && result.cursor !== usedCursor ? result.cursor : null;
         renderRows();
-        state.textContent = pages.length ? `${pages.length} page${pages.length === 1 ? '' : 's'} shown. Select one to continue.` :
+        state.textContent = pages.length ? (mode==='save'?'Choose where to create your new page.':'Select a page to open its saved Paper.') :
           query ? 'No matching pages. Try another search.' : 'Search for a Notion page by its title.';
         more.hidden = !cursor;
       } catch (error) {
@@ -384,7 +392,7 @@ export function setupNotion({
           loading = false;
           list.setAttribute('aria-busy', 'false');
           more.disabled = false;
-          primary.disabled = !selected || mutating;
+          primary.disabled = !selected || mutating || mode==='save'&&!pageTitle.value.trim();
         }
       }
     }
@@ -414,7 +422,8 @@ export function setupNotion({
         (index + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
       rows[next].focus();
     });
-    search.focus();
+    pageTitle?.addEventListener('input',()=>{primary.disabled=!selected||loading||mutating||!pageTitle.value.trim();});
+    if(pageTitle){pageTitle.focus();pageTitle.select();}else search.focus();
     void load();
   }
 
@@ -438,10 +447,10 @@ export function setupNotion({
     if (progress.focused?.isConnected && !progress.focused.disabled) progress.focused.focus();
   }
 
-  async function savePaper(token, parentId,newCopy=false) {
+  async function savePaper(token, parentId,newCopy=false,pageTitle) {
     if (!alive(token) || mutating || !owner()) return;
     mutating = true;
-    const screenId = view;
+    const screenId = view, previousSave=connectionState.link?.savedAt;
     const progress = setBusy('Saving Paper… Closing this dialog will not cancel a submitted save.');
     try {
       await beforeSave();
@@ -452,7 +461,7 @@ export function setupNotion({
       if (typeof generated?.html === 'string') snapshot.html = generated.html;
       if (typeof generated?.pngBase64 === 'string') snapshot.pngBase64 = generated.pngBase64;
       const result = await transport(`/api/notion/save${paperQuery}`, { method: 'POST', body: {
-        ...(parentId ? { parentId } : {}),...(newCopy?{newCopy:true}:{}), ...(Object.keys(snapshot).length ? { preview: snapshot } : {}),
+        ...(parentId ? { parentId } : {}),...(newCopy?{newCopy:true}:{}),...(pageTitle?{title:pageTitle}:{}), ...(Object.keys(snapshot).length ? { preview: snapshot } : {}),
       } });
       if (!result || typeof result.pageId !== 'string' || !result.pageId) throw new Error('Notion did not return the saved Paper page.');
       if (!current(token, screenId)) return;
@@ -463,6 +472,7 @@ export function setupNotion({
     } catch (error) {
       if (!current(token, screenId)) return;
       mutating = false;
+      try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(next.saving){savingView(token);return;}if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview){savedView(token,true);return;}if(next.needsReview){resume(token);return;}}catch{/* Preserve the original failure if status is unavailable too. */}
       if (errorStatus(error) === 409) conflictView(token, error);
       else {
         releaseBusy(progress);

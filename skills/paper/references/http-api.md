@@ -8,7 +8,8 @@ Launch `node <plugin-root>/server/server.mjs --stdio`. Keep stdin open while the
 
 | Tool | Inputs and result |
 | --- | --- |
-| `paper_home` | No arguments lists personal Papers, known projects and verified server status. `action: create/open` uses a returned `workspaceId` and optional `paperId`; returns the browser URL and workspace. `action: stop` requires the listed workspaceId and server instance. Home navigation does not switch the active document workspace. The global MCP App entrypoint uses this tool. |
+| `paper_home` | No arguments lists personal Papers, known projects and verified server status. `create/open` uses returned `workspaceId` and optional `paperId`. `stop` requires workspaceId and server instance. `sharing` lists link metadata; `stop-sharing` takes workspaceId, paperId, instance and optional invitationId. `rename/reveal/trash` take workspaceId/paperId; rename also takes name. `trash-list` lists recoverable items; `restore` uses workspaceId/trashId. Home navigation does not switch the agent's document workspace. |
+| `paper_join` | Complete invitation `url`. Selects its live shared Paper for artwork tools and returns a key-free guest descriptor plus Paper ID/role/name. Opens the same native app surface. No local duplicate or extra MCP configuration. `paper_open` selects local work again. |
 | `paper_open` | Optional `workspace`; omit for the personal library. Returns the complete editor/dashboard and API address. |
 | `paper_list` | No inputs; saved document summaries and stable IDs. |
 | `paper_create` | Optional `name`, `width`, `height`; creates real Paper files and returns id, folder path and editor URL. |
@@ -20,7 +21,7 @@ Launch `node <plugin-root>/server/server.mjs --stdio`. Keep stdin open while the
 | `paper_save_feedback` | `paperId`, feedback `revision`, complete `workspace` object or null. At most 5 MB; preserve unrelated comments. |
 | `paper_add_asset` | `paperId`, exactly one of standard `base64` or absolute in-workspace `sourceFile`. PNG/JPEG/WebP, at most 5 MB. Returns `{asset,path}`. |
 | `paper_package` | `action: export/import`, absolute in-workspace `file`; export also takes `paperId`. Complete `.paper.zip`, up to 50 MiB. Export refuses an existing destination; import creates a new Paper. |
-| `paper_notion` | `action: status/connect/disconnect/pages/save/open`, optional `paperId`, `parentId`, `pageId`, title `query`, returned `cursor`. Separate save requires `newCopy:true` and parentId. Direct official Notion connection; conflicts preserve both versions. |
+| `paper_notion` | `action: status/connect/disconnect/pages/save/open`, optional `paperId`, `parentId`, `pageId`, new-page `title`, search `query`, returned `cursor`. Separate save requires `newCopy:true`; parent is required unless pages reports canCreatePrivate. Direct official Notion connection; conflicts preserve both versions. |
 
 For complete text/image node examples and ownership/coordinate rules, read the [native layer format](paper-format.md).
 
@@ -38,13 +39,15 @@ After adding an image set `paper.assets[result.asset] = result.path`; use that a
 | `/api/status` | GET | Runtime, workspace, storage root, instance, canStop and active sharing count. |
 | `/api/server/stop` | POST | Same-origin owner only; `{instance}` must match the current server. Closes listeners/invitations and keeps saved files. Stdio remains available for reopening. |
 | `/api/access?paper=<id>` | GET | Owner access; browser also uses this route on share listener. |
-| `/api/home` | GET, POST | Owner-only global Home listing or `list/create/open/stop` action. Projects are explicit saved pointers, never a machine scan. |
+| `/api/home` | GET, POST | Owner-only Home actions listed above. Projects are explicit saved pointers, never a machine scan. Sharing inspection and file actions do not auto-start stopped servers. |
 | `/api/papers` | GET, POST | List, or create with optional name/width/height JSON. |
 | `/api/paper?paper=<id>` | GET, PUT | `{paper,revision}` read; conditional artwork save. |
 | `/api/scene?paper=<id>` | GET, PUT | Legacy alias; GET returns `{scene,revision}`. Use `/api/paper` for new clients. |
 | `/api/feedback?paper=<id>` | GET, PUT | `{workspace,revision}` read, object/null conditional save. A missing feedback file reads as null with a usable revision. |
 | `/api/assets?paper=<id>` | POST | Raw PNG/JPEG/WebP bytes, at most 5 MB. Returns `{asset,path}`. |
-| `/api/sharing?paper=<id>` | GET, POST, DELETE | Inspect invitation, create/replace with `{role:"view"|"edit",network?:boolean,internet?:boolean}` (choose at most one location flag), or revoke. Only create/share under the person's authorization. |
+| `/api/sharing?paper=<id>` | GET, POST, DELETE | GET returns key-free invitation metadata. POST `{role:"view"|"edit",network?:boolean,internet?:boolean,newLink?:boolean,label?:string}`; newLink:true creates independent access (maximum 16 links per Paper). Legacy omitted newLink reuses matching access or replaces changed access. POST `{retry:true,invitationId}` rechecks readiness. DELETE `{invitationId?}` revokes one or all that Paper's links. Creation returns its key once. |
+| `/api/sharing/overview` | GET | Key-free metadata for every active invitation in this library. |
+| `/api/sharing/link?paper=<id>` | POST | `{invitationId}` explicitly reveals that ready invitation's URL, token and MCP endpoint for Copy/Agent actions. No keys in routine status/overview reads. |
 | `/api/events` | GET | SSE: `papers-changed`, `paper-changed`, `feedback-changed`, `guide-changed`, `presence`, `presence-snapshot`; includes Paper id and revision where applicable. |
 | `/Paper/<id>/<file>` | GET, HEAD | Artwork, DESIGN.md, CONTEXT.md, feedback and assets. No history, hidden files, path traversal or symlinks. |
 | `/`, `/home.html`, `/?paper=<id>` | GET, HEAD | Complete dashboard/editor; same bundled UI in every workspace. |
@@ -62,7 +65,7 @@ Owner transfer/cloud routes use the same loopback Host and write-Origin checks:
 | `/api/notion/callback` | GET | Single-use PKCE/state callback for this loopback origin. |
 | `/api/notion/connection` | DELETE | Disconnect locally. |
 | `/api/notion/pages` | POST | `{query?,cursor?}` → accessible page titles/IDs and optional next cursor. |
-| `/api/notion/save?paper=<id>` | POST | `{parentId?,newCopy?,preview?:{html?,pngBase64?}}` → saved link and local-changed state. newCopy is explicit separate-page creation. |
+| `/api/notion/save?paper=<id>` | POST | `{parentId?,title?,newCopy?,preview?:{html?,pngBase64?}}` → saved link and local-changed state. title names a newly created page; newCopy explicitly creates a separate page. |
 | `/api/notion/open` | POST | `{pageId}` → new local Paper and href from a checked cloud archive. |
 
 Notion routes, archive import/export and credentials are owner-only. See [Notion](notion.md) for storage and conflict semantics. Page/layer deep links use `#page=<id>&node=<id>`; they change the browser view, not the saved artwork.
@@ -85,7 +88,9 @@ The owner also exposes scoped GET `/api/updates?paper=<id>` for native views. It
 
 ## Invited agents and browsers
 
-See [sharing](sharing.md). Owner-controlled sharing starts a separate listener. A browser exchanges its invitation key at POST `/api/join` for an opaque HttpOnly session. Agents use the copied HTTP `/mcp` endpoint, retaining both Authorization and its automatically generated X-Paper-Client header so distinct agents get distinct anonymous identities, with `Authorization: Bearer <key>`, JSON Content-Type, and Accept containing `application/json, text/event-stream`. The key is private; never put it in a repo, document, screenshot or log.
+See [sharing](sharing.md). The simplest agent route is local `paper_join {url}`: it holds the key in memory, verifies the shared server and scopes artwork calls to the invited Paper. Its local tools retain the returned paperId argument; the forwarded remote tools omit it. Joined saves use full JSON and image uploads use base64. Private files, owner notes, packages and Notion remain unavailable through the invitation.
+
+Owner-controlled sharing starts a separate listener. A browser exchanges its invitation key at POST `/api/join` for an opaque HttpOnly session. For manual MCP configuration agents use the copied HTTP `/mcp` endpoint, retaining both Authorization and its automatically generated X-Paper-Client header so distinct agents get distinct anonymous identities, with `Authorization: Bearer <key>`, JSON Content-Type, and Accept containing `application/json, text/event-stream`. The key is private; never put it in a repo, document, screenshot or log.
 
 Every request derives scope from that invitation. Guest tools take **no paperId, workspace or sourceFile**. View invitations expose `paper_read` and `paper_read_feedback`. Edit invitations additionally expose `paper_save`, `paper_save_feedback`, `paper_add_asset` (base64 only) and `paper_activity` (without paperId). Guest artwork/feedback saves and assets are capped at 5 MB and 30 write attempts per minute per invitation. Only owner tools can change DESIGN.md or CONTEXT.md; remote readers get the design guide, not private context or local file paths.
 

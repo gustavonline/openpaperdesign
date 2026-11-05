@@ -8,7 +8,6 @@ main{height:100vh;display:flex;flex-direction:column;background:var(--surface);p
 .content{flex:1;min-height:0;overflow:auto;padding:28px}
 h1{margin:0;font-size:22px;line-height:1.2;font-weight:600}.library-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:24px}
 #collection-help{margin:6px 0 0;color:var(--text-2);font-size:12px}
-.location{position:relative;color:var(--text-2);font-size:12px}.location summary{cursor:pointer;list-style:none;padding:6px 8px;border-radius:6px}.location summary:hover{background:var(--hover)}.location>div{position:absolute;right:0;top:32px;z-index:5;width:min(340px,calc(100vw - 40px));padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--popover);box-shadow:var(--shadow)}.location p{margin:0 0 10px}.location code{font-size:11px;overflow-wrap:anywhere;user-select:text}
 .tools{display:flex;align-items:center;gap:8px;margin-bottom:20px;height:var(--control-h)}
 #workspace-filter{height:var(--control-h);min-width:130px;max-width:220px}
 .search{position:relative;flex:1;height:var(--control-h)}
@@ -16,14 +15,21 @@ h1{margin:0;font-size:22px;line-height:1.2;font-weight:600}.library-heading{disp
 .search input{width:100%;height:var(--control-h);padding-left:30px;font-size:13px;border-color:var(--edge-strong);border-radius:6px}
 .tools .ibtn{width:var(--control-h);height:var(--control-h);border-radius:6px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(208px,1fr));gap:12px 12px}
+.card-wrap{position:relative}
 .card{color:inherit;text-decoration:none;display:block;border-radius:10px}
+.card-more{position:absolute;top:6px;right:6px;width:28px;height:28px;border:1px solid var(--line);background:var(--popover);opacity:0}
+.card-wrap:hover .card-more,.card-wrap:focus-within .card-more,.card-more[aria-expanded=true]{opacity:1}
+@media(hover:none){.card-more{opacity:1}}
+.grid .card:not(.broken) .meta{display:none}
+.list .card{padding-right:44px}.list .card-more{top:8px;right:8px;border-color:transparent;background:transparent}
+.home-open-menu .danger{color:var(--danger)}.home-open-menu button:disabled{opacity:.45}.home-open-menu hr{margin:4px 2px;border:0;border-top:1px solid var(--line)}
 .thumb{aspect-ratio:1.6;border-radius:8px;background:var(--field);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;padding:8px;overflow:hidden}
 .card:hover .thumb{border-color:var(--edge-strong)}
 .card:focus-visible{outline:none}.card:focus-visible .thumb{outline:1.5px solid var(--accent);outline-offset:-1.5px}
 .thumb img{max-width:100%;max-height:100%;object-fit:contain;display:block}
 .thumb .icon{width:28px;height:28px;color:var(--text-2)}
-.name{margin:8px 0 1px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.meta{margin:0;font-size:11px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.name{margin:8px 0 1px;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{margin:0;font-size:13px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .list{display:flex;flex-direction:column;gap:2px}
 .list .card{display:flex;align-items:center;gap:12px;height:44px;padding:0 8px;border-radius:8px}
 .list .card:hover{background:var(--hover)}
@@ -36,30 +42,36 @@ h1{margin:0;font-size:22px;line-height:1.2;font-weight:600}.library-heading{disp
 .primary{height:var(--control-h);padding:0 14px;border:0;border-radius:6px;background:var(--text);color:var(--surface);font-size:13px;font-weight:500}
 .primary:hover{background:color-mix(in srgb,var(--text) 88%,var(--surface))}
 .primary:disabled{opacity:.55}
-.placeholder{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--text-2);font-size:11px;font-variant-numeric:tabular-nums}
+.placeholder{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--text-2);font-size:13px;font-variant-numeric:tabular-nums}
 .problem{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 12px;font-size:12px;color:var(--danger)}
 .problem button{height:24px;padding:0 8px;border:1px solid currentColor;border-radius:5px;background:transparent;color:inherit;font-size:12px}
 .problem input{flex-basis:100%;min-width:0;padding:6px 8px;font-size:12px}.activity{margin:0 0 12px;color:var(--text-2);font-size:12px}.activity input{display:block;width:100%;margin-top:6px;padding:6px 8px;font:inherit}
 @media(max-width:640px){.bar{padding:8px 16px}.content{padding:20px 16px}.home-actions{gap:5px}.mark{font-size:12px}.tools{flex-wrap:wrap;height:auto}.search{min-width:110px}#workspace-filter{min-width:110px;max-width:140px}.server-control{padding:0 8px}.primary{padding:0 10px}.library-heading{margin-bottom:18px}}
 .file-dialog{width:min(400px,calc(100vw - 32px));padding:24px;border:1px solid var(--edge-strong);border-radius:12px;background:var(--popover);color:var(--text);box-shadow:var(--shadow)}.file-dialog::backdrop{background:rgb(0 0 0/.35)}.file-dialog h2{font-size:16px;margin:0 0 12px}.file-dialog p{font-size:13px;color:var(--text-2);line-height:1.5}.file-dialog>div{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
 .home-actions{display:flex;align-items:center;gap:8px}.server-control{height:var(--control-h);padding:0 10px;border:1px solid var(--edge-strong);border-radius:6px;background:transparent;color:var(--text-2)}
-#servers-dialog{width:min(440px,calc(100vw - 32px));max-height:80vh;overflow:auto;padding:20px;border:1px solid var(--edge-strong);border-radius:12px;background:var(--popover);color:var(--text);box-shadow:var(--shadow)}
-#servers-dialog::backdrop{background:rgb(0 0 0/.35)}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.dialog-head h2{margin:0;font-size:15px;font-weight:600}.dialog-help{margin:12px 0;color:var(--text-2);font-size:12px}
-.server-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:60px;border-top:1px solid var(--line)}.server-name{font-weight:500}.server-status{margin-top:2px;color:var(--text-2);font-size:11px}.server-stop{height:26px;padding:0 10px;border:1px solid var(--edge-strong);border-radius:5px;background:transparent;color:var(--text)}.server-stop:hover{color:var(--danger);border-color:currentColor}.server-stop:disabled{opacity:.5}
-#server-message{margin:12px 0 0;font-size:12px;color:var(--text-2)}
-</style><link rel="stylesheet" href="notion.css?v=1ae5727e73d0"></head>
+.list-dialog{width:min(480px,calc(100vw - 32px));max-height:80vh;overflow:auto;padding:20px;border:1px solid var(--edge-strong);border-radius:12px;background:var(--popover);color:var(--text);box-shadow:var(--shadow)}
+.list-dialog::backdrop{background:rgb(0 0 0/.35)}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.dialog-head h2{margin:0;font-size:18px;font-weight:600}.dialog-help{margin:12px 0;color:var(--text-2);font-size:13px}
+.list-dialog h3{margin:20px 0 4px;font-size:12px;font-weight:600;color:var(--text-2)}
+.server-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:60px;border-top:1px solid var(--line)}.server-row>div:first-child{min-width:0}.server-name{font-weight:500;overflow:hidden;text-overflow:ellipsis}.server-status{margin-top:2px;color:var(--text-2);font-size:13px}.row-actions{display:flex;gap:6px;flex:0 0 auto}.server-stop{height:26px;padding:0 10px;border:1px solid var(--edge-strong);border-radius:5px;background:transparent;color:var(--text);white-space:nowrap}.server-stop:hover{border-color:var(--text-2)}.server-stop.danger:hover{color:var(--danger);border-color:currentColor}.server-stop:disabled{opacity:.5}
+.invite-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:40px;padding-left:12px;font-size:12px}.invite-row .server-status{margin:0}
+.activity button{height:24px;margin-left:4px;padding:0 8px;border:1px solid var(--edge-strong);border-radius:5px;background:transparent;color:var(--text);font-size:12px}
+#server-message,#deleted-message,#sharing-message{margin:12px 0 0;font-size:12px;color:var(--text-2)}
+.file-dialog form>div{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}.file-dialog .problem{margin:10px 0 0;color:var(--danger)}.file-dialog input{width:100%;height:32px;margin-top:4px;font-size:13px}.file-dialog .danger,.file-dialog .danger:hover{background:var(--danger);color:#fff}
+</style><link rel="stylesheet" href="notion.css?v=0b98163e185d"></head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
   <symbol id="i-list" viewBox="0 0 16 16"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></symbol>
   <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></symbol>
   <symbol id="i-page" viewBox="0 0 16 16"><path d="M3.5 1.8h6l3 3v9.4h-9z"/><path d="M9.5 1.8v3h3"/></symbol>
+  <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/></symbol>
 </svg>
 <main>
-  <header class="bar"><div class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M18.5 13.5V7.5L13.5 2.5H5A1.5 1.5 0 0 0 3.5 4V19A1.5 1.5 0 0 0 5 20.5H12.5M13.5 2.5V6A1.5 1.5 0 0 0 15 7.5H18.5" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><rect x="15" y="15" width="7" height="7" rx="1.5" fill="var(--accent)"/></svg>OpenPaperDesign</div><div class="home-actions"><button class="server-control" id="servers" type="button" aria-haspopup="dialog">Servers</button><button class="server-control" id="open-paper" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="home-open-menu">Open…</button><button class="primary" id="new-paper" type="button" title="Create a blank Paper and open it">New Paper</button></div></header>
-  <div id="home-open-menu" popover class="home-open-menu" role="menu"><button type="button" id="open-notion" role="menuitem"><span class="notion-open-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.934.653.934 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.047-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.447-1.632z"/></svg></span>Open from Notion…</button><button type="button" id="open-file" role="menuitem">Import Paper file…</button></div><input id="home-paper-import" type="file" accept=".zip,.json" hidden>
+  <header class="bar"><div class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M18.5 13.5V7.5L13.5 2.5H5A1.5 1.5 0 0 0 3.5 4V19A1.5 1.5 0 0 0 5 20.5H12.5M13.5 2.5V6A1.5 1.5 0 0 0 15 7.5H18.5" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><rect x="15" y="15" width="7" height="7" rx="1.5" fill="var(--accent)"/></svg>OpenPaperDesign</div><div class="home-actions"><button class="server-control" id="home-sharing" type="button" aria-haspopup="dialog">Sharing</button><button class="server-control" id="open-paper" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="home-open-menu">Open…</button></div></header>
+  <div id="home-open-menu" popover class="home-open-menu" role="menu"><button type="button" id="open-notion" role="menuitem"><span class="notion-open-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.934.653.934 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.047-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.447-1.632z"/></svg></span>Open from Notion…</button><button type="button" id="open-shared" role="menuitem" hidden>Open shared Paper…</button><button type="button" id="open-file" role="menuitem">Import Paper file…</button><hr><button type="button" id="open-deleted" role="menuitem">Recently deleted…</button></div><input id="home-paper-import" type="file" accept=".zip,.json" hidden>
+  <div id="card-menu" popover class="home-open-menu" role="menu" aria-label="Paper actions"><button type="button" role="menuitem" data-act="open">Open</button><button type="button" role="menuitem" data-act="rename">Rename…</button><button type="button" role="menuitem" data-act="reveal">Show in Finder</button><hr><button type="button" role="menuitem" data-act="trash" class="danger">Move to Trash…</button></div>
   <div class="content">
-    <div class="library-heading"><div><h1>Personal</h1><p id="collection-help">Your Papers, saved on this device. No project needed.</p></div><details class="location"><summary>Location</summary><div><p id="location-help">Your Papers stay on this device.</p><code id="location-path"></code></div></details></div>
+    <div class="library-heading"><div><h1>Personal</h1></div><button class="primary" id="new-paper" type="button" title="Create a blank Paper and open it">New Paper</button></div>
     <p class="problem" id="problem" role="alert" hidden></p>
     <p class="activity" id="activity" role="status" hidden></p>
     <div class="tools">
@@ -73,10 +85,20 @@ h1{margin:0;font-size:22px;line-height:1.2;font-weight:600}.library-heading{disp
   </div>
 </main>
 <dialog id="import-dialog" class="file-dialog" aria-labelledby="import-title"><h2 id="import-title">Import a Paper</h2><p>Choose a .paper.zip with its images, or a Paper JSON file. It opens as a new Paper in this library.</p><div><button id="cancel-import" class="server-control" type="button">Cancel</button><button id="choose-file" class="primary" type="button">Choose file…</button></div></dialog>
-<dialog id="servers-dialog" aria-labelledby="servers-title">
-  <div class="dialog-head"><h2 id="servers-title">Servers</h2><button id="servers-close" class="ibtn" type="button" aria-label="Close servers">✕</button></div>
-  <p class="dialog-help">Known Paper collections on this device. Stopping a server closes its connections and shared links. Saved Papers stay on disk.</p>
+<dialog id="invitation-dialog" class="file-dialog" aria-labelledby="invitation-title"><form><h2 id="invitation-title">Open shared Paper</h2><label>Invitation link<input id="invitation-url" class="field" type="url" required autocomplete="off" placeholder="https://…/join#…"></label><p id="invitation-error" class="problem" role="status" hidden></p><div><button id="invitation-cancel" class="btn" type="button">Cancel</button><button id="invitation-open" class="btn primary" type="submit">Open Paper</button></div></form></dialog>
+<dialog id="home-sharing-dialog" class="list-dialog" aria-labelledby="sharing-title">
+  <div class="dialog-head"><h2 id="sharing-title">Sharing</h2><button id="sharing-close" class="ibtn" type="button" aria-label="Close sharing">✕</button></div>
+  <div id="shared-list"></div><p id="sharing-message" role="status" hidden></p>
+  <h3>Servers</h3>
+  <p class="dialog-help">Stopping a server also ends its shared links.</p>
   <div id="server-list"></div><p id="server-message" role="status" hidden></p>
 </dialog>
-<script type="module" src="home.js?v=86603d2decb4"></script>
+<dialog id="deleted-dialog" class="list-dialog" aria-labelledby="deleted-title">
+  <div class="dialog-head"><h2 id="deleted-title">Recently deleted</h2><button id="deleted-close" class="ibtn" type="button" aria-label="Close recently deleted">✕</button></div>
+  <p class="dialog-help">Papers moved to Trash stay in a hidden .trash folder inside each Paper library until you restore them.</p>
+  <div id="deleted-list"></div><p id="deleted-message" role="status" hidden></p>
+</dialog>
+<dialog id="rename-dialog" class="file-dialog" aria-labelledby="rename-title"><form id="rename-form"><h2 id="rename-title">Rename Paper</h2><label><span class="sr-only">Paper name</span><input id="rename-name" class="field" maxlength="80" required autocomplete="off"></label><p class="problem" id="rename-problem" role="alert" hidden></p><div><button id="cancel-rename" class="server-control" type="button">Cancel</button><button id="save-rename" class="primary" type="submit">Rename</button></div></form></dialog>
+<dialog id="trash-dialog" class="file-dialog" aria-labelledby="trash-title"><h2 id="trash-title">Move to Trash?</h2><p id="trash-help"></p><p class="problem" id="trash-problem" role="alert" hidden></p><div><button id="cancel-trash" class="server-control" type="button">Cancel</button><button id="confirm-trash" class="primary danger" type="button">Move to Trash</button></div></dialog>
+<script type="module" src="home.js?v=a2e72829d6b0"></script>
 </body></html>

@@ -149,6 +149,9 @@ export function createNotion({library,configDir,origin}) {
       const result={connected,...(connected&&a.name?{name:a.name}:{}),...(connectionError?{connectionError}:{})};
       if(paperId) {
         const state=await linked(paperId);
+        result.paperName=(await library.read(paperId)).paper.name;
+        result.saving=inflight.has(paperId);
+        if(result.saving){if(state?.link)result.link=state.link;return result;}
         if(state?.link) {
           result.link=state.link;
           result.changed=revision(await exportBundle(library,paperId))!==state.link.localRevision;
@@ -210,8 +213,9 @@ export function createNotion({library,configDir,origin}) {
     async pages({query='',cursor}={}) {
       await ready();if(typeof query!=='string'||query.length>500||cursor!==undefined&&(typeof cursor!=='string'||cursor.length>4096))fail(400,'Invalid Notion page search');
       await client.ready();
+      let canCreatePrivate=false;try{const createSchema=await client.schema('create-pages'),createArgs=createSchema.properties?.data||createSchema;canCreatePrivate=!createArgs.required?.includes('parent');}catch{}
       if(cursor!==undefined&&!query.trim()&&!client.tools.has('list-recent-pages'))fail(400,'Enter a page title before using a search cursor');
-      if(!query.trim()&&!client.tools.has('list-recent-pages'))return {pages:[],needsQuery:true};
+      if(!query.trim()&&!client.tools.has('list-recent-pages'))return {pages:[],needsQuery:true,canCreatePrivate};
       const key=query.trim()?'search':'list-recent-pages',rawSchema=await client.schema(key),schema=rawSchema.properties?.data||rawSchema,props=schema.properties||{};
       if(cursor!==undefined&&!props.cursor&&!props.start_cursor)fail(400,'This Notion search does not support pagination cursors. Refine the page title');
       const args=query.trim()?{query}:{};
@@ -227,18 +231,19 @@ export function createNotion({library,configDir,origin}) {
         pages.push({id,title:item.title,url:pageURL(id)});
       }
       const next=result.next_cursor||result.nextCursor;
-      return {pages,...(typeof next==='string'&&next.length<=4096?{cursor:next}:{})};
+      return {pages,canCreatePrivate,...(typeof next==='string'&&next.length<=4096?{cursor:next}:{})};
     },
     async save(paperId,args={}) {
-      await ready();if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['parentId','preview','newCopy'].includes(k))||args.newCopy!==undefined&&typeof args.newCopy!=='boolean')fail(400,'Save accepts parentId, preview and newCopy');
+      await ready();if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['parentId','preview','newCopy','title'].includes(k))||args.newCopy!==undefined&&typeof args.newCopy!=='boolean')fail(400,'Save accepts parentId, preview, newCopy and title');
+      if(args.title!==undefined&&(typeof args.title!=='string'||!args.title.trim()||args.title.length>160))fail(400,'Choose a page title of 1–160 characters');
       const previews=previewFiles(args.preview);if(!ID.test(paperId||''))fail(400,'Invalid Paper identity');
       if(inflight.has(paperId))fail(423,'This Paper is already saving to Notion');inflight.add(paperId);
       try{return await withPrivateLock(folder,`notion-save-${workspace}-${paperId}`,async()=>{
         const a=await authenticated(),existing=await linked(paperId),state=args.newCopy?null:existing;
-        if(args.newCopy&&!args.parentId)fail(400,'Choose a parent page for the separate copy');
         if(existing?.link&&args.parentId&&!args.newCopy)fail(400,'Use Save elsewhere or newCopy:true to create a separate Notion page');
+        if(state?.link&&args.title!==undefined)fail(400,'A title is only used when creating a new Notion page');
         if(state?.pending){const reviewId=state.pending.pageId||state.link?.pageId||state.pending.parentId;fail(409,`A previous Notion write is unverified. Inspect ${uuid(reviewId)?pageURL(reviewId):'the Notion page'} and Open the saved snapshot as a new Paper before saving again; a duplicate page was not created`);}
-        if(!state?.link&&!args.parentId)fail(400,'Choose a parent Notion page for the first save');
+        if(!state?.link&&!args.parentId){const schema=await client.schema('create-pages'),fields=schema.properties?.data||schema;if(fields.required?.includes('parent'))fail(400,'Choose a parent Notion page for this save');}
         const parent=args.parentId?pageId(args.parentId):null;
         let remote;if(state?.link){remote=await remoteForSave(state.link.pageId);sameRemote(remote,state);}
         const bytes=await exportBundle(library,paperId);
@@ -258,14 +263,14 @@ export function createNotion({library,configDir,origin}) {
           // Prepend a dated version on this same page; preserve every older snapshot and human note.
           await guardedWrite(paperId,existing,{...existing,pending:{kind:'update',at:savedAt}},'update-page',{page_id:id,command:'insert_content',content:section,position:{type:'start'},allow_async:false});
         } else {
-          const created=await guardedWrite(paperId,existing,{...existing,account:account(a),pending:{kind:'create',at:savedAt,parentId:parent}},'create-pages',{parent:{page_id:parent},pages:[{properties:{title:snapshot.paper.name},content:section}],allow_async:false});
+          const created=await guardedWrite(paperId,existing,{...existing,account:account(a),pending:{kind:'create',at:savedAt,parentId:parent}},'create-pages',{...(parent?{parent:{page_id:parent}}:{}),pages:[{properties:{title:args.title?.trim()||snapshot.paper.name},content:section}],allow_async:false});
           id=created.pages?.length===1?created.pages[0].id:null;
           if(!uuid(id))fail(502,'Notion did not confirm the new page identity. Inspect the chosen parent before retrying; no save success was recorded');
           await record(paperId,{...existing,account:account(a),pending:{kind:'verify',at:savedAt,pageId:id,url:pageURL(id)}});
         }
         const confirmed=managed(await fetchPage(id));
         if(confirmed.managedId!==managedId||confirmed.remoteRevision!==remoteRevision||files.some(f=>!confirmed.section.includes(f.filename)&&f.tag!=='embed')||files.some(f=>f.tag==='embed')&&!/<embed\b/.test(confirmed.section))fail(502,'Notion did not retain the complete managed snapshot. Inspect the page; no save success was recorded');
-        const link={pageId:id,url:pageURL(id),savedAt,localRevision,remoteRevision};
+        const link={pageId:id,url:pageURL(id),name:args.title?.trim()||state?.link?.name||snapshot.paper.name,savedAt,localRevision,remoteRevision};
         await record(paperId,{account:account(a),link,managedHash:confirmed.managedHash});
         return {saved:true,link,changed:revision(await exportBundle(library,paperId))!==localRevision};
       });}finally{inflight.delete(paperId);}

@@ -1,10 +1,10 @@
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
-import {setupPresence} from './presence.js?v=3d824c32d7dc';
-import { setupSharing } from './sharing.js?v=6f98f4d01e0b';
+import {setupPresence} from './presence.js?v=7259cc25cb5c';
+import { setupSharing } from './sharing.js?v=48aa310546f2';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=7c38f23521a1';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers} from './editing-model.js?v=1d0049e52e98';
-import {setupNotion,notionIcon} from './notion-ui.js?v=0eb3e5f4ec47';
+import {setupNotion,notionIcon} from './notion-ui.js?v=9c2cb2f24936';
 const $ = selector => document.querySelector(selector);
 const stage = $('#stage'), world = $('#world'), body = document.body, form = $('#properties'), tree = $('#layer-tree');
 // Which Paper this page edits, read once from the URL (`?paper=<id>`, exactly once; the server refuses an
@@ -25,9 +25,11 @@ const access = await (async()=>{
 let canEdit = access.role === 'owner' || access.role === 'edit', accessRevoked = false;
 body.classList.toggle('shared-paper', !!access.shared); body.classList.toggle('read-only', !canEdit);
 if (access.shared) { const badge = document.createElement('span'); badge.className = 'access-badge'; badge.textContent = canEdit ? 'Can edit' : 'View only'; $('#left-toggle').before(badge); }
-if (access.shared) { for (const item of document.querySelectorAll('[data-action="home"],[data-action="new"],.owner-only')) item.hidden = true; }
+if (access.shared) { for (const item of document.querySelectorAll(inPaperSurface?'[data-action="new"],.owner-only':'[data-action="home"],[data-action="new"],.owner-only')) item.hidden = true; }
+if(access.shared&&!inPaperSurface)$('#home').hidden=true;
+if(!canEdit)for(const item of document.querySelectorAll('[data-action="rename"],#undo,#redo'))item.hidden=true;
 if (!canEdit) { for (const field of form.querySelectorAll('input,textarea,select')) field.disabled = true; $('[data-action="rename"]').disabled = true; $('#title-text').disabled = true; }
-setupSharing({paperId,access,closeMenu,onCancel:()=>{if(mesurerHost.stableMode==='edit')setTool('select');else mesurerHost.api?.resetInspect();}});
+const sharingUI=setupSharing({paperId,access,closeMenu,onCancel:()=>{if(mesurerHost.stableMode==='edit')setTool('select');else mesurerHost.api?.resetInspect();}});
 const notionUI=setupNotion({paperId,access,beforeSave:async()=>{commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your local changes before continuing.');},preview:paperPreview,onOpen:async href=>{if(!await flushSave()||!await flushFeedback())throw new Error('Save your current Paper before opening another.');leaving=true;location.assign(href);},message});
 $('#notion-share-icon').innerHTML=notionIcon;
 $('#save-notion').addEventListener('click',()=>{closeMenu();notionUI.save();});
@@ -313,10 +315,9 @@ function selectMany(keys, {reveal=false,primary=null}={}) {
 }
 function selectNode(key,{reveal=false,add=false}={}){const keys=add?[...selection]:[];if(key&&nodes.has(key)){const i=keys.indexOf(key);if(add&&i>=0)keys.splice(i,1);else keys.push(key);}selectMany(keys,{reveal,primary:key});}
 function populateDoc() {
-  const pages = visiblePages(), layers = pages.reduce((n, p) => n + p.nodes.length, 0), roots = pages.reduce((n, p) => n + p.nodes.filter(node => p.root.includes(node.id) && isArtboard(node)).length, 0);
+  const pages = visiblePages();
   $('#doc-view h3').textContent = pageId === 'all' ? 'All pages' : 'Page';
   $('#doc-page').textContent = pageId === 'all' ? `${scene.pages.length} ${scene.pages.length === 1 ? 'page' : 'pages'} in this Paper` : pages[0]?.name || '';
-  $('#doc-count').textContent = `${layers.toLocaleString('en')} ${layers === 1 ? 'layer' : 'layers'} · ${roots} ${roots === 1 ? 'artboard' : 'artboards'}`;
 }
 function populateInspector() {
   $('#multi-selection').hidden=selection.size<2;
@@ -727,14 +728,14 @@ function finishGesture() {
     // A plain click with a drawing tool: on an existing layer it selects that layer (no accidental shape);
     // on empty artboard space it creates one default-sized shape or text (one-shot); a pencil needs a drag.
     if (!g.key) {
-      if (g.layer && nodes.has(g.layer)) { setTool('select'); selectNode(g.layer); return; }
       if (g.tool === 'stroke') return;
+      if (g.layer && nodes.has(g.layer)) { setTool('select'); selectNode(g.layer); return; }
       g.key = newNode(g.context, g.origin.x, g.origin.y);
     }
     const entry = nodes.get(g.key), node = entry.node;
     if (!g.moved && (node.type === 'rect' || node.type === 'ellipse')) { node.rect.w = node.rect.h = 100; }
     if (!g.moved && node.type === 'connector') { node.rect.w = 120; node.rect.h = 1; node.points = [{ x: 0, y: 0 }, { x: 120, y: 0 }]; }
-    paint(g.key); pushHistory({ kind: 'add', key: g.key, rec: null }); setTool('select'); selectNode(g.key);
+    paint(g.key); pushHistory({ kind: 'add', key: g.key, rec: null }); if(g.tool!=='stroke')setTool('select'); selectNode(g.key);
     if (node.type === 'text') startTextEdit(g.key, true);
   }
   saveView();
@@ -1633,7 +1634,7 @@ async function start() {
   setTimeout(() => { if (!body.classList.contains('mesurer-ready')) body.classList.add('rail-standalone'); }, 2000);
 }
 beforeSurfaceLeave(async()=>{saveViewNow();commitFields();stopTextEdit();endRename(true);finishGesture();if(!await flushSave()||!await flushFeedback())throw new Error('Save or download your changes before leaving this Paper.');});
-onSurfaceDispose(()=>{unmountMesurer?.();presenceUI?.stop();notionUI.destroy();toolbarStatusObserver?.disconnect();});
+onSurfaceDispose(()=>{unmountMesurer?.();presenceUI?.stop();notionUI.destroy();sharingUI.destroy();toolbarStatusObserver?.disconnect();});
 start().then(() => {
   surfaceReady();
   const url=new URL(location.href);

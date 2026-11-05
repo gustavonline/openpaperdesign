@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=1d0c11db519b"><link rel="stylesheet" href="canvas.css?v=e9a64b908a70"><link rel="stylesheet" href="notion.css?v=1ae5727e73d0"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=1d0c11db519b"><link rel="stylesheet" href="canvas.css?v=23bb4bd70cce"><link rel="stylesheet" href="notion.css?v=0b98163e185d"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -118,12 +118,12 @@
   <div id="multi-selection" hidden>
     <section><h3 id="selection-count"></h3><div class="row"><button class="btn" type="button" data-edit="group">Group</button><button class="btn" type="button" data-edit="duplicate">Duplicate</button></div></section>
     <section><h3>Align</h3><div class="arrange-grid"><button class="btn" type="button" data-arrange="left">Left</button><button class="btn" type="button" data-arrange="center">Centre</button><button class="btn" type="button" data-arrange="right">Right</button><button class="btn" type="button" data-arrange="top">Top</button><button class="btn" type="button" data-arrange="middle">Middle</button><button class="btn" type="button" data-arrange="bottom">Bottom</button></div></section>
-    <section><h3>Distribute spacing</h3><div class="row"><button class="btn" type="button" data-arrange="distribute-x">Horizontal</button><button class="btn" type="button" data-arrange="distribute-y">Vertical</button></div><p class="note">Select three or more layers.</p></section>
-    <section><div class="row"><button class="btn" type="button" data-edit="front">Bring to front</button><button class="btn" type="button" data-edit="back">Send to back</button></div><p class="note">Shift-click to add or remove layers. Shift-drag empty space to select an area.</p></section>
+    <section><h3>Distribute spacing</h3><div class="row"><button class="btn" type="button" data-arrange="distribute-x">Horizontal</button><button class="btn" type="button" data-arrange="distribute-y">Vertical</button></div></section>
+    <section><div class="row"><button class="btn" type="button" data-edit="front">Bring to front</button><button class="btn" type="button" data-edit="back">Send to back</button></div></section>
   </div>
   <div id="doc-view">
-    <section><h3>Page</h3><dl><dt>Name</dt><dd id="doc-page"></dd><dt>Content</dt><dd id="doc-count"></dd></dl></section>
-    <section><h3>View</h3><div class="row"><button class="btn" type="button" data-zoom="fit">Zoom to fit</button><button class="btn" type="button" data-zoom="100">100%</button></div><p class="note">Your view only: camera and canvas background (right-click the canvas) stay in this browser, not in the project.</p></section>
+    <section><h3>Page</h3><dl><dt>Name</dt><dd id="doc-page"></dd></dl></section>
+    <section><h3>View</h3><div class="row"><button class="btn" type="button" data-zoom="fit">Zoom to fit</button><button class="btn" type="button" data-zoom="100">100%</button></div></section>
   </div>
   <form id="properties" hidden autocomplete="off">
     <section class="head"><h3 id="node-name"></h3><span id="node-kind"></span></section>
@@ -159,8 +159,7 @@
 <!-- Exports of the artwork as it is rendered (no editor chrome), and the whole Paper as its file. -->
 <div id="export-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Share and export" hidden>
   <button type="button" role="menuitem" id="open-sharing">Share this Paper…</button>
-  <button type="button" role="menuitem" id="save-notion" class="owner-only"><span id="notion-share-icon" aria-hidden="true"></span><span>Save to Notion…</span></button>
-  <button type="button" role="menuitem" id="copy-paper-link">Copy link</button>
+  <button type="button" role="menuitem" id="copy-paper-link" hidden>Copy link</button>
   <hr class="owner-only">
   <div class="menu-label" id="export-target"></div>
   <button type="button" role="menuitem" data-export="png">PNG image<kbd id="export-size"></kbd></button>
@@ -169,16 +168,25 @@
   <button type="button" role="menuitem" data-export="json">Paper file<kbd>.json · all pages</kbd></button>
   <button type="button" role="menuitem" data-export="bundle" class="owner-only">Paper with assets<kbd>.paper.zip</kbd></button>
   <button type="button" role="menuitem" data-export="preview">Paper preview<kbd>.html · all pages</kbd></button>
+  <hr class="owner-only">
+  <button type="button" role="menuitem" id="save-notion" class="owner-only"><span id="notion-share-icon" aria-hidden="true"></span><span>Save to Notion…</span></button>
 </div>
 <input id="paper-import" type="file" accept=".zip,.json" hidden>
 <dialog id="sharing-dialog" data-canvas-chrome aria-labelledby="sharing-title">
   <header><h2 id="sharing-title">Share Paper</h2><button type="button" class="ibtn" data-close-sharing aria-label="Close sharing"><svg class="icon"><use href="#i-close"/></svg></button></header>
-  <p id="share-state" role="status">Only you have access</p><p id="share-detail" class="note"></p>
-  <label class="share-permission">Access<select id="share-role" class="field"><option value="view">Can view</option><option value="edit">Can edit</option></select></label>
-  <label class="share-permission">Where<select id="share-location" class="field"><option value="network">Same network</option><option value="device">This device</option><option value="online">Internet</option></select></label>
-  <div class="share-actions"><button type="button" id="share-primary">Create link</button><button type="button" id="share-agent" hidden>Connect your agent</button></div>
-  <textarea class="field" aria-label="Connection text" readonly hidden></textarea>
-  <button type="button" id="share-stop" class="share-stop" hidden>Stop sharing</button>
+  <p id="share-state" role="status">Only you have access</p>
+  <p id="share-detail" class="note">Anyone with an invitation link can open this Paper. Keep this computer running while you share.</p>
+  <div id="share-links" aria-label="Invitation links"></div>
+  <button type="button" id="share-new" class="share-quiet" hidden>+ Create another link</button>
+  <form id="share-create">
+    <label class="share-name">Link name <span class="note">optional</span><input id="share-name" class="field" maxlength="80" placeholder="Design review" autocomplete="off"></label>
+    <div class="share-permission"><span>Anyone with this link</span><select id="share-role" class="field" aria-label="Invitation access"><option value="view">Can view</option><option value="edit">Can edit</option></select></div>
+    <fieldset class="share-reach"><legend>Share over</legend><label><input type="radio" name="share-reach" value="online" checked> Internet</label><label><input type="radio" name="share-reach" value="network"> Local network</label></fieldset>
+    <div class="share-actions"><button type="submit" id="share-primary">Create link</button><button type="button" id="share-create-cancel" hidden>Cancel</button></div>
+  </form>
+  <section id="share-agent-panel" hidden aria-label="Connect your agent"><h3>Open with your agent</h3><p>The recipient can open this invitation with the Paper plugin in Codex or Claude Code.</p><div class="share-actions"><a id="share-codex" class="share-link">Open in Codex</a><a id="share-claude" class="share-link">Open in Claude Code</a><button id="share-invite-copy" type="button">Copy invitation</button></div><details><summary>Manual MCP connection</summary><p>For other MCP clients. Keep the access key private.</p><button type="button" id="share-agent">Copy connection</button></details></section>
+  <textarea class="field share-copy-fallback" aria-label="Copy this text" readonly hidden></textarea>
+  <button type="button" id="share-stop" class="share-stop" hidden>Stop sharing this Paper</button>
 </dialog>
 <!-- Save status: its own small live note beside the right corner bar; silent until something changes. -->
 <div id="status" data-canvas-chrome class="save-status" role="status" aria-live="polite" hidden></div>
@@ -201,7 +209,7 @@
 <div id="tool-flyout" data-canvas-chrome class="float menu" role="menu" aria-label="Shapes to draw" hidden></div>
 
 <div id="toast" data-canvas-chrome role="status" hidden></div>
-<dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is copied into this Paper. If the site blocks access, download the image and drop it here.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
+<dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is saved with this Paper.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="mesurer-root"></div>
-<script type="module" src="app.js?v=09cda4df364b"></script>
+<script type="module" src="app.js?v=5d3928dd3654"></script>
 </body></html>

@@ -5,13 +5,14 @@ import {createHash, randomBytes} from 'node:crypto';
 import {PaperLibrary, PaperError, ID} from './library.mjs';
 import {inspectWorkspace,stopWorkspace} from './workspace.mjs';
 import {VERSION} from './runtime.mjs';
+import {renamePaper,revealPaper,trashPaper,listTrash,restorePaper} from './paper-actions.mjs';
 
 export const HOME_URI=`ui://openpaperdesign/home/${VERSION}/${randomBytes(8).toString('hex')}`;
 export const HOME_MIME='text/html;profile=mcp-app';
 export function isHomeResource(uri){
   if(typeof uri!=='string')return false;
   const base=`ui://openpaperdesign/home/${VERSION}/`;
-  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
+  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
 }
 export function dataHome(){
   if(process.env.PAPER_HOME){if(!path.isAbsolute(process.env.PAPER_HOME))throw new Error('PAPER_HOME must be an absolute folder');return process.env.PAPER_HOME;}
@@ -44,10 +45,64 @@ export async function runningHomeWorkspace(id){
   const entry=(await workspaces()).find(entry=>entry.id===id);if(!entry||entry.unavailable)throw new PaperError(404,'This Paper library is unavailable.');
   return {...entry,server:await inspectWorkspace(entry.root)};
 }
+// These local owner actions are never exposed by a shared invitation.
+async function liveServer(root){
+  try{return await inspectWorkspace(root);}catch(error){throw new PaperError(409,`Paper could not reach this library’s server: ${error.message}`);}
+}
+async function owner(live,method,pathname,body){
+  let response;
+  try{response=await fetch(live.url+pathname,{method,headers:{Origin:live.url,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),redirect:'error',signal:AbortSignal.timeout(5000)});}
+  catch{throw new PaperError(503,'The Paper server did not respond. Try again.');}
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new PaperError(response.status===404?409:response.status>=500?502:response.status,data.error||'The Paper server did not complete the request.');
+  return data;
+}
+// Session-only invitations disappear with their server, so a stopped server has nothing to stop.
+async function stopSharing(root,paperId,invitationId,instance){
+  const live=await liveServer(root);if(!live)return {active:false,invitations:[]};
+  if(instance!==undefined&&live.instance!==instance)throw new PaperError(409,'The server changed. Refresh Sharing and try again.');
+  const result=await owner(live,'DELETE',`/api/sharing?paper=${encodeURIComponent(paperId)}`,invitationId?{invitationId}:undefined);
+  const left=Array.isArray(result.invitations)?result.invitations:null;
+  if(!left||(invitationId?left.some(i=>i?.id===invitationId):result.active!==false||left.length))throw new PaperError(409,'Paper could not confirm that sharing stopped.');
+  return {active:!!result.active,remaining:left.length};
+}
+async function sharingOverview(entry){
+  let live;try{live=await inspectWorkspace(entry.root);}catch(error){return {state:'unavailable',message:error.message,invitations:[]};}
+  if(!live)return {state:'stopped',invitations:[]};
+  const server={state:'running',instance:live.instance,version:live.version,canStop:live.canStop};
+  let data;try{data=await owner(live,'GET','/api/sharing/overview');}catch(error){return {...server,message:error.status===409?'This server is from an older Paper version. Stop it, then reopen its Papers to manage sharing.':error.message,invitations:[]};}
+  const names=new Map(),invitations=[];let library;
+  for(const i of Array.isArray(data.invitations)?data.invitations.slice(0,256):[]){
+    if(!i||typeof i.paperId!=='string'||!ID.test(i.paperId)||typeof i.id!=='string'||!ID.test(i.id))continue;
+    library??=await PaperLibrary.open(entry.root);
+    if(!names.has(i.paperId))names.set(i.paperId,await library.read(i.paperId).then(r=>r.paper.name,()=>'Unavailable Paper'));
+    invitations.push({id:i.id,paperId:i.paperId,paperName:names.get(i.paperId),label:String(i.label||''),role:i.role==='edit'?'edit':'view',network:!!i.network,internet:!!i.internet,online:!!i.online,ready:!!i.ready,preparing:!!i.preparing,expiresAt:Number(i.expiresAt)||null});
+  }
+  return {...server,invitations};
+}
+async function ownLibrary(entry){
+  if(entry.id!=='personal')await fs.access(path.join(entry.root,'Paper')).catch(()=>{throw new PaperError(409,'This project’s Paper folder is unavailable.');});
+  return PaperLibrary.open(entry.root);
+}
 export function createHome(open){
   return async(args={})=>{
-    if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['action','workspaceId','paperId','name','instance'].includes(k)))throw new PaperError(400,'Invalid Home request');
+    if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['action','workspaceId','paperId','name','instance','invitationId','trashId'].includes(k)))throw new PaperError(400,'Invalid Home request');
+    for(const key of ['workspaceId','paperId','name','instance','invitationId','trashId'])if(args[key]!==undefined&&typeof args[key]!=='string')throw new PaperError(400,'Invalid Home request');
+    if(args.paperId!==undefined&&!ID.test(args.paperId)||args.invitationId!==undefined&&!ID.test(args.invitationId))throw new PaperError(400,'Invalid Paper or invitation');
     const action=args.action||'list',roots=await workspaces();
+    if(action==='sharing'){
+      const result=[];
+      for(const entry of roots)if(!entry.unavailable)result.push({id:entry.id,name:entry.name,...await sharingOverview(entry)});
+      return {workspaces:result};
+    }
+    if(action==='trash-list'){
+      const items=[];
+      for(const entry of roots){
+        if(entry.unavailable)continue;
+        try{for(const item of await listTrash(await ownLibrary(entry)))items.push({...item,workspaceId:entry.id,workspaceName:entry.name});}catch{/* An unavailable library has nothing to restore right now. */}
+      }
+      return {items:items.sort((a,b)=>b.deletedAt-a.deletedAt).slice(0,500)};
+    }
     if(action==='list'){
       const projects=[],papers=[];let previewBudget=1024*1024;
       for(const entry of roots){
@@ -75,6 +130,20 @@ export function createHome(open){
     const entry=roots.find(p=>p.id===(args.workspaceId||'personal'));if(!entry)throw new PaperError(404,'Unknown project');
     if(entry.unavailable)throw new PaperError(409,'This saved project location is unavailable. Ask your agent to reopen its project folder.');
     if(action==='stop')return stopWorkspace(entry.root,args.instance);
+    // Owner actions work on files or the already running server; they never start a server.
+    if(action==='stop-sharing'){
+      if(!args.paperId||typeof args.instance!=='string')throw new PaperError(400,'Choose a shared Paper from Sharing');
+      return stopSharing(entry.root,args.paperId,args.invitationId,args.instance);
+    }
+    if(['rename','reveal','trash','restore'].includes(action)){
+      const library=await ownLibrary(entry);
+      if(action==='restore')return {...await restorePaper(library,args.trashId),workspaceId:entry.id};
+      if(!args.paperId)throw new PaperError(400,'Choose a Paper');
+      if(action==='rename')return renamePaper(library,args.paperId,args.name);
+      if(action==='reveal')return revealPaper(library,args.paperId);
+      await library.folder(args.paperId);await stopSharing(entry.root,args.paperId);
+      return {...await trashPaper(library,args.paperId),workspaceId:entry.id};
+    }
     if(!['open','create'].includes(action))throw new PaperError(400,'Unknown Home action');
     const app=await open(entry.root);
     if(action==='create'){const made=await app.library.create({name:args.name||'Untitled Paper'});return {url:`${app.url}/?paper=${made.id}`,workspace:entry.root,...made};}

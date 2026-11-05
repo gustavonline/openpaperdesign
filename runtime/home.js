@@ -1,6 +1,6 @@
 import {surfaceReady,surfaceStopped,onSurfaceDispose,inPaperSurface} from './surface.js?v=da065f7b280e';
-const VERSION='0.7.0-preview.10';
-const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper');
+const VERSION='0.7.0-preview.11';
+const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper'),cardMenu=document.getElementById('card-menu');
 let selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,cardsKey='',optionsKey='',serverVersion=null;
 
 async function request(args={}){
@@ -30,20 +30,28 @@ async function opening(action,text='Opening Paper…'){
 }
 const plural=(n,word)=>`${n} ${word}${n===1?'':'s'}`;
 const ago=ms=>{const seconds=Math.max(0,(Date.now()-ms)/1000);return seconds<60?'just now':seconds<3600?plural(Math.floor(seconds/60),'minute')+' ago':seconds<86400?plural(Math.floor(seconds/3600),'hour')+' ago':plural(Math.floor(seconds/86400),'day')+' ago';};
-const paperMeta=p=>p.error||[p.workspaceName,Number.isFinite(p.modified)?`Edited ${ago(p.modified)}`:null,plural(p.pages,'page')].filter(Boolean).join(' · ');
+// Grid cards show only the preview and name; list rows keep a short edited time.
+const paperMeta=p=>p.error||[selected==='all'?p.workspaceName:null,Number.isFinite(p.modified)?`Edited ${ago(p.modified)}`:null].filter(Boolean).join(' · ');
+const openPaper=p=>opening(()=>targetURL(p.workspaceId,p.id).then(navigate));
 function card(p){
-  const a=document.createElement('a');a.className='card';a.title=p.name;
+  const el=document.createElement('div'),a=document.createElement('a'),more=document.createElement('button');el.className='card-wrap';a.className=p.error?'card broken':'card';a.title=p.name;
   a.innerHTML='<div class="thumb"></div><svg class="icon row-icon"><use href="#i-page"/></svg><div style="min-width:0;flex:1"><p class="name"></p><p class="meta"></p></div>';
-  const thumb=a.querySelector('.thumb'),placeholder=()=>{const box=document.createElement('div');box.className='placeholder';box.innerHTML='<svg class="icon" aria-hidden="true"><use href="#i-page"/></svg><span></span>';box.querySelector('span').textContent=p.size?`${Math.round(p.size[0])} × ${Math.round(p.size[1])}`:'No preview';return box;};
+  Object.assign(more,{type:'button',className:'ibtn card-more',innerHTML:'<svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>'});
+  more.setAttribute('aria-label',`More actions for ${p.name}`);more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');
+  const thumb=a.querySelector('.thumb'),placeholder=()=>{const box=document.createElement('div');box.className='placeholder';box.innerHTML='<svg class="icon" aria-hidden="true"><use href="#i-page"/></svg>';return box;};
   if(p.thumbnail){const img=new Image();img.alt='';img.src=p.thumbnail;img.onerror=()=>img.replaceWith(placeholder());thumb.append(img);}else thumb.append(placeholder());
   a.querySelector('.name').textContent=p.name;
   a.querySelector('.meta').textContent=paperMeta(p);
+  // The native surface has no real navigation; always call location.assign there.
   a.addEventListener('click',async event=>{
     if(busy){event.preventDefault();return;}
     if(!inPaperSurface&&runningURL(p.workspaceId,p.id))return;
-    event.preventDefault();await opening(()=>targetURL(p.workspaceId,p.id).then(navigate));
+    event.preventDefault();await openPaper(p);
   });
-  return a;
+  const c={p,el,a,more};el.append(a,more);
+  more.addEventListener('click',()=>{const r=more.getBoundingClientRect();showCardMenu(c,r.right,r.bottom+4,true);});
+  el.addEventListener('contextmenu',event=>{event.preventDefault();const r=more.getBoundingClientRect();event.clientX||event.clientY?showCardMenu(c,event.clientX,event.clientY):showCardMenu(c,r.right,r.bottom+4,true);});
+  return c;
 }
 function filter(){
   const text=q.value.trim().toLowerCase();let shown=0;
@@ -51,9 +59,6 @@ function filter(){
   const none=document.getElementById('none'),project=projects.find(p=>p.id===selected);
   none.textContent=project?.unavailable?'This project folder is unavailable. Reopen it with your agent when it is accessible.':text?'No Papers match your search. Press Escape to clear it.':'No Papers yet. New Paper creates one.';none.hidden=shown>0||!problem.hidden;
   document.querySelector('h1').textContent=selected==='all'?'All Papers':project?.name||'Personal';document.title=document.querySelector('h1').textContent+' — Paper';
-  document.getElementById('collection-help').textContent=selected==='all'?'Personal Papers and Papers from your projects.':selected==='personal'?'Your Papers, saved on this device. No project needed.':'Saved with this project. Your personal library stays separate.';
-  document.getElementById('location-path').textContent=project?.storageRoot||'Personal Papers and each project’s Paper folder.';
-  document.getElementById('location-help').textContent=selected==='personal'?'New Papers and imports in Personal are saved here. Updating the plugin keeps them in place.':selected==='all'?'Personal is the default for new Papers and imports. Project Papers stay in their own project folder.':'New Papers and imports in this project are saved here.';
   create.disabled=disconnected||!!project?.unavailable;document.getElementById('open-paper').disabled=create.disabled;create.title=`Create a Paper in ${selected==='all'?'Personal':project?.name||'Personal'}`;
   document.getElementById('workspace-filter').value=selected;
   for(const button of document.querySelectorAll('[data-workspace]'))button.setAttribute('aria-current',button.dataset.workspace===selected?'page':'false');
@@ -63,8 +68,8 @@ function render(data){
   serverVersion=data.version||null;
   projects=data.projects||[];if(selected!=='all'&&!projects.some(p=>p.id===selected))selected='personal';
   const nextCards=JSON.stringify(data.papers||[]),nextOptions=JSON.stringify(projects.map(p=>[p.id,p.name]));
-  if(nextCards!==cardsKey){cardsKey=nextCards;cards=(data.papers||[]).map(p=>({p,el:card(p)}));list.replaceChildren(...cards.map(c=>c.el));}
-  for(const {p,el} of cards)el.href=runningURL(p.workspaceId,p.id)?.href||'#';
+  if(nextCards!==cardsKey){cardsKey=nextCards;if(cardMenu.matches(':popover-open'))cardMenu.hidePopover();cards=(data.papers||[]).map(card);list.replaceChildren(...cards.map(c=>c.el));}
+  for(const {p,a} of cards)a.href=runningURL(p.workspaceId,p.id)?.href||'#';
   if(nextOptions!==optionsKey){
     optionsKey=nextOptions;const select=document.getElementById('workspace-filter');select.replaceChildren();
     for(const project of projects)select.append(new Option(project.id==='personal'?'Personal':`Project · ${project.name}`,project.id));
@@ -101,7 +106,7 @@ async function openFromNotion(){
   openMenu.hidePopover();
   await opening(async()=>{const workspaceId=selected==='all'?'personal':selected,url=await targetURL(workspaceId);
     if(url.origin!==location.origin){url.searchParams.set('collection',workspaceId);url.hash='notion';return navigate(url.href);}
-    if(!notionHome){const module=await import('./notion-ui.js?v=0eb3e5f4ec47');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
+    if(!notionHome){const module=await import('./notion-ui.js?v=9c2cb2f24936');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
     await notionHome.open();
   },'Opening Notion…');
 }
@@ -123,13 +128,12 @@ addEventListener('hashchange',openRequest);openRequest();
 document.getElementById('choose-file').addEventListener('click',()=>{document.getElementById('import-dialog').close();document.getElementById('home-paper-import').click();});
 document.getElementById('cancel-import').addEventListener('click',()=>document.getElementById('import-dialog').close());
 
-const serversDialog=document.getElementById('servers-dialog'),serverMessage=document.getElementById('server-message');
+const serverMessage=document.getElementById('server-message');
 function renderServers(){
   const area=document.getElementById('server-list');area.replaceChildren();
-  const version=document.createElement('p');version.className='dialog-help';version.textContent=`Home ${VERSION}${serverVersion?` · MCP/server ${serverVersion}`:''}`;area.append(version);
   for(const project of projects){
     const server=project.server,row=document.createElement('div'),info=document.createElement('div'),name=document.createElement('div'),status=document.createElement('div');row.className='server-row';name.className='server-name';status.className='server-status';name.textContent=project.name;
-    status.textContent=server?.state==='running'?`Running · ${server.version||'unknown version'}${server.sharingCount?` · ${plural(server.sharingCount,'shared Paper')}`:''}`:server?.state==='unavailable'?'Unavailable':project.unavailable?'Folder unavailable':'Stopped';
+    status.textContent=server?.state==='running'?`Running${server.sharingCount?` · ${plural(server.sharingCount,'shared Paper')}`:''}`:server?.state==='unavailable'?'Unavailable':project.unavailable?'Folder unavailable':'Stopped';
     if(server?.message)status.title=server.message;info.append(name,status);row.append(info);
     if(server?.state==='running'){
       const stop=document.createElement('button');stop.className='server-stop';stop.type='button';stop.textContent='Stop server';stop.disabled=!server.canStop;stop.title=server.canStop?`Stop ${project.name}`:'Stop this older server from its terminal';
@@ -142,7 +146,7 @@ function renderServers(){
             for(const p of projects)if(p.server?.url===result.url)p.server={state:'stopped'};
             create.disabled=true;openButton.disabled=true;serverMessage.textContent='Server stopped. Reopen Home through the plugin to start it again.';problem.textContent='Server stopped. Your Papers are saved. Reopen Home through the plugin to continue.';problem.hidden=false;surfaceStopped();
           }else{render(await request());serverMessage.textContent='Server stopped. Your Papers are saved.';}
-          renderServers();serverMessage.hidden=false;
+          renderServers();serverMessage.hidden=false;void renderSharing();
         }catch(error){serverMessage.textContent=error.message;serverMessage.hidden=false;stop.disabled=false;stop.textContent='Stop server';}
         finally{busy=false;}
       });row.append(stop);
@@ -150,5 +154,130 @@ function renderServers(){
     area.append(row);
   }
 }
-document.getElementById('servers').addEventListener('click',async()=>{if(!disconnected)await load();renderServers();serversDialog.showModal();});
-document.getElementById('servers-close').addEventListener('click',()=>serversDialog.close());
+const help=text=>Object.assign(document.createElement('p'),{className:'dialog-help',textContent:text});
+function button(text,onclick,danger=false){const b=document.createElement('button');Object.assign(b,{type:'button',className:danger?'server-stop danger':'server-stop',textContent:text});b.addEventListener('click',()=>onclick(b));return b;}
+function row(title,detail,buttons=[],className='server-row'){
+  const r=document.createElement('div'),info=document.createElement('div'),name=document.createElement('div'),status=document.createElement('div'),actions=document.createElement('div');
+  r.className=className;name.className='server-name';status.className='server-status';actions.className='row-actions';name.textContent=title;status.textContent=detail;info.append(name,status);actions.append(...buttons);r.append(info,actions);return r;
+}
+
+// Sharing lists invitations from servers that are already running; it never starts one.
+const sharingMessage=document.getElementById('sharing-message');
+const reach=i=>i.internet?'Internet':i.network?'Local network':i.online?'Online address':'This device only';
+async function revoke(b,args){
+  if(busy)return;busy=true;const text=b.textContent;b.disabled=true;b.textContent='Stopping…';sharingMessage.hidden=true;
+  try{await request({action:'stop-sharing',...args});sharingMessage.textContent=args.invitationId?'Access removed.':'Sharing stopped for this Paper.';busy=false;await renderSharing();}
+  catch(error){sharingMessage.textContent=error.message;b.disabled=false;b.textContent=text;}
+  finally{busy=false;sharingMessage.hidden=false;}
+}
+async function renderSharing(){
+  const area=document.getElementById('shared-list');
+  if(disconnected){area.replaceChildren(help('Server stopped. Reopen Home through the plugin to see shared Papers.'));return;}
+  area.replaceChildren(help('Checking shared Papers…'));
+  let data;try{data=await request({action:'sharing'});}catch(error){area.replaceChildren(help(error.message));return;}
+  const rows=[];
+  for(const ws of data.workspaces||[]){
+    if(ws.message&&ws.state==='running')rows.push(row(ws.name,ws.message));
+    const papers=new Map();for(const i of ws.invitations||[])papers.set(i.paperId,[...papers.get(i.paperId)||[],i]);
+    for(const [paperId,invites] of papers){
+      const target={workspaceId:ws.id,instance:ws.instance,paperId};
+      rows.push(row(invites[0].paperName,`${ws.name} · ${plural(invites.length,'link')}`,[button('Open',()=>{sharingDialog.close();openPaper({workspaceId:ws.id,id:paperId});}),button('Stop sharing',b=>revoke(b,target),true)]));
+      for(const i of invites){
+        const r=row(i.label||'Link',`${i.role==='edit'?'Can edit':'Can view'} · ${reach(i)}${i.ready?'':' · Connecting…'}`,[button('Remove access',b=>revoke(b,{...target,invitationId:i.id}),true)],'invite-row');
+        if(i.expiresAt)r.title=`Expires ${new Date(i.expiresAt).toLocaleString()}`;rows.push(r);
+      }
+    }
+  }
+  area.replaceChildren(...(rows.length?rows:[help('No Papers are shared right now. Share a Paper from its editor.')]));
+}
+const sharingDialog=document.getElementById('home-sharing-dialog');
+document.getElementById('home-sharing').addEventListener('click',async()=>{if(!disconnected)await load();serverMessage.hidden=sharingMessage.hidden=true;renderServers();sharingDialog.showModal();void renderSharing();});
+document.getElementById('sharing-close').addEventListener('click',()=>sharingDialog.close());
+
+// Card actions: Open, Rename, Show in folder and reversible Move to Trash.
+let menuCard=null,menuClosed={c:null,at:0};
+const platform=navigator.userAgentData?.platform||navigator.platform||'';
+cardMenu.querySelector('[data-act=reveal]').textContent=/mac/i.test(platform)?'Show in Finder':/win/i.test(platform)?'Show in Explorer':'Show in folder';
+function showCardMenu(c,x,y,fromButton=false){
+  // A click on the open menu's own button first light-dismisses it; do not reopen it.
+  if(busy||disconnected||fromButton&&menuClosed.c===c&&Date.now()-menuClosed.at<300)return;
+  if(cardMenu.matches(':popover-open'))cardMenu.hidePopover();
+  menuCard?.more.setAttribute('aria-expanded','false');menuCard=c;
+  cardMenu.querySelector('[data-act=rename]').disabled=!!c.p.error;
+  cardMenu.showPopover();
+  Object.assign(cardMenu.style,{top:`${Math.max(8,Math.min(innerHeight-cardMenu.offsetHeight-8,y))}px`,left:`${Math.max(8,Math.min(innerWidth-cardMenu.offsetWidth-8,fromButton?x-cardMenu.offsetWidth:x))}px`});
+  c.more.setAttribute('aria-expanded','true');cardMenu.querySelector('button:not(:disabled)').focus();
+}
+cardMenu.addEventListener('toggle',event=>{
+  if(event.newState!=='closed'||!menuCard||cardMenu.matches(':popover-open'))return;
+  menuCard.more.setAttribute('aria-expanded','false');menuClosed={c:menuCard,at:Date.now()};
+  if(document.activeElement===document.body||cardMenu.contains(document.activeElement))menuCard.more.focus({preventScroll:true});
+});
+for(const menu of [cardMenu,openMenu])menu.addEventListener('keydown',event=>{
+  const items=[...menu.querySelectorAll('button:not(:disabled)')],i=items.indexOf(document.activeElement),next={ArrowDown:i+1,ArrowUp:i-1,Home:0,End:items.length-1}[event.key];
+  if(next===undefined||!items.length)return;event.preventDefault();items[(next+items.length)%items.length].focus();
+});
+const renameDialog=document.getElementById('rename-dialog'),renameName=document.getElementById('rename-name'),renameProblem=document.getElementById('rename-problem');
+const trashDialog=document.getElementById('trash-dialog'),trashProblem=document.getElementById('trash-problem');
+let chosen=null;
+function notice(text,label,action){
+  activity.replaceChildren(text,Object.assign(document.createElement('button'),{type:'button',textContent:label,onclick:action}));activity.hidden=false;
+}
+cardMenu.addEventListener('click',async event=>{
+  const act=event.target.closest('button')?.dataset.act,c=menuCard;if(!act||!c||busy)return;
+  cardMenu.hidePopover();chosen=c.p;
+  if(act==='open')return openPaper(c.p);
+  if(act==='rename'){renameName.value=c.p.name;renameProblem.hidden=true;renameDialog.showModal();renameName.select();return;}
+  if(act==='trash'){document.getElementById('trash-help').textContent=`“${c.p.name}” moves to Open → Recently deleted, where you can restore it. Any sharing links for it stop first.`;trashProblem.hidden=true;trashDialog.showModal();document.getElementById('cancel-trash').focus();return;}
+  busy=true;problem.hidden=true;
+  try{await request({action:'reveal',workspaceId:c.p.workspaceId,paperId:c.p.id});}catch(error){fail(error);}finally{busy=false;}
+});
+// Dialog actions report errors in place and keep the dialog open so nothing is lost.
+async function confirmAction(dialog,problemNode,submit,task){
+  if(busy)return;busy=true;submit.disabled=true;problemNode.hidden=true;let done=false;
+  try{await task();done=true;dialog.close();}catch(error){problemNode.textContent=error.message;problemNode.hidden=false;}
+  finally{busy=false;submit.disabled=false;}
+  if(done)await load();
+}
+document.getElementById('rename-form').addEventListener('submit',event=>{
+  event.preventDefault();const p=chosen,name=renameName.value.trim().replace(/\s+/g,' ');
+  if(!p||!name)return;if(name===p.name){renameDialog.close();return;}
+  void confirmAction(renameDialog,renameProblem,document.getElementById('save-rename'),()=>request({action:'rename',workspaceId:p.workspaceId,paperId:p.id,name}));
+});
+document.getElementById('cancel-rename').addEventListener('click',()=>renameDialog.close());
+async function undo(workspaceId,trashId){
+  if(busy)return;busy=true;problem.hidden=true;
+  try{await request({action:'restore',workspaceId,trashId});activity.hidden=true;}catch(error){fail(error);}finally{busy=false;}
+  await load();
+}
+document.getElementById('confirm-trash').addEventListener('click',event=>{
+  const p=chosen;if(!p)return;
+  void confirmAction(trashDialog,trashProblem,event.currentTarget,async()=>{
+    const moved=await request({action:'trash',workspaceId:p.workspaceId,paperId:p.id});
+    notice(`Moved “${moved.name}” to Recently deleted. `,'Undo',()=>undo(moved.workspaceId,moved.trashId));
+  });
+});
+document.getElementById('cancel-trash').addEventListener('click',()=>trashDialog.close());
+
+const deletedDialog=document.getElementById('deleted-dialog'),deletedMessage=document.getElementById('deleted-message');
+async function renderDeleted(){
+  const area=document.getElementById('deleted-list');area.replaceChildren(help('Loading…'));
+  let items;try{({items}=await request({action:'trash-list'}));}catch(error){area.replaceChildren(help(error.message));return;}
+  area.replaceChildren(...(items.length?items.map(item=>row(item.name,`${item.workspaceName} · Deleted ${ago(item.deletedAt)}`,[button('Restore',async b=>{
+    if(busy)return;busy=true;b.disabled=true;b.textContent='Restoring…';deletedMessage.hidden=true;
+    try{await request({action:'restore',workspaceId:item.workspaceId,trashId:item.trashId});deletedMessage.textContent=`Restored “${item.name}”.`;await renderDeleted();}
+    catch(error){deletedMessage.textContent=error.message;b.disabled=false;b.textContent='Restore';}
+    finally{busy=false;deletedMessage.hidden=false;void load();}
+  })])):[help('Nothing here. Papers you move to Trash appear here until you restore them.')]));
+}
+document.getElementById('open-deleted').addEventListener('click',()=>{openMenu.hidePopover();deletedMessage.hidden=true;deletedDialog.showModal();void renderDeleted();});
+document.getElementById('deleted-close').addEventListener('click',()=>deletedDialog.close());
+
+// Native hosts can join without adding a second MCP server or saving the invitation key.
+const openShared=document.getElementById('open-shared'),invitationDialog=document.getElementById('invitation-dialog'),invitationError=document.getElementById('invitation-error');let invitationAbort;
+openShared.hidden=!inPaperSurface;
+openShared.addEventListener('click',()=>{openMenu.hidePopover();invitationError.hidden=true;invitationDialog.showModal();document.getElementById('invitation-url').focus();});
+document.getElementById('invitation-cancel').addEventListener('click',()=>invitationDialog.close());
+invitationDialog.addEventListener('close',()=>invitationAbort?.abort());
+invitationDialog.querySelector('form').addEventListener('submit',async event=>{event.preventDefault();const b=document.getElementById('invitation-open');if(b.disabled)return;b.disabled=true;b.textContent='Opening…';invitationError.hidden=true;invitationAbort=new AbortController();try{await window.__paperNative.joinInvitation(document.getElementById('invitation-url').value.trim(),{signal:invitationAbort.signal});}catch(error){if(invitationDialog.open){invitationError.textContent=error.message;invitationError.hidden=false;}}finally{b.disabled=false;b.textContent='Open Paper';}});
+onSurfaceDispose(()=>invitationAbort?.abort());

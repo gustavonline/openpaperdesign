@@ -2,7 +2,7 @@
 name: paper-diagram
 description: Create, revise or review editable architecture, process, data and infrastructure diagrams in Paper. Use for C4, UML-style structure, BPMN-style workflows, ER models, Kubernetes topology, flowcharts and source-backed system explanations.
 metadata:
-  version: "0.7.0-preview.10"
+  version: "0.7.0-preview.11"
 ---
 
 # Diagram in Paper
@@ -18,6 +18,8 @@ Choose one primary view and a consistent abstraction level. Use [notation select
 ## Build on the same layers
 
 Use [Paper workspace operations](../paper/SKILL.md) when opening a project or reading the save contract. Read the existing [diagram model](../paper/references/diagrams.md) before authoring layer JSON. These are the bundled MCP/CLI and pure Node helpers, with no external diagram server or renderer dependency.
+
+For an invitation use `paper_join` and the returned Paper ID. Save full JSON; owner sourceFile paths, private notes and Notion are unavailable through invitations. Shipped shape helpers can still construct the JSON locally.
 
 Use `DIAGRAM_FAMILIES` / `makeSymbol` and `instantiate` from the shipped runtime modules. They supply standard editable shapes and allocate fresh IDs. Name root groups after the actual service/entity/task and edit their actual text children. Library images have the documented asset/notice-copy route. Avoid hand-writing a parallel graph model or claiming an image is editable text.
 

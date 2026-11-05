@@ -17,6 +17,7 @@ import { createSharing } from './sharing.mjs';
 import { complete, protocolError } from './mcp.mjs';
 import {createHome, homeResource, isHomeResource, HOME_URI, HOME_MIME, personalWorkspace, rememberWorkspace,dataHome} from './home.mjs';
 import {createUI} from './ui.mjs';
+import {joinInvitation} from './invitation.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RUNTIME = path.resolve(HERE,'../runtime');
@@ -124,11 +125,13 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
           if(event)emit(event,{paperId:id,revision,clientId:peer.id});return json(res,200,{peer});
         }
       }
+      if(pathname==='/api/sharing/overview'&&req.method==='GET')return json(res,200,sharing.overview());
+      if(pathname==='/api/sharing/link'&&req.method==='POST'){const args=JSON.parse(await readBody(req,1024));if(!args||Object.keys(args).some(k=>k!=='invitationId')||typeof args.invitationId!=='string')throw new PaperError(400,'Choose an invitation');return json(res,200,await sharing.link(paperId(url),args.invitationId));}
       if(pathname==='/api/sharing'){
         const id=paperId(url);
         if(req.method==='GET')return json(res,200,await sharing.status(id));
-        if(req.method==='DELETE')return json(res,200,await sharing.stop(id));
-        if(req.method==='POST'){const args=JSON.parse(await readBody(req,1024));if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['role','network','internet'].includes(k)))throw new PaperError(400,'Invalid sharing options');return json(res,201,await sharing.create(id,args.role,args.network??false,args.internet??false));}
+        if(req.method==='DELETE'){const bytes=await readBody(req,1024),args=bytes.length?JSON.parse(bytes):{};if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>k!=='invitationId')||args.invitationId!==undefined&&typeof args.invitationId!=='string')throw new PaperError(400,'Invalid invitation');return json(res,200,await sharing.stop(id,args.invitationId));}
+        if(req.method==='POST'){const args=JSON.parse(await readBody(req,1024));if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['role','network','internet','newLink','label','retry','invitationId'].includes(k)))throw new PaperError(400,'Invalid sharing options');if(args.retry===true){if(typeof args.invitationId!=='string')throw new PaperError(400,'Choose an invitation');return json(res,200,await sharing.retry(id,args.invitationId));}return json(res,201,await sharing.create(id,args.role,args.network??false,args.internet??false,{newLink:args.newLink??false,label:args.label??''}));}
       }
       if(pathname==='/api/assets' && req.method==='POST')return json(res,201,await library.addAsset(paperId(url),await readBody(req,5*1024*1024)));
       if(pathname==='/api/papers'){
@@ -186,7 +189,8 @@ async function connectWorkspace(root,agentClient){
 const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:['paper_list','paper_read','paper_read_feedback'].includes(name),destructiveHint:false,openWorldHint:false}});
 export const TOOLS=[
   {...tool('paper_ui','Use the owner API for the selected Paper library from the native app.',{key:string,workspaceId:string,origin:string,instance:string,path:string,method:{type:'string',enum:['GET','POST','PUT','DELETE']},headers:{type:'object',additionalProperties:{type:'string'}},body:string},['key','workspaceId','origin','instance','path']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},_meta:{ui:{visibility:['app']}}},
-  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop']},workspaceId:string,paperId:string,name:string,instance:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'}]}}},
+  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop','sharing','stop-sharing','rename','reveal','trash','trash-list','restore']},workspaceId:string,paperId:string,name:string,instance:string,invitationId:string,trashId:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'}]}}},
+  {...tool('paper_join','Join a shared Paper invitation. Opens its live canvas and selects it for the artwork tools. No local workspace or extra MCP setup is needed. paper_open switches back to local Papers.',{url:string},['url']),title:'Open shared Paper',annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI}},
   tool('paper_open','Open a Paper workspace. Omit workspace for the personal library; select an absolute project folder for project-local Papers.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
   tool('paper_list','List saved Papers in the opened workspace.',{}),
   tool('paper_create','Create a blank saved Paper; return its id, files and editor URL.',{name:string,width:{type:'integer',minimum:16,maximum:10000},height:{type:'integer',minimum:16,maximum:10000}}),
@@ -198,27 +202,33 @@ export const TOOLS=[
   tool('paper_activity','Show your current activity and optional work area. Empty status clears it. Temporary, not saved artwork.',{paperId:string,status:{type:'string',maxLength:120},pageId:string,nodeId:{type:'integer'},rect:{type:'object',properties:{x:{type:'number'},y:{type:'number'},w:{type:'number'},h:{type:'number'}},required:['x','y','w','h'],additionalProperties:false}},['paperId','status']),
   tool('paper_write_note','Update DESIGN.md or CONTEXT.md with its read revision.',{paperId:string,file:{type:'string',enum:['DESIGN.md','CONTEXT.md']},revision:string,text:string},['paperId','file','revision','text']),
   tool('paper_package','Export a complete portable .paper.zip or import one as a new Paper. Files must be inside the selected workspace. Export never replaces an existing file.',{action:{type:'string',enum:['export','import']},paperId:string,file:string},['action','file']),
-  {...tool('paper_notion','Connect the official Notion account, list accessible pages, save/update a Paper, or open a cloud snapshot as a new local Paper. Login completes in the browser. Save is explicit; remote changes are never silently overwritten.',{action:{type:'string',enum:['status','connect','disconnect','pages','save','open']},paperId:string,parentId:string,pageId:string,query:string,cursor:string,newCopy:{type:'boolean'}},['action']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true}},
+  {...tool('paper_notion','Connect the official Notion account, list accessible pages, save/update a Paper, or open a cloud snapshot as a new local Paper. Login completes in the browser. Save is explicit; remote changes are never silently overwritten.',{action:{type:'string',enum:['status','connect','disconnect','pages','save','open']},paperId:string,parentId:string,pageId:string,title:string,query:string,cursor:string,newCopy:{type:'boolean'}},['action']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true}},
 ];
 export async function serveStdio() {
   // An installed version can be pruned while this process is still attached to its host.
   const editor=await loadRuntime(RUNTIME);
-  const apps=new Map(),openingApps=new Map(),agentClient=randomBytes(16).toString('hex');let active=null;
+  const apps=new Map(),openingApps=new Map(),guests=new Map(),agentClient=randomBytes(16).toString('hex');let active=null,joined=null;
   const getApp=async root=>{
     const previous=apps.get(root);if(previous&&(previous.closed||!previous.server&&(await discoverWorkspace(root))?.instance!==previous.instance))apps.delete(root);
     if(!apps.has(root)){if(!openingApps.has(root))openingApps.set(root,connectWorkspace(root,agentClient).then(app=>{apps.set(root,app);return app}).finally(()=>openingApps.delete(root)));return openingApps.get(root);}return apps.get(root);
   };
   const home=createHome(getApp);
-  const uiKey=randomBytes(32).toString('hex'),ui=createUI(uiKey,home);
+  const uiKey=randomBytes(32).toString('hex'),ui=createUI(uiKey,home,id=>guests.get(id));
   const rawCall=async(name,args={},peerId='agent-mcp')=>{
     if(!TOOLS.some(t=>t.name===name))throw new PaperError(400,'Unknown tool');
     if(name==='paper_home')return home(args);
     if(name==='paper_ui')return ui(args);
+    if(name==='paper_join'){
+      for(const [id,g]of guests)if(g.descriptor.expiresAt<=Date.now())guests.delete(id);
+      let guest=[...guests.values()].find(g=>g.matches(args.url));if(!guest){if(guests.size>=8)throw new PaperError(429,'Eight shared Papers are already open in this session. Start a new session to join another.');guest=await joinInvitation(args.url);guests.set(guest.descriptor.id,guest);}joined=guest;
+      return {guest:guest.descriptor,paperId:guest.descriptor.paperId,role:guest.descriptor.role,name:guest.descriptor.name,shared:true};
+    }
     if(name==='paper_open'){
       const root=await projectWorkspace(args.workspace===undefined?await personalWorkspace():args.workspace);
-      await rememberWorkspace(root);active=await getApp(root);
+      await rememberWorkspace(root);active=await getApp(root);joined=null;
       return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:VERSION};
     }
+    if(joined)return joined.tool(name,args);
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
     if(name==='paper_package'){
       if(!['export','import'].includes(args.action)||typeof args.file!=='string'||!path.isAbsolute(args.file))throw new PaperError(400,'Choose export/import and an absolute workspace file');
@@ -230,7 +240,7 @@ export async function serveStdio() {
       const route={status:['GET','status'],connect:['POST','connect'],disconnect:['DELETE','connection'],pages:['POST','pages'],save:['POST','save'],open:['POST','open']}[args.action];if(!route)throw new PaperError(400,'Unknown Notion action');
       if(args.paperId&&!ID.test(args.paperId))throw new PaperError(400,'Invalid Paper identity');
       const query=['save','status'].includes(args.action)&&args.paperId?`?paper=${encodeURIComponent(args.paperId)}`:'';
-      const body=args.action==='pages'?Object.fromEntries(['query','cursor'].filter(k=>args[k]!==undefined).map(k=>[k,args[k]])):args.action==='save'?{...(args.parentId?{parentId:args.parentId}:{}),...(args.newCopy!==undefined?{newCopy:args.newCopy}:{})}:args.action==='open'?{pageId:args.pageId}:{};
+      const body=args.action==='pages'?Object.fromEntries(['query','cursor'].filter(k=>args[k]!==undefined).map(k=>[k,args[k]])):args.action==='save'?{...(args.parentId?{parentId:args.parentId}:{}),...(args.newCopy!==undefined?{newCopy:args.newCopy}:{}),...(args.title!==undefined?{title:args.title}:{})}:args.action==='open'?{pageId:args.pageId}:{};
       const response=await fetch(`${active.url}/api/notion/${route[1]}${query}`,{method:route[0],headers:{Origin:active.url,'Content-Type':'application/json'},...(route[0]==='POST'?{body:JSON.stringify(body)}:{})});const result=await response.json();if(!response.ok)throw new PaperError(response.status,result.error||'Notion request failed');return result;
     }
     if(name==='paper_list')return {papers:await active.library.list()};
@@ -261,7 +271,7 @@ export async function serveStdio() {
   const soft=async fn=>{try{return await fn();}catch{return null;}};
   const labels={paper_read:'Reading the Paper',paper_save:'Updating artwork',paper_add_asset:'Adding an image',paper_read_feedback:'Reading feedback',paper_save_feedback:'Updating feedback',paper_write_note:'Updating notes'};
   const call=async(name,args={})=>{
-    if(name==='paper_home'||!active||!args.paperId||!TOOLS.some(t=>t.name===name))return rawCall(name,args);
+    if(joined||name==='paper_join'||name==='paper_home'||!active||!args.paperId||!TOOLS.some(t=>t.name===name))return rawCall(name,args);
     await active.library.folder(args.paperId);
     if(name==='paper_activity'){if(typeof args.status!=='string')throw new PaperError(400,'Supply a status');const {paperId,status,pageId=null,nodeId=null,rect=null}=args;return {agent:await active.presence.activity(paperId,'owner',agentClient,{status,pageId,nodeId,rect})};}
     const peer=await soft(()=>active.presence.update(args.paperId,'owner',agentClient,{status:labels[name]||'Working on the Paper'},'agent'));
@@ -295,7 +305,7 @@ export async function serveStdio() {
         result={contents:[{...await homeResource(editor,uiKey),uri:request.params.uri}]};
       }
       else if(request.method==='tools/call'){
-        const execute=async()=>{try{const value=await call(request.params?.name,request.params?.arguments);return request.params?.name==='paper_home'?{_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI},structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:request.params?.name==='paper_ui'?{structuredContent:value,content:[]}:{content:[{type:'text',text:JSON.stringify(value)}]};}catch(error){return {content:[{type:'text',text:error.message}],isError:true};}};
+        const execute=async()=>{try{const value=await call(request.params?.name,request.params?.arguments);return ['paper_home','paper_join'].includes(request.params?.name)?{_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI},structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:request.params?.name==='paper_ui'?{structuredContent:value,content:[]}:{content:[{type:'text',text:JSON.stringify(value)}]};}catch(error){return {content:[{type:'text',text:error.message}],isError:true};}};
         const operation=request.params?.name==='paper_ui'?execute():(agentCalls=agentCalls.then(execute,execute));
         const task=operation.then(result=>respond({jsonrpc:'2.0',id:request.id,result:complete(request,result,SERVER_INFO)}));
         uiCalls.add(task);void task.finally(()=>uiCalls.delete(task));continue;
@@ -315,4 +325,4 @@ async function main() {
   const app=await startServer(workspace,{port,shareUrl:option('--share-url'),sharePort:Number(option('--share-port','0'))});process.stdout.write(`Paper ready: ${app.url}/home.html\nFiles: ${app.library.root}\n`);
   let closing=false;for(const event of ['SIGINT','SIGTERM'])process.on(event,async()=>{if(closing)return;closing=true;await app.close();process.exit(0);});
 }
-if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(error=>{process.stderr.write(`Paper: ${error.message}\n`);process.exitCode=1;});
+if(process.argv[1]&&await fs.realpath(path.resolve(process.argv[1])).catch(()=>null)===fileURLToPath(import.meta.url))main().catch(error=>{process.stderr.write(`Paper: ${error.message}\n`);process.exitCode=1;});

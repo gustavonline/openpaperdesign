@@ -2,7 +2,7 @@
 name: paper-design
 description: Create or revise visual direction and editable designs in Paper for websites, app screens, dashboards, banners and other graphics. Use when turning a brief or references into design alternatives, documenting a design system, or reviewing visual consistency.
 metadata:
-  version: "0.7.0-preview.10"
+  version: "0.7.0-preview.11"
 ---
 
 # Design in Paper
@@ -20,6 +20,8 @@ For new direction or system work, read [design-system guidance](references/desig
 ## Compose in the native source
 
 Open/list/read the requested Paper before creating another. [Paper workspace operations](../paper/SKILL.md) describes the bundled MCP/CLI and revision-checked save; use it when opening a workspace or when the save contract is unfamiliar. The plugin supplies those tools, so no external Paper/Figma service is assumed.
+
+For an invitation use `paper_join`, then edit the returned Paper with full JSON and base64 asset uploads. Invited work has no owner filesystem paths, private context or cloud-account access. Do not create a local copy unless requested.
 
 For direct JSON edits, read the [native layer format](../paper/references/paper-format.md) before constructing text/image layers. Keep important text and geometry as real layers. Match intended dimensions and actual content. Use the bundled font faces the editor can render (Inter 400/700); retain source assets and licences for images. Do not promise an unsupported font or effect in the preview/export. Existing diagrams in the same Paper remain editable.
 
