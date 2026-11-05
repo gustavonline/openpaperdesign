@@ -9,7 +9,13 @@
   "scripts": {
     "start": "node server/server.mjs",
     "mcp": "node server/server.mjs --stdio",
-    "build:ui": "node scripts/refresh-assets.mjs && node scripts/build-native.mjs"
+    "build:ui": "node scripts/refresh-assets.mjs && node scripts/build-native.mjs",
+    "build:inspection": "npm run build --prefix vendor/inspection",
+    "check": "node scripts/check.mjs",
+    "test": "node --test \"tests/*.mjs\"",
+    "verify:assets": "node scripts/verify-assets.mjs",
+    "package": "node scripts/package.mjs",
+    "smoke": "node scripts/smoke.mjs ."
   },
   "license": "Apache-2.0",
   "description": "Lightweight local design and diagram Papers",

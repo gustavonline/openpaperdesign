@@ -1,0 +1,145 @@
+name: Release
+
+# A release is deliberate:
+#  - Pushing a preview tag (v1.2.3-preview.4) publishes a GitHub prerelease.
+#  - A stable tag (v1.2.3) is only built and verified when pushed. Publishing it needs this workflow run
+#    by hand (Actions > Release > Run workflow) with the tag typed twice, and the `release` environment's
+#    approval if the owner has set required reviewers on it.
+# The tag must already exist and must equal v<package.json version>.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release, for example v1.2.3 or v1.2.3-preview.4
+        required: true
+        type: string
+      confirm:
+        description: Type the same tag again to publish it
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Verify and package the tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      commit: ${{ steps.commit.outputs.commit }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - name: Decide what this run may do
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$TAG' must look like v1.2.3 or v1.2.3-preview.4"; exit 1
+          fi
+          prerelease=false; [[ "$TAG" == *-* ]] && prerelease=true
+          publish=true
+          if [ "$EVENT" = workflow_dispatch ]; then
+            [ "$CONFIRM" = "$TAG" ] || { echo "::error::Confirmation '$CONFIRM' does not match '$TAG'; nothing published"; exit 1; }
+          elif [ "$prerelease" = false ]; then
+            publish=false
+            echo "::notice::$TAG is a stable tag. It is verified and packaged here but not published; run this workflow manually to publish it."
+          fi
+          { echo "tag=$TAG"; echo "prerelease=$prerelease"; echo "publish=$publish"; } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.plan.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record the exact commit
+        id: commit
+        env:
+          PRERELEASE: ${{ steps.plan.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if [ "$PRERELEASE" = false ] && ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Stable releases must come from a commit on main"; exit 1
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Version matches the tag
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: node scripts/check.mjs --tag "$TAG"
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --prefix vendor/inspection --no-audit --no-fund
+      - name: Assets rebuild exactly from lockfiles
+        run: node scripts/verify-assets.mjs
+      - name: Tests, including the unpacked archive
+        run: node --test "tests/*.mjs"
+      - name: Package the tag
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: node scripts/package.mjs --tag "$TAG" --out dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ steps.plan.outputs.tag }}
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ needs.build.outputs.tag }}
+          path: release
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          COMMIT: ${{ needs.build.outputs.commit }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum -c ./*.sha256
+          # The tag must still name the commit that was tested.
+          current=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)
+          [ "$current" = "$COMMIT" ] || { echo "::error::$TAG now points at $current, not the tested $COMMIT"; exit 1; }
+          zip=$(ls ./*.zip); zip=${zip#./}; sha=$(cut -d' ' -f1 "$zip.sha256")
+          cat > notes.md <<EOF
+          OpenPaperDesign $TAG, built from commit \`$COMMIT\`.
+
+          - Archive: \`$zip\`
+          - SHA256: \`$sha\`
+
+          Needs Node.js 22 or later; no npm install. Check the checksum, unpack, and see docs/releases.md.
+
+          CI passed source and package checks on this exact commit, including the unpacked archive. Installing it in the Codex or Claude Code desktop apps is tested separately and is not implied by this release.
+          EOF
+          if [ "$PRERELEASE" = true ]; then kind=--prerelease; else kind=--latest; fi
+          gh release create "$TAG" "$zip" "$zip.sha256" --verify-tag --title "OpenPaperDesign $TAG" --notes-file notes.md "$kind"
