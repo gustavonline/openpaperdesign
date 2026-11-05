@@ -3,7 +3,7 @@ import {setupPresence} from './presence.js?v=7259cc25cb5c';
 import { setupSharing } from './sharing.js?v=48aa310546f2';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=7c38f23521a1';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers} from './editing-model.js?v=1d0049e52e98';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText} from './editing-model.js?v=1d0049e52e98';
 import {setupNotion,notionIcon} from './notion-ui.js?v=9c2cb2f24936';
 const $ = selector => document.querySelector(selector);
 const stage = $('#stage'), world = $('#world'), body = document.body, form = $('#properties'), tree = $('#layer-tree');
@@ -38,7 +38,7 @@ const assetUrl = path => paperAsset(paperBase + path);
 const clientId = (access.clientPrefix || '') + (crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
 const clientHeaders = { 'X-Paper-Client': clientId };
 const LIMIT = 1e6, VIEW_KEY = scoped('paper:view:2'), PANEL_KEY = scoped('paper:panels:1'), ROW_CAP = 200;
-let scene, revision, selected = null, gesture, frameRequest, saveTimer, viewTimer, toastTimer, textEdit, fieldBefore;
+let scene, revision, selected = null, gesture, frameRequest, saveTimer, viewTimer, toastTimer, textEdit, textCancel = false, fieldBefore;
 const selection = new Set();
 // `inspection`: Inspection owns input (any native tool, menu or utility; artwork editing pauses).
 // `inspectMode`: the mode shown is Inspect. A utility or menu opened from Edit pauses editing but keeps Edit shown.
@@ -679,20 +679,32 @@ form.addEventListener('blur', () => {
 }, true);
 form.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.target.blur(); });
 
-// Text editing in place.
+// Text editing in place. Enter adds a line, Ctrl/Cmd+Enter or leaving the field keeps the edit, Escape restores the
+// text from before the edit. Pointer hits are resolved from the stack under the pointer: a captured gesture or an
+// overlapping background shape can retarget the event, and grouped symbols hide their children behind the group.
+function textAt(x, y) {
+  const hits = document.elementsFromPoint(x, y).map(el => el.closest?.('[data-node-key]')?.dataset.nodeKey).filter((key, i, all) => key && nodes.has(key) && all.indexOf(key) === i);
+  const page = nodes.get(hits[0])?.page; if (!page) return null;
+  const keys = new Map(hits.filter(key => nodes.get(key).page === page).map(key => [nodes.get(key).node.id, key])), id = textTarget(entries.get(page.id), [...keys.keys()]);
+  return id === null ? null : keys.get(id);
+}
 function startTextEdit(key, selectAll = false) {
   const entry = nodes.get(key), element = dom.get(key);
-  if (!entry || entry.node.type !== 'text' || entry.node.locked || inspection) return;
+  if (!canEdit || !entry || entry.node.type !== 'text' || inspection || !editableText(entries.get(entry.page.id), entry.node.id)) return;
+  if (textEdit === key) return;
+  stopTextEdit();
   if (selected !== key) selectNode(key);
   const before = copy(entry.node);
   element.contentEditable = 'plaintext-only'; if (element.contentEditable !== 'plaintext-only') element.contentEditable = 'true';
-  element.focus({ preventScroll: true }); textEdit = key;
+  element.focus({ preventScroll: true }); textEdit = key; textCancel = false;
   if (selectAll) { const range = document.createRange(); range.selectNodeContents(element); getSelection().removeAllRanges(); getSelection().addRange(range); }
   element.addEventListener('blur', () => {
-    textEdit = null; entry.node.text = element.innerText.replace(/\n$/, ''); element.contentEditable = 'false';
-    paint(key); record(key, before, copy(entry.node)); populateInspector();
+    textEdit = null; element.contentEditable = 'false';
+    if (!textCancel) entry.node.text = element.innerText.replace(/\n$/, '');
+    textCancel = false; paint(key); if (entry.node.text !== before.text) record(key, before, copy(entry.node)); populateInspector();
   }, { once: true });
 }
+function cancelTextEdit() { if (textEdit) { textCancel = true; dom.get(textEdit)?.blur(); } }
 function stopTextEdit() { if (textEdit) dom.get(textEdit)?.blur(); }
 
 // Pointer gestures on the canvas.
@@ -729,6 +741,7 @@ function finishGesture() {
     // on empty artboard space it creates one default-sized shape or text (one-shot); a pencil needs a drag.
     if (!g.key) {
       if (g.tool === 'stroke') return;
+      if (g.text) { setTool('select'); startTextEdit(g.text, true); return; }
       if (g.layer && nodes.has(g.layer)) { setTool('select'); selectNode(g.layer); return; }
       g.key = newNode(g.context, g.origin.x, g.origin.y);
     }
@@ -833,7 +846,7 @@ stage.addEventListener('pointerdown', e => {
   else if (mode !== 'select') {
     const b=drawingContext(e.target),origin=contextOrigin(b);
     const x=(p.x-camera.x)/camera.z-origin.x,y=(p.y-camera.y)/camera.z-origin.y;
-    gesture={kind:'draw',key:null,tool:mode,context:b,layer:layer?.dataset.nodeKey||null,source:mode==='connector'?hitSymbol(e.target):null,lastClient:{x:e.clientX,y:e.clientY},start:p,origin:{x,y}};
+    gesture={kind:'draw',key:null,tool:mode,context:b,layer:layer?.dataset.nodeKey||null,text:mode==='text'?textAt(e.clientX,e.clientY):null,source:mode==='connector'?hitSymbol(e.target):null,lastClient:{x:e.clientX,y:e.clientY},start:p,origin:{x,y}};
   } else if (handle || layer) {
     const key = handle ? handle.dataset.boardMove : (e.metaKey||e.ctrlKey?layer.dataset.nodeKey:hitSymbol(layer)), node = nodes.get(key).node;
     if(e.shiftKey){selectNode(key,{add:true});stage.focus({preventScroll:true});e.preventDefault();return;}
@@ -898,7 +911,7 @@ for (const name of ['mousedown', 'auxclick']) window.addEventListener(name, e =>
 world.addEventListener('click', e => { const name = e.target.closest('[data-board-select]'); if (name && !inspection) { selectNode(name.dataset.boardSelect); stage.focus({ preventScroll: true }); } });
 stage.addEventListener('dblclick', e => {
   if (!canEdit) return;
-  const element = e.target.closest('.node-text'); if (element) startTextEdit(element.dataset.nodeKey);
+  const key = textAt(e.clientX, e.clientY); if (key) { e.preventDefault(); startTextEdit(key, true); }
 });
 
 // Wheel and pinch: captured on window before Inspection, but only over the owned canvas. Panels, dialogs
@@ -950,7 +963,7 @@ function onKey(e) {
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (mod && ['=', '+', '-', '0'].includes(e.key)) { e.preventDefault(); if (!inspection) e.key === '0' ? zoomCommand('100') : zoomCenter(e.key === '-' ? 1 / 1.2 : 1.2); return; }
   if (openMenuEl && menuKeys(e)) return;
-  if (e.target.isContentEditable) { if (e.key === 'Escape') e.target.blur(); return; }
+  if (e.target.isContentEditable) { if (e.key === 'Escape') { e.preventDefault(); cancelTextEdit(); } else if (e.key === 'Enter' && mod) { e.preventDefault(); e.target.blur(); } return; }
   if (inspection) return;
   if (editable(e.target)) return;
   if (!canEdit && (mod && /^[zy]$/.test(k) || ['Delete','Backspace','Enter'].includes(e.key) || arrows[e.key])) return;
