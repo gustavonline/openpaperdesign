@@ -20,7 +20,7 @@ codex plugin marketplace add gustavonline/openpaperdesign
 codex plugin add openpaperdesign@openpaperdesign
 ```
 
-After installing or updating, quit and reopen Codex to reload its sidebar Home and local tools. Then open **OpenPaperDesign** in the desktop sidebar, or ask your agent to open Home.
+After installing or updating, quit and reopen Codex to reload its sidebar Home and local tools. Then open **OpenPaperDesign** in the desktop sidebar or from **More tools** in a new browser tab. Both open the same Home. You can also ask your agent to open Home.
 
 Home, Papers and the Notion picker use the same plugin window. Use the Paper menu in the upper-left corner → **All Papers** to return Home. Notion sign-in opens separately; its picker stays in Paper.
 
@@ -46,7 +46,7 @@ Recipients can open an invitation in their browser, Codex or Claude Code. The ap
 
 Internet sharing needs the optional [cloudflared CLI](https://developers.cloudflare.com/tunnel/downloads/). On macOS, install it once with `brew install cloudflared`. No Cloudflare account, domain or hosted backend is needed. The plugin starts its own temporary tunnel only when you create an Internet invitation. [Sharing details](skills/paper/references/sharing.md).
 
-Shift-click selects several layers. Copy, paste, duplicate, group and arrange them with familiar shortcuts or the right-click menu. Text and appearance controls live in Properties. Right-click empty canvas to choose snapping, grid and background. A selected layer's **Copy link** links to that layer in your local editor.
+Shift-click selects several layers. Copy, paste, duplicate, group and arrange them with familiar shortcuts or the right-click menu. Double-click visible text to edit it, including labels inside grouped symbols. Enter adds a line, Ctrl/Cmd+Enter or blur keeps the change, and Escape restores the original. Text and appearance controls also live in Properties. Right-click empty canvas to choose snapping, grid and background. A selected layer's **Copy link** links to that layer in your local editor.
 
 **Share → Save to Notion** takes you through Notion’s own sign-in and back to Paper. Name the new page and choose where to save it. Later saves update the same page. **Home → Open → Open from Notion** searches accessible pages and opens a saved Paper as a new local copy. The snapshot includes editable files and a self-contained preview with Pages, pan and zoom. Save is manual; changes made elsewhere are reported before replacement. [Notion connection and storage](skills/paper/references/notion.md).
 
@@ -70,7 +70,7 @@ A Paper contains `paper.json`, assets, a `DESIGN.md` guide and brief notes in `C
 
 To run it without a plugin, clone this repository and run `node server/server.mjs`. Add `--workspace /absolute/path/to/project` to open a project library. The command prints the browser address. `node server/server.mjs --list` lists known Papers without opening a server.
 
-The browser and plugin use the same renderer. For UI development, install the development dependencies and run `npm run build:ui` after changing the renderer; commit `runtime/native.js` with the source changes. Installed plugins use the included build and need no npm installation.
+The browser and plugin use the same renderer. For UI development, install the development dependencies and run `npm run build:ui` after changing the renderer; commit `runtime/native.js` with the source changes. Installed plugins use the included build and need no npm installation. See [checks, packages and release qualification](docs/releases.md) for the development and release workflow.
 
 ## Credits
 

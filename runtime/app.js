@@ -3,8 +3,8 @@ import {setupPresence} from './presence.js?v=7259cc25cb5c';
 import { setupSharing } from './sharing.js?v=48aa310546f2';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=7c38f23521a1';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText} from './editing-model.js?v=1d0049e52e98';
-import {setupNotion,notionIcon} from './notion-ui.js?v=9c2cb2f24936';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText} from './editing-model.js?v=6f3b93cc6712';
+import {setupNotion,notionIcon} from './notion-ui.js?v=e4bdf8fe2768';
 const $ = selector => document.querySelector(selector);
 const stage = $('#stage'), world = $('#world'), body = document.body, form = $('#properties'), tree = $('#layer-tree');
 // Which Paper this page edits, read once from the URL (`?paper=<id>`, exactly once; the server refuses an

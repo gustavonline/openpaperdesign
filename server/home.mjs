@@ -12,7 +12,7 @@ export const HOME_MIME='text/html;profile=mcp-app';
 export function isHomeResource(uri){
   if(typeof uri!=='string')return false;
   const base=`ui://openpaperdesign/home/${VERSION}/`;
-  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
+  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12,13].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
 }
 export function dataHome(){
   if(process.env.PAPER_HOME){if(!path.isAbsolute(process.env.PAPER_HOME))throw new Error('PAPER_HOME must be an absolute folder');return process.env.PAPER_HOME;}
