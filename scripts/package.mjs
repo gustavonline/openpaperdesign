@@ -12,9 +12,9 @@ import {fileURLToPath} from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const ALLOW = ['.agents', '.claude-plugin', '.mcp.json', 'DESIGN.md', 'LICENSE', 'NOTICE.md', 'README.md', 'assets', 'commands',
-  'mcp.json', 'package-lock.json', 'package.json', 'plugin.json', 'runtime', 'scripts', 'server', 'skills', 'vendor/inspection'];
+  'docs/releases.md', 'mcp.json', 'package-lock.json', 'package.json', 'plugin.json', 'runtime', 'scripts', 'server', 'skills', 'vendor/inspection'];
 const DENY = /(?:^|\/)(?:node_modules|Paper|\.history|\.env[^/]*|[^/]*\.zip|[^/]*\.log|\.DS_Store)(?:\/|$)/;
-const REQUIRED = ['LICENSE', 'NOTICE.md', 'package.json', 'plugin.json', 'server/server.mjs', 'runtime/native.js', 'scripts/check.mjs'];
+const REQUIRED = ['LICENSE', 'NOTICE.md', 'package.json', 'plugin.json', 'server/server.mjs', 'runtime/native.js', 'scripts/check.mjs', 'docs/releases.md'];
 
 const die = message => { console.error(`package: ${message}`); process.exit(1); };
 const git = (...args) => execFileSync('git', ['-C', root, ...args], {maxBuffer: 256 * 1024 * 1024});
