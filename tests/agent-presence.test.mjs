@@ -63,3 +63,13 @@ test('unknown file-write barriers survive an ABA replay and refuse late agent co
  assert.equal(transitionAgent(rev(2),rev(4),p.snapshot('paper').commits)?.id,a.id,'a new proved transition still animates');
  tick(15001);assert.equal(p.snapshot('paper').commits.length,0);
 });
+
+test('operation generations outlive receipt expiry and safely invalidate on eviction or shutdown',t=>{
+ const {presence:p,tick}=harness(t),token=p.generation('paper');assert.equal(p.canComplete('paper',token),true);
+ p.committed({paperId:'paper',revision:rev(2)});p.committed({paperId:'paper',revision:rev(3)});p.committed({paperId:'paper',revision:rev(2)});
+ tick(15001);assert.equal(p.snapshot('paper').commits.length,0);assert.equal(p.canComplete('paper',token),false);
+ const fresh=p.generation('paper');assert.equal(p.canComplete('paper',fresh),true);
+ for(let i=0;i<64;i++)p.generation('other'+i);
+ assert.equal(p.canComplete('paper',fresh),false);assert.notEqual(p.generation('paper'),fresh);
+ const latest=p.generation('paper');p.close();assert.equal(p.canComplete('paper',latest),false);
+});

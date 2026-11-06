@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {WORKSPACE_API,PAPER_DOCUMENT_VERSION} from '../runtime/workspace-protocol.js';
 import { createPresence } from './presence.mjs';
-import { discoverWorkspace, registerWorkspace, openWorkspaceServer, remotePresence } from './workspace.mjs';
+import { discoverWorkspace, registerWorkspace, openWorkspaceServer, remotePresence, presenceOperation } from './workspace.mjs';
 import { randomBytes } from 'node:crypto';
 import { checkRuntime, loadRuntime, EDITOR_FILES, VERSION } from './runtime.mjs';
 import { isArtboard } from '../runtime/diagram-model.js';
@@ -73,7 +73,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       if(pathname==='/api/events'&&req.method==='GET'){
         res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});res.write(': connected\n\n');res.paperId=url.searchParams.getAll('paper').length===1&&ID.test(url.searchParams.get('paper'))?url.searchParams.get('paper'):null;streams.add(res);if(res.paperId)res.write(`event: presence-snapshot\ndata: ${JSON.stringify(presence.snapshot(res.paperId))}\n\n`);req.on('close',()=>streams.delete(res));return;
       }
-      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION,features:{notionAutosync:1,agentMotion:1},instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
+      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION,features:{notionAutosync:1,agentMotion:1,agentCompletion:1},instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
       if(pathname==='/api/server/stop'&&req.method==='POST'){
         const args=JSON.parse(await readBody(req,1024));
         if(args?.instance!==registration?.instance)throw new PaperError(409,'The server changed. Refresh Home before stopping it.');
@@ -120,14 +120,15 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         if(req.method==='GET')return json(res,200,presence.snapshot(id));
         if(req.method==='POST'){
           const body=JSON.parse(await readBody(req,2048));if(!body||typeof body!=='object'||Array.isArray(body))throw new PaperError(400,'Invalid presence');
-          const {kind='human',long=false,event,revision,baseRevision,leave=false,restore=false,activity=false,...patch}=body,who=client(req);
+          const {kind='human',long=false,event,revision,baseRevision,generation,leave=false,restore=false,activity=false,...patch}=body,who=client(req);
           if(!who||!['human','agent'].includes(kind)||typeof long!=='boolean'||typeof leave!=='boolean'||typeof restore!=='boolean'||typeof activity!=='boolean')throw new PaperError(400,'Invalid presence');
           if(event!==undefined&&(!['paper-changed','feedback-changed','guide-changed'].includes(event)||!/^"[a-f0-9]{64}"$/.test(revision||'')))throw new PaperError(400,'Invalid saved change');
           if(baseRevision!==undefined&&(!event||!/^"[a-f0-9]{64}"$/.test(baseRevision)))throw new PaperError(400,'Invalid base revision');
+          if(generation!==undefined&&(kind!=='agent'||typeof generation!=='string'||!/^[a-f0-9]{32}$/.test(generation)))throw new PaperError(400,'Invalid operation generation');
           if(kind!=='agent'&&(event!==undefined||long||restore||activity))throw new PaperError(400,'Invalid participant activity');
           if(leave){presence.leave('owner',who);return json(res,200,{left:true});}
           const peer=presence.update(id,'owner',who,patch,kind,true,long,restore,activity);
-          if(event&&(event!=='paper-changed'||!baseRevision||(await library.read(id)).revision===revision))emit(event,{paperId:id,baseRevision,revision,clientId:peer.id});return json(res,200,{peer});
+          if(event&&(event!=='paper-changed'||(await library.read(id)).revision===revision&&(!baseRevision||presence.canComplete(id,generation))))emit(event,{paperId:id,baseRevision,revision,clientId:peer.id});return json(res,200,{peer,generation:presence.generation(id)});
         }
       }
       if(pathname==='/api/sharing/overview'&&req.method==='GET')return json(res,200,sharing.overview());
@@ -284,7 +285,7 @@ export async function serveStdio() {
     const peer=await soft(()=>active.presence.update(args.paperId,'owner',agentClient,{status:labels[name]||'Working on the Paper'},'agent'));
     try{
       const result=await rawCall(name,args,peer?.id||'agent-mcp'),event={paper_save:'paper-changed',paper_save_feedback:'feedback-changed',paper_write_note:'guide-changed'}[name];
-      const finished=await soft(()=>active.presence.complete?active.presence.complete(args.paperId,event,result.revision,args.revision):active.presence.restore(args.paperId,'owner',agentClient));
+      const finished=await soft(()=>active.presence.complete?active.presence.complete(args.paperId,event,result.revision,args.revision,peer?.[presenceOperation]):active.presence.restore(args.paperId,'owner',agentClient));
       return {...result,agent:finished||peer};
     }catch(error){await soft(()=>active.presence.restore(args.paperId,'owner',agentClient));throw error;}
   };

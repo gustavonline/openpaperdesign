@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {PaperLibrary} from '../server/library.mjs';
-import {remotePresence,discoverWorkspace} from '../server/workspace.mjs';
+import {remotePresence,discoverWorkspace,presenceOperation} from '../server/workspace.mjs';
 import {transitionAgent} from '../runtime/agent-motion.js';
 const root=await fs.mkdtemp(path.join(os.tmpdir(),'paper-motion-http-'));process.env.PAPER_HOME=root;
 const {startServer}=await import('../server/server.mjs');
@@ -41,10 +41,10 @@ test('successful owner commits reach both polling and fetched documents; failed 
 });
 test('attached MCP completion proves its exact base/result; stale completion cannot attribute a newer fetch',async t=>{
  const {app,made,get,dir}=await harness(t),advertised=await discoverWorkspace(dir),proxy=remotePresence(app.url,'attached-agent',advertised.features),external=await PaperLibrary.open(dir);
- t.after(()=>proxy.close());assert.equal(advertised.features.agentMotion,1);
+ t.after(()=>proxy.close());assert.equal(advertised.features.agentMotion,1);assert.equal(advertised.features.agentCompletion,1);
  const first=await external.read(made.id),peer=await proxy.activity(made.id,'owner','attached-agent',{status:'Drawing',pageId:first.paper.pages[0].id,nodeId:1});
  first.paper.name='Attached save';const saved=await external.save(made.id,bytes(first.paper),first.revision,'paper',peer.id);
- await proxy.complete(made.id,'paper-changed',saved.revision,first.revision);
+ await proxy.complete(made.id,'paper-changed',saved.revision,first.revision,peer[presenceOperation]);
  const poll=await get('/api/updates');assert.equal(transitionAgent(first.revision,saved.revision,poll.presence.commits)?.id,peer.id);assert.equal(poll.presence.peers[0].status,'');
  const second=await external.read(made.id);second.paper.name='Attached second';const attached=await external.save(made.id,bytes(second.paper),second.revision,'paper',peer.id);
  const newer=await app.library.read(made.id);newer.paper.name='Human raced completion';await app.library.save(made.id,bytes(newer.paper),newer.revision,'paper','human');
@@ -89,13 +89,16 @@ test('attached completion and error cleanup clear remembered activity on legacy 
  assert.ok(bodies.every(body=>!('baseRevision' in body)));await proxy.close();
 });
 
-test('late attached completion cannot claim bytes replayed through ordinary file edits',async t=>{
- const {app,made,get}=await harness(t),first=await app.library.read(made.id),proxy=remotePresence(app.url,'aba-agent',{agentMotion:1});t.after(()=>proxy.close());
+test('late attached completion cannot claim file replays after receipt expiry',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:100000});
+ const {app,made,get}=await harness(t),first=await app.library.read(made.id),proxy=remotePresence(app.url,'aba-agent',{agentMotion:1,agentCompletion:1});t.after(()=>proxy.close());
  const peer=await proxy.activity(made.id,'owner','aba-agent',{status:'Drawing'});
  first.paper.name='Agent result';const saved=await app.library.save(made.id,bytes(first.paper),first.revision,'paper',peer.id),file=path.join(made.path,'paper.json'),b=await fs.readFile(file);
  const waitUnknown=async revision=>{for(let i=0;i<100;i++){const state=await get('/api/updates');if(state.presence.commits.at(-1)?.revision===revision&&state.presence.commits.at(-1)?.actor===null)return;await new Promise(r=>setTimeout(r,20));}assert.fail('Watcher did not publish the unknown-write barrier');};
  const human=structuredClone(first.paper);human.name='Ordinary file edit';const c=bytes(human),cRevision='"'+createHash('sha256').update(c).digest('hex')+'"';
- await fs.writeFile(file,c);await waitUnknown(cRevision);await fs.writeFile(file,b);await waitUnknown(saved.revision);
- await proxy.complete(made.id,'paper-changed',saved.revision,first.revision);
+ await fs.writeFile(file,c);await waitUnknown(cRevision);await fs.writeFile(file,b);await waitUnknown(saved.revision);t.mock.timers.tick(15001);
+ assert.equal((await get('/api/presence')).commits.length,0,'short-lived receipts have expired');
+ const newer=await proxy.update(made.id,'owner','aba-agent',{status:'Reading'},'agent');assert.notEqual(newer[presenceOperation],peer[presenceOperation]);assert.ok(!JSON.stringify(peer).includes(peer[presenceOperation]),'operation tokens stay internal to their tool call');
+ await proxy.complete(made.id,'paper-changed',saved.revision,first.revision,peer[presenceOperation]);
  const fetched=await get('/api/paper');assert.equal(fetched.revision,saved.revision);assert.equal(transitionAgent(first.revision,fetched.revision,fetched.presence.commits),null);
 });

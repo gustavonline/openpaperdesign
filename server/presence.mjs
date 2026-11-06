@@ -8,17 +8,21 @@ const bad=(condition,text)=>{if(!condition)throw new PaperError(400,text);};
 const xy=v=>v&&['x','y'].every(k=>Number.isFinite(v[k])&&Math.abs(v[k])<=1e6);
 const rectangle=v=>xy(v)&&['w','h'].every(k=>Number.isFinite(v[k])&&v[k]>=0&&v[k]<=1e6);
 export function createPresence({publish,now=Date.now}={}){
-  const peers=new Map(),commits=new Map(),salt=randomBytes(16);
+  const peers=new Map(),commits=new Map(),generations=new Map(),salt=randomBytes(16);
+  function generation(paperId,changed=false){
+    if(changed||!generations.has(paperId)){generations.delete(paperId);generations.set(paperId,randomBytes(16).toString('hex'));if(generations.size>64)generations.delete(generations.keys().next().value);}
+    return generations.get(paperId);
+  }
   const revision=v=>/^"[a-f0-9]{64}"$/.test(v||'');
   const commitTTL=15000;
   const publicPeer=p=>({id:p.id,name:p.name,avatar:p.avatar,color:p.color,kind:p.kind,pageId:p.pageId,nodeId:p.nodeId,cursor:p.cursor,drag:p.drag,rect:p.rect,status:p.status,ttl:Math.max(0,p.expiresAt-now())});
   const send=p=>publish?.({paperId:p.paperId,peer:publicPeer(p)});
   function remove(key){const p=peers.get(key);if(p){peers.delete(key);publish?.({paperId:p.paperId,id:p.id,peer:null});}}
   function prune(){for(const [key,p] of peers)if(p.expiresAt<=now())remove(key);for(const [id,list] of commits){const live=list.filter(c=>c.until>now());if(live.length)commits.set(id,live);else commits.delete(id);}}
-  // Only successful artwork saves reach this boundary. Keep identities at commit time,
+  // Artwork writes and watcher observations meet here. Keep identities at commit time,
   // so completion can clear activity before a polling renderer displays the save.
   function committed({paperId,baseRevision,revision:result,clientId}){
-    prune();if(!revision(result)){commits.delete(paperId);return null;}
+    generation(paperId,true);prune();if(!revision(result)){commits.delete(paperId);return null;}
     if(!revision(baseRevision)){
       // Keep an explicit unknown-write barrier, including when bytes return to
       // an older revision. A delayed completion cannot reclaim that result.
@@ -64,12 +68,14 @@ export function createPresence({publish,now=Date.now}={}){
   }
   return {
     update,
+    generation,
+    canComplete:(paperId,token)=>typeof token==='string'&&generations.get(paperId)===token,
     committed,
     activity:(id,scope,who,patch)=>update(id,scope,who,patch.status?patch:{status:'',pageId:null,nodeId:null,rect:null,cursor:null,drag:null},'agent',true,!!patch.status,false,true),
     restore:(id,scope,who)=>update(id,scope,who,{},'agent',true,false,true),
     snapshot(paperId){prune();return {paperId,peers:[...peers.values()].filter(p=>p.paperId===paperId).map(publicPeer),commits:(commits.get(paperId)||[]).map(({baseRevision,revision,actor,until})=>({baseRevision,revision,actor,ttl:Math.max(0,until-now())}))};},
     leave(scope,client){remove(scope+':'+client);},
     removeScope(scope){for(const [key,p] of peers)if(p.scope===scope)remove(key);for(const [id,list] of commits){const kept=list.filter(c=>c.scope!==scope);if(kept.length)commits.set(id,kept);else commits.delete(id);}},
-    close(){clearInterval(timer);peers.clear();commits.clear();},
+    close(){clearInterval(timer);peers.clear();commits.clear();generations.clear();},
   };
 }
