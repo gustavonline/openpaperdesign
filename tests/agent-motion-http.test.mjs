@@ -96,7 +96,10 @@ test('late attached completion cannot claim file replays after receipt expiry',a
  first.paper.name='Agent result';const saved=await app.library.save(made.id,bytes(first.paper),first.revision,'paper',peer.id),file=path.join(made.path,'paper.json'),b=await fs.readFile(file);
  const waitUnknown=async revision=>{for(let i=0;i<100;i++){const state=await get('/api/updates');if(state.presence.commits.at(-1)?.revision===revision&&state.presence.commits.at(-1)?.actor===null)return;await new Promise(r=>setTimeout(r,20));}assert.fail('Watcher did not publish the unknown-write barrier');};
  const human=structuredClone(first.paper);human.name='Ordinary file edit';const c=bytes(human),cRevision='"'+createHash('sha256').update(c).digest('hex')+'"';
- await fs.writeFile(file,c);await waitUnknown(cRevision);await fs.writeFile(file,b);await waitUnknown(saved.revision);t.mock.timers.tick(15001);
+ await fs.writeFile(file,c);await waitUnknown(cRevision);await fs.writeFile(file,b);
+ // fs.watch may coalesce repeated in-place notifications on Node 22/Linux.
+ // C already invalidates the operation; drain the 120ms debounce before expiry.
+ await new Promise(r=>setTimeout(r,250));assert.equal((await get('/api/paper')).revision,saved.revision);t.mock.timers.tick(15001);
  assert.equal((await get('/api/presence')).commits.length,0,'short-lived receipts have expired');
  const newer=await proxy.update(made.id,'owner','aba-agent',{status:'Reading'},'agent');assert.notEqual(newer[presenceOperation],peer[presenceOperation]);assert.ok(!JSON.stringify(peer).includes(peer[presenceOperation]),'operation tokens stay internal to their tool call');
  await proxy.complete(made.id,'paper-changed',saved.revision,first.revision,peer[presenceOperation]);
