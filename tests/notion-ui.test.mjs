@@ -34,12 +34,15 @@ const {setupNotion}=await import('../runtime/notion-ui.js');
 
 const paper='p1',link={pageId:'11111111111111111111111111111111',url:'https://www.notion.so/11111111111111111111111111111111',savedAt:'2026-11-05T10:00:00.000Z'};
 const controllers=new Set();
-function harness(statuses,{access,save}={}) {
-  const calls=[],queue=[...statuses];
-  const request=async(path,{method='GET'}={})=>{
+function harness(statuses,{access,save,pages,autosync}={}) {
+  const calls=[],requests=[],queue=[...statuses];
+  const request=async(path,{method='GET',body}={})=>{
+    requests.push({path,method,body});
     calls.push(`${method} ${path.split('?')[0]}`);
     if(path.startsWith('/api/notion/status')){const next=queue.length>1?queue.shift():queue[0];if(next instanceof Error)throw next;return next;}
-    if(path.startsWith('/api/notion/save'))return save();
+    if(path.startsWith('/api/notion/save'))return save(body);
+    if(path.startsWith('/api/notion/pages'))return pages(body);
+    if(path.startsWith('/api/notion/autosync'))return autosync(body);
     if(path.startsWith('/api/notion/connection'))return {connected:false};
     throw new Error(`unexpected ${path}`);
   };
@@ -48,7 +51,7 @@ function harness(statuses,{access,save}={}) {
   const text=()=>dialog().textContent;
   const buttons=()=>dialog().querySelectorAll('button').map(b=>b.textContent.trim());
   const press=label=>dialog().querySelectorAll('button').find(b=>b.textContent.trim()===label).fire('click');
-  return {ui,calls,text,buttons,press};
+  return {ui,calls,requests,text,buttons,press};
 }
 const connected={connected:true,name:'Workspace',link,paperName:'P'};
 const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
@@ -146,4 +149,58 @@ test('disconnect clears the connected view and the next open re-reads status',as
   await h.ui.save();
   assert.equal(h.calls.filter(c=>c==='GET /api/notion/status').length,2);
   assert.ok(h.buttons().includes('Connect to Notion'));
+});
+
+
+test('picker shows emoji, reported breadcrumb and honest unavailable location, with an explicit destination',async()=>{
+  const h=harness([{connected:true,paperName:'My Paper'}],{pages:async()=>({canCreatePrivate:true,pages:[
+    {id:'a',title:'Data & Context',icon:{type:'emoji',emoji:'🌱'},breadcrumb:'Workspace / Owner'},
+    {id:'b',title:'Maintenance',icon:{type:'fallback',reason:'image-or-unsupported'},parent:null,breadcrumb:null}
+  ]})});
+  await h.ui.save();await settle();
+  assert.match(h.text(),/🌱/);assert.match(h.text(),/Workspace \/ Owner/);assert.match(h.text(),/Location unavailable from Notion/);
+  const dialog=document.body.children.at(-1),input=dialog.querySelectorAll('input')[0];assert.equal(input.value,'My Paper');
+  const primary=dialog.querySelectorAll('button').find(b=>b.textContent==='Create page & save');assert.equal(primary.disabled,true);
+  assert.equal(dialog.all().some(e=>e.tagName==='IMG'),false,'image icon uses a CSP-safe text fallback');
+  const row=dialog.querySelectorAll('button').find(b=>b.textContent.includes('Data & Context'));row.fire('click');
+  assert.match(h.text(),/Save under: Data & Context/);assert.equal(row.attrs['aria-pressed'],'true');assert.equal(primary.disabled,false);
+  assert.equal(h.requests.filter(r=>r.method==='POST').length,1,'selection never writes to Notion');
+});
+
+test('picker ignores stale search responses and keeps the selected destination stable when loading more pages',async()=>{
+  let resolveOld;const old=new Promise(resolve=>{resolveOld=resolve;});
+  const h=harness([{connected:true,paperName:'Paper'}],{pages:body=>!body.query?old:Promise.resolve({pages:[{id:'new',title:'New match',parent:{title:'Project'}}],cursor:'next'})});
+  await h.ui.save();const dialog=document.body.children.at(-1),search=dialog.querySelectorAll('input')[1];
+  search.value='new';search.fire('input');resolveOld({pages:[{id:'old',title:'Old match'}]});await settle();
+  assert.equal(h.text().includes('Old match'),false);await new Promise(r=>setTimeout(r,280));await settle();
+  assert.match(h.text(),/New match/);assert.match(h.text(),/Parent: Project · Full path unavailable/);
+  dialog.querySelectorAll('button').find(b=>b.textContent.includes('New match')).fire('click');
+  h.press('Show more pages');await settle();assert.match(h.text(),/Save under: New match/);
+  assert.equal(dialog.querySelectorAll('button').find(b=>b.textContent==='Create page & save').disabled,false);
+});
+
+test('linked save can go back from change-destination without losing its link',async()=>{
+  const h=harness([{...connected,syncState:'saved',changed:false}],{pages:async()=>({pages:[]})});
+  await h.ui.save();h.press('Save elsewhere…');await settle();assert.match(h.text(),/Choose a destination/);
+  h.press('Back');assert.match(h.text(),/No local changes/);assert.equal(h.buttons().includes('Open in Notion'),false); // External link remains an anchor.
+  assert.equal(document.body.children.at(-1).querySelector('a[href]').href,link.url);
+});
+
+test('sync controls expose pause/resume independently of connection and picker, and report a stopped backend honestly',async()=>{
+  const h=harness([{...connected,syncState:'saved',autosync:{enabled:true,paused:null,state:'saved'},autosyncRunning:false}],{autosync:async body=>({autosync:{enabled:body.enabled,paused:body.enabled?null:'user',state:'paused'}})});
+  await h.ui.save();assert.match(h.text(),/Waiting for the background service/);assert.ok(h.buttons().includes('Pause autosync'));
+  h.press('Pause autosync');await settle();await settle();assert.match(h.text(),/Autosync paused by you/);assert.ok(h.buttons().includes('Resume autosync'));
+  assert.deepEqual(h.requests.find(r=>r.path.startsWith('/api/notion/autosync')).body,{enabled:false});
+  assert.match(h.text(),/Connected: Workspace/);
+});
+
+test('Trash and uncertain-write views never offer resume or a save that could restore a page',async()=>{
+  for(const status of [
+    {...connected,syncState:'trashed',remoteTrashed:true,autosync:{enabled:false,paused:'remote-trash'}},
+    {...connected,syncState:'needs-review',needsReview:true,autosync:{enabled:true,paused:'needs-review'}}
+  ]){
+    const h=harness([status]);await h.ui.save();assert.match(h.text(),/paused/);
+    assert.equal(h.buttons().some(label=>/Resume autosync|Save changes|Save again|Save a separate copy/.test(label)),false);
+    h.ui.destroy();document.body.children=[];
+  }
 });

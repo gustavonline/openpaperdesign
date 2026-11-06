@@ -1,6 +1,6 @@
 import {compatibleWorkspace} from './workspace-protocol.js?v=78da2eb567e7';
 import {surfaceReady,surfaceStopped,onSurfaceDispose,inPaperSurface} from './surface.js?v=da065f7b280e';
-const VERSION='0.7.0-preview.17';
+const VERSION='0.7.0-preview.18';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper'),cardMenu=document.getElementById('card-menu');
 let menuCard=null,selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,optionsKey='';
 
@@ -48,7 +48,7 @@ function drawPreview(thumb,p){
 const cardKey=p=>`${p.workspaceId}/${p.id}`;
 function card(p){
   const el=document.createElement('div'),a=document.createElement('a'),more=document.createElement('button');el.className='card-wrap';
-  a.innerHTML='<div class="thumb"></div><svg class="icon row-icon"><use href="#i-page"/></svg><div style="min-width:0;flex:1"><p class="name"></p><p class="meta"></p></div>';
+  a.innerHTML='<div class="thumb"></div><svg class="icon row-icon"><use href="#i-page"/></svg><div style="min-width:0;flex:1"><p class="name"></p><p class="notion-tag" hidden></p><p class="meta"></p></div>';
   Object.assign(more,{type:'button',className:'ibtn card-more',innerHTML:'<svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>'});
   more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');
   const thumb=a.querySelector('.thumb'),c={p,key:cardKey(p),el,a,more,sig:'',preview:''};
@@ -57,6 +57,8 @@ function card(p){
     const sig=JSON.stringify(next);if(sig===c.sig)return;c.sig=sig;c.p=next;
     a.className=next.error?'card broken':'card';a.title=next.name;more.setAttribute('aria-label',`More actions for ${next.name}`);
     a.querySelector('.name').textContent=next.name;a.querySelector('.meta').textContent=paperMeta(next);
+    const tag=a.querySelector('.notion-tag'),sync=next.notion;tag.hidden=!sync?.link&&!next.notionUnavailable;if(next.notionUnavailable)tag.textContent='Notion status unavailable';
+    if(sync?.link){const state=sync.needsReview?'Needs review':sync.saving?'Syncing…':sync.autosync?.paused==='manual'?'Manual':sync.autosync?.paused?'Paused':sync.changed?'Local changes':'Saved';tag.textContent=`Notion · ${state}`;tag.title='Linked to Notion. Status reflects the last checked or saved copy.';}
     const preview=`${next.preview?.state}|${next.preview?.revision}|${next.thumbnail?.length}|${next.error||''}`;
     if(preview!==c.preview){c.preview=preview;drawPreview(thumb,next);}
   };
@@ -128,7 +130,7 @@ async function openFromNotion(){
   openMenu.hidePopover();
   await opening(async()=>{const workspaceId=selected==='all'?'personal':selected,url=await targetURL(workspaceId);
     if(url.origin!==location.origin){url.searchParams.set('collection',workspaceId);url.hash='notion';return navigate(url.href);}
-    if(!notionHome){const module=await import('./notion-ui.js?v=83a96945da7c');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
+    if(!notionHome){const module=await import('./notion-ui.js?v=f4fa90dc79e3');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
     await notionHome.open();
   },'Opening Notion…');
 }
@@ -261,7 +263,7 @@ cardMenu.addEventListener('click',async event=>{
   cardMenu.hidePopover();chosen=c.p;
   if(act==='open')return openPaper(c.p);
   if(act==='rename'){renameName.value=c.p.name;renameProblem.hidden=true;renameDialog.showModal();renameName.select();return;}
-  if(act==='trash'){document.getElementById('trash-help').textContent=`“${c.p.name}” moves to Recently deleted, where you can restore it. Its sharing links stop first.`;trashProblem.hidden=true;trashDialog.showModal();document.getElementById('cancel-trash').focus();return;}
+  if(act==='trash'){document.getElementById('trash-notion-options').hidden=!c.p.notion?.link;trashDialog.querySelector('[value=both]').checked=true;const linkedPage=document.getElementById('trash-notion-page');linkedPage.textContent=c.p.notion?.link?.url||'';document.getElementById('trash-help').textContent=`“${c.p.name}” moves to Recently deleted, where you can restore it. Its sharing links stop first.`;trashProblem.hidden=true;trashDialog.showModal();document.getElementById('cancel-trash').focus();return;}
   busy=true;problem.hidden=true;
   try{await request({action:'reveal',workspaceId:c.p.workspaceId,paperId:c.p.id});}catch(error){fail(error);}finally{busy=false;}
 });
@@ -279,9 +281,9 @@ document.getElementById('rename-form').addEventListener('submit',event=>{
   void confirmAction(renameDialog,renameProblem,document.getElementById('save-rename'),()=>request({action:'rename',workspaceId:p.workspaceId,paperId:p.id,name}));
 });
 document.getElementById('cancel-rename').addEventListener('click',()=>renameDialog.close());
-async function undo(workspaceId,trashId,paperId){
+async function undo(workspaceId,trashId,paperId,copies='local'){
   if(busy)return;busy=true;problem.hidden=true;let restored=false;
-  try{await request({action:'restore',workspaceId,trashId});restored=true;dismissNotice();}catch(error){fail(error);}finally{busy=false;}
+  try{await request({action:'restore',workspaceId,trashId,copies});restored=true;dismissNotice();}catch(error){fail(error);}finally{busy=false;}
   await load();
   if(restored){const back=cards.find(c=>c.p.workspaceId===workspaceId&&c.p.id===paperId);if(back&&!back.el.hidden)back.a.focus({preventScroll:false});}
 }
@@ -289,28 +291,31 @@ document.getElementById('confirm-trash').addEventListener('click',event=>{
   const p=chosen;if(!p)return;
   const submit=event.currentTarget;
   void(async()=>{
-    const result=await confirmAction(trashDialog,trashProblem,submit,()=>request({action:'trash',workspaceId:p.workspaceId,paperId:p.id}));
+    const result=await confirmAction(trashDialog,trashProblem,submit,()=>request({action:'trash',workspaceId:p.workspaceId,paperId:p.id,copies:p.notion?.link?trashDialog.querySelector('[name=trash-copies]:checked').value:'local'}));
     if(!result)return;
     const moved=result.value;lastFocus=q;
     // Focus after closing the modal; modal focus restoration would otherwise take it away from Undo.
-    notice(`Moved “${moved.name}” to Recently deleted.`,[['Undo',()=>undo(moved.workspaceId,moved.trashId,moved.paperId)],['View',openDeleted]]).focus({preventScroll:true});
+    notice(`Moved “${moved.name}” to Recently deleted.`,[['Undo',()=>undo(moved.workspaceId,moved.trashId,moved.paperId,moved.copies)],['View',openDeleted]]).focus({preventScroll:true});
   })();
 });
 document.getElementById('cancel-trash').addEventListener('click',()=>trashDialog.close());
 
 const deletedDialog=document.getElementById('deleted-dialog'),deletedMessage=document.getElementById('deleted-message');
+async function restoreDeleted(item,b,copies){
+  if(busy)return;busy=true;b.disabled=true;b.textContent='Restoring…';deletedMessage.hidden=true;
+  try{await request({action:'restore',workspaceId:item.workspaceId,trashId:item.trashId,copies});deletedMessage.textContent=copies==='local'&&item.notion?.remoteTrashed?`Restored “${item.name}” locally. Its Notion copy remains in Trash.`:`Restored “${item.name}”.`;await renderDeleted();}
+  catch(error){deletedMessage.textContent=error.message;b.disabled=false;b.textContent=copies==='both'?'Restore both copies':'Restore locally';}
+  finally{busy=false;deletedMessage.hidden=false;void load();}
+}
 async function renderDeleted(){
   const area=document.getElementById('deleted-list');area.replaceChildren(help('Loading…'));
   let items;try{({items}=await request({action:'trash-list'}));}catch(error){area.replaceChildren(help(error.message));return;}
-  area.replaceChildren(...(items.length?items.map(item=>row(item.name,`${item.workspaceName} · Deleted ${ago(item.deletedAt)}`,[button('Restore',async b=>{
-    if(busy)return;busy=true;b.disabled=true;b.textContent='Restoring…';deletedMessage.hidden=true;
-    try{await request({action:'restore',workspaceId:item.workspaceId,trashId:item.trashId});deletedMessage.textContent=`Restored “${item.name}”.`;await renderDeleted();}
-    catch(error){deletedMessage.textContent=error.message;b.disabled=false;b.textContent='Restore';}
-    finally{busy=false;deletedMessage.hidden=false;void load();}
-  })])):[help('Nothing here. Papers you move to Trash appear here until you restore them.')]));
-  // The pressed Restore button is gone after a refresh; keep keyboard focus inside the dialog.
+  area.replaceChildren(...(items.length?items.map(item=>row(item.name,`${item.workspaceName} · Deleted ${ago(item.deletedAt)}`,
+    [button(item.notion?.remoteTrashed?'Restore both copies':'Restore',b=>restoreDeleted(item,b,item.notion?.remoteTrashed?'both':'local')),
+     ...(item.notion?.remoteTrashed?[button('Restore locally',b=>restoreDeleted(item,b,'local'))]:[])])):[help('Nothing here. Papers you move to Trash appear here until you restore them.')]));
   if(deletedDialog.open&&!deletedDialog.contains(document.activeElement)||document.activeElement===document.getElementById('deleted-close'))(area.querySelector('button')||document.getElementById('deleted-close')).focus();
 }
+
 let deletedOpener=null;
 function openDeleted(){
   if(deletedDialog.open)return;

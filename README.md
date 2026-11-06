@@ -5,9 +5,11 @@
 
 # OpenPaperDesign
 
-A canvas for designs, diagrams and working with your AI agent. Create layouts and graphics, map an architecture, inspect spacing and colours, leave comments, and export your work.
+Canvas for your agent. Create layouts and graphics, map an architecture, inspect spacing and colours, leave comments, and export your work.
 
 Each Paper is a folder of editable files. Home opens your Personal library. Use its library selector to switch to a project or see all Papers. A Paper's ⋯ menu offers Rename, Show in Finder and Move to Trash. Recently deleted Papers can be restored from Open.
+
+[Website](https://openpaperdesign.gustavonline.com/) · [Releases](https://github.com/gustavonline/openpaperdesign/releases)
 
 ## Install
 
@@ -48,7 +50,7 @@ Internet sharing needs the optional [cloudflared CLI](https://developers.cloudfl
 
 Shift-click selects several layers. Copy, paste, duplicate, group and arrange them with familiar shortcuts or the right-click menu. Double-click visible text to edit it, including labels inside grouped symbols. Enter adds a line, Ctrl/Cmd+Enter or blur keeps the change, and Escape restores the original. Text and appearance controls also live in Properties. Right-click empty canvas to choose snapping, grid and background. A selected layer's **Copy link** links to that layer in your local editor.
 
-**Share → Save to Notion** takes you through Notion’s own sign-in and back to Paper. Name the new page and choose where to save it. Later saves update the same page. **Home → Open → Open from Notion** searches accessible pages and opens a saved Paper as a new local copy. The snapshot includes editable files and a self-contained preview with Pages, pan and zoom. Save is manual; changes made elsewhere are reported before replacement. [Notion connection and storage](skills/paper/references/notion.md).
+**Share → Save to Notion** takes you through Notion’s own sign-in and back to Paper. Name the new page and choose where to save it. Later saves update the same page. **Home → Open → Open from Notion** searches accessible pages and opens a saved Paper as a new local copy. The snapshot includes editable files and a self-contained preview with Pages, pan and zoom. The first successful save enables automatic file snapshots for this Paper while its workspace server is running; pause/resume is in the Notion dialog. Remote conflicts stop sync rather than overwriting. Manual saves also refresh the rendered preview. [Notion connection and storage](skills/paper/references/notion.md).
 
 Use **Share → Paper with assets** to download a complete `.paper.zip`, and **Home → Open → Import Paper file** to open it elsewhere. A JSON export contains the artwork records; the ZIP also carries images, guides and feedback. Imports go into the library selected in Home, including Personal.
 

@@ -6,7 +6,7 @@ import {PaperError} from './library.mjs';
 
 export const NOTION_ORIGIN='https://mcp.notion.com';
 const MAX_REPLY=8*1024*1024, TIMEOUT=30000;
-const allowedTools=new Set(['search','fetch','create-pages','update-page','create-file-upload','create-attachment','get-file-download-urls','get-async-task','list-recent-pages']);
+const allowedTools=new Set(['search','fetch','create-pages','update-page','create-file-upload','create-attachment','get-file-download-urls','get-async-task','list-recent-pages','get-self','delete-pages','restore-pages']);
 const normalize=name=>name.replace(/_/g,'-').replace(/^notion-/,'');
 const fail=(status,message)=>{throw new PaperError(status,message);};
 export function officialURL(value,media=false) {

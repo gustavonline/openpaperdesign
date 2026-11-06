@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=1d0c11db519b"><link rel="stylesheet" href="canvas.css?v=dc7ecf3e44f4"><link rel="stylesheet" href="notion.css?v=0b98163e185d"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=19b1f36b710d"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -38,18 +38,18 @@
 <!-- A Paper is one saved document; inside it, Pages hold the artboards and their layers. -->
 <aside id="left-panel" data-canvas-chrome aria-label="Paper and design">
   <div class="switch" role="tablist" aria-label="Left panel">
-    <button type="button" role="tab" id="tab-canvas-btn" data-tab="canvas" aria-controls="tab-canvas" aria-selected="true">Paper</button>
+    <button type="button" role="tab" id="tab-canvas-btn" data-tab="canvas" aria-controls="tab-canvas" aria-selected="true">Page</button>
     <button type="button" role="tab" id="tab-design-btn" data-tab="design" aria-controls="tab-design" aria-selected="false" tabindex="-1">Design</button>
   </div>
   <div id="tab-canvas" class="tab" role="tabpanel" aria-labelledby="tab-canvas-btn">
     <div id="sidebar-sections">
       <section id="pages-section" class="sidebar-section" data-sidebar-section="pages">
-        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="pages-toggle" aria-expanded="true" aria-controls="pages-panel"><span class="section-chevron" aria-hidden="true">›</span>Pages</button></h2>
+        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="pages-toggle" aria-expanded="true" aria-controls="pages-panel"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Pages</button></h2>
         <div id="pages-panel" class="sidebar-body"><label class="search"><span class="sr-only">Find a page</span><svg class="icon"><use href="#i-search"/></svg><input id="page-search" class="field" type="search" placeholder="Find a page" autocomplete="off"></label><div id="pages" role="group" aria-label="Pages in this Paper"></div></div>
       </section>
       <div class="sidebar-splitter" data-sidebar-splitter="pages" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize · Arrow keys to adjust · Home/End for limits"></div>
       <section id="layers-section" class="sidebar-section" data-sidebar-section="layers">
-        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="layers-toggle" aria-expanded="true" aria-controls="layers-panel"><span class="section-chevron" aria-hidden="true">›</span>Layers</button></h2>
+        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="layers-toggle" aria-expanded="true" aria-controls="layers-panel"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Layers</button></h2>
         <div id="layers-panel" class="sidebar-body">
           <label class="search"><span class="sr-only">Find a layer on the shown pages</span><svg class="icon"><use href="#i-search"/></svg><input id="layer-search" class="field" type="search" placeholder="Find a layer" autocomplete="off"></label>
           <div id="layer-tree" role="tree" aria-label="Layers"></div>
@@ -57,7 +57,7 @@
       </section>
       <div class="sidebar-splitter" data-sidebar-splitter="layers" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize · Arrow keys to adjust · Home/End for limits" hidden></div>
       <section id="library-section" class="sidebar-section" data-sidebar-section="library">
-        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="library-toggle" aria-expanded="false" aria-controls="library-panel"><span class="section-chevron" aria-hidden="true">›</span>Library</button></h2>
+        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="library-toggle" aria-expanded="false" aria-controls="library-panel"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Library</button></h2>
         <div id="library-panel" class="sidebar-body" hidden>
   <label class="search"><span class="sr-only">Find a symbol</span><svg class="icon"><use href="#i-search"/></svg><input id="symbol-search" class="field" type="search" placeholder="Find a symbol" autocomplete="off"></label>
   <div class="library-browser"><nav id="symbol-categories" aria-label="Symbol categories"></nav><div class="library-results"><div id="symbol-families"></div><section id="scratchpad" hidden><div id="saved-symbols"></div><div class="scratch-actions"><button type="button" class="btn" id="upload-symbol">Add image…</button><button type="button" class="btn" id="url-symbol">From URL…</button></div><p class="note">Drop images here, or save a selected layer.</p></section></div></div>
@@ -69,15 +69,14 @@
     <div class="sidebar-footer"><button type="button" id="sidebar-reset" title="Restore default section sizes and open sections">Reset panel layout</button></div>
   </div>
   <div id="tab-design" class="tab" role="tabpanel" aria-labelledby="tab-design-btn" hidden>
-    <section class="design-doc">
-      <details id="design-guide"><summary><span>Design guide</span><a id="design-open" href="DESIGN.md" target="_blank" rel="noopener" title="Open the governing DESIGN.md">DESIGN.md</a></summary><div id="design-doc" class="prose"></div></details>
-      <p class="note" id="design-missing" hidden>This Paper has no DESIGN.md yet.</p>
-    </section>
-    <section class="in-use">
-      <div class="section-head"><h2 title="Counted from every page of this Paper">In use</h2></div>
+    <section class="in-use"><details open id="design-tokens"><summary class="sidebar-heading"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Tokens</summary><div class="tokens-body">
       <h3>Text styles</h3><div id="text-styles" class="list"></div>
       <h3>Colours</h3><div id="colours" class="list"></div>
       <p class="note" id="image-note" hidden>Colours inside images stay in those images and aren’t listed.</p>
+    </div></details></section>
+    <section class="design-doc">
+      <details id="design-guide"><summary><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg><span>Design guide</span><a id="design-open" href="DESIGN.md" target="_blank" rel="noopener" title="Open the governing DESIGN.md">DESIGN.md</a></summary><div id="design-doc" class="prose"></div></details>
+      <p class="note" id="design-missing" hidden>This Paper has no DESIGN.md yet.</p>
     </section>
   </div>
 </aside>
@@ -147,7 +146,7 @@
       <label class="num"><span>H</span><input class="field" type="number" step="any" min="0.1" name="h"></label>
     </div></section>
     <section id="fill-section"><h3>Fill</h3><div class="fill"><input type="color" name="color-picker" aria-label="Fill colour"><input class="field" type="text" name="color" aria-label="Fill hex" pattern="#[0-9a-fA-F]{6}" spellcheck="false"></div><p class="note" id="fill-note" hidden></p></section>
-    <section id="text-section"><h3>Text</h3>
+    <section id="text-section"><h3>Typography</h3>
       <textarea class="field" name="text" rows="3" aria-label="Text content"></textarea>
       <div class="pair"><label class="num"><span>Size</span><input class="field" type="number" name="font_size" min="1" max="500" step="any"></label>
       <select class="field" name="weight" aria-label="Font weight"><option value="400">Inter Regular</option><option value="700">Inter Bold</option></select></div>
@@ -160,8 +159,8 @@
       <label class="check"><input type="checkbox" name="visible"> Visible</label>
       <label class="check"><input type="checkbox" name="locked"> Locked</label>
     </div></section>
-    <section><div class="row"><button type="button" class="btn" data-edit="duplicate">Duplicate</button><button type="button" class="btn" data-edit="ungroup">Ungroup</button><button type="button" class="btn" data-edit="link">Copy link</button></div></section>
-    <section id="symbol-actions" hidden><div class="row"><button type="button" class="btn" id="connect-symbol">Connect to…</button><button type="button" class="btn" id="save-symbol">Save to Scratchpad</button><button type="button" class="btn" id="edit-connection-label" hidden>Edit label</button></div><p class="note" id="connect-hint" hidden>Click another symbol to connect. Escape cancels.</p></section>
+    <section><h3>Actions</h3><div class="inspector-actions"><button type="button" class="btn" data-edit="duplicate">Duplicate</button><button type="button" class="btn" data-edit="ungroup">Ungroup</button><button type="button" class="btn" data-edit="link">Copy link</button></div></section>
+    <section id="symbol-actions" hidden><div class="inspector-actions"><button type="button" class="btn" id="connect-symbol">Connect to…</button><button type="button" class="btn" id="save-symbol">Save to Scratchpad</button><button type="button" class="btn" id="edit-connection-label" hidden>Edit label</button></div><p class="note" id="connect-hint" hidden>Click another symbol to connect. Escape cancels.</p></section>
   </form>
 </aside>
 <div id="right-bar" data-canvas-chrome class="topbar">
@@ -190,9 +189,9 @@
   <p id="share-state" role="status">Only you have access</p>
   <p id="share-detail" class="note">Anyone with an invitation link can open this Paper. Keep this computer running while you share.</p>
   <div id="share-links" aria-label="Invitation links"></div>
-  <button type="button" id="share-new" class="share-quiet" hidden>+ Create another link</button>
+  <button type="button" id="share-new" class="share-quiet" hidden>Add link</button>
   <form id="share-create">
-    <label class="share-name">Link name <span class="note">optional</span><input id="share-name" class="field" maxlength="80" placeholder="Design review" autocomplete="off"></label>
+    <label class="share-name">Link name <span class="note">optional</span><input id="share-name" class="field" maxlength="80" placeholder="Paper name" autocomplete="off"></label>
     <div class="share-permission"><span>Anyone with this link</span><select id="share-role" class="field" aria-label="Invitation access"><option value="view">Can view</option><option value="edit">Can edit</option></select></div>
     <fieldset class="share-reach"><legend>Share over</legend><label><input type="radio" name="share-reach" value="online" checked> Internet</label><label><input type="radio" name="share-reach" value="network"> Local network</label></fieldset>
     <div class="share-actions"><button type="submit" id="share-primary">Create link</button><button type="button" id="share-create-cancel" hidden>Cancel</button></div>
@@ -224,5 +223,5 @@
 <div id="toast" data-canvas-chrome role="status" hidden></div>
 <dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is saved with this Paper.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="paper-inspection-root"></div>
-<script type="module" src="app.js?v=712941e9cd35"></script>
+<script type="module" src="app.js?v=8feedf20debd"></script>
 </body></html>

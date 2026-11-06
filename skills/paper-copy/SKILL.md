@@ -2,7 +2,7 @@
 name: paper-copy
 description: Write or refine the text inside a Paper design or diagram so it fits the artifact, audience and task. Use for headings, labels, UI messages and visual explanations; preserve approved copy and distinguish proposals from facts. Not a general article-writing or text-editor workflow.
 metadata:
-  version: "0.7.0-preview.17"
+  version: "0.7.0-preview.18"
 ---
 
 # Copy for the artifact

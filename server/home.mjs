@@ -3,6 +3,8 @@ import path from 'node:path';
 import os from 'node:os';
 import {createHash, randomBytes} from 'node:crypto';
 import {PaperLibrary, PaperError, ID} from './library.mjs';
+import {createNotion} from './notion.mjs';
+import {privateDirectory,withPrivateLock} from './notion-client.mjs';
 import {inspectWorkspace,stopWorkspace} from './workspace.mjs';
 import {VERSION} from './runtime.mjs';
 import {renamePaper,revealPaper,trashPaper,listTrash,restorePaper,paperPreview} from './paper-actions.mjs';
@@ -11,9 +13,9 @@ export const HOME_URI=`ui://openpaperdesign/home/${VERSION}/${randomBytes(8).toS
 export const HOME_MIME='text/html;profile=mcp-app';
 export function isHomeResource(uri){
   if(typeof uri!=='string')return false;
-  const retained=uri.match(/^ui:\/\/openpaperdesign\/home\/(0\.7\.0-preview\.(?:12|13|14|15|16|17))\/[a-f0-9]{16}$/);
+  const retained=uri.match(/^ui:\/\/openpaperdesign\/home\/(0\.7\.0-preview\.(?:12|13|14|15|16|17|18))\/[a-f0-9]{16}$/);
   const base=`ui://openpaperdesign/home/${VERSION}/`;
-  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||!!retained||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12,13,14,15,16,17].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
+  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||!!retained||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12,13,14,15,16,17,18].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
 }
 export function dataHome(){
   if(process.env.PAPER_HOME){if(!path.isAbsolute(process.env.PAPER_HOME))throw new Error('PAPER_HOME must be an absolute folder');return process.env.PAPER_HOME;}
@@ -85,11 +87,15 @@ async function ownLibrary(entry){
   if(entry.id!=='personal')await fs.access(path.join(entry.root,'Paper')).catch(()=>{throw new PaperError(409,'This project’s Paper folder is unavailable.');});
   return PaperLibrary.open(entry.root);
 }
-export function createHome(open){
+export function createHome(open,{notionFactory}={}){
+  const transaction=async(library,id,action)=>withPrivateLock(await privateDirectory(dataHome()),`home-action-${identity(library.workspace)}-${id}`,action);
+  const summaries=async(library,ids)=>{try{return await withNotion(library,n=>n.summary(ids));}catch{return {papers:[],unavailable:true};}};
+  const withNotion=async(library,action)=>{const service=notionFactory?notionFactory(library):createNotion({library,configDir:dataHome(),origin:()=>{throw new PaperError(409,'Open this library to connect Notion');}});try{return await action(service);}finally{await service.close();}};
   return async(args={})=>{
-    if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['action','workspaceId','paperId','name','instance','invitationId','trashId'].includes(k)))throw new PaperError(400,'Invalid Home request');
-    for(const key of ['workspaceId','paperId','name','instance','invitationId','trashId'])if(args[key]!==undefined&&typeof args[key]!=='string')throw new PaperError(400,'Invalid Home request');
+    if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['action','workspaceId','paperId','name','instance','invitationId','trashId','copies'].includes(k)))throw new PaperError(400,'Invalid Home request');
+    for(const key of ['workspaceId','paperId','name','instance','invitationId','trashId','copies'])if(args[key]!==undefined&&typeof args[key]!=='string')throw new PaperError(400,'Invalid Home request');
     if(args.paperId!==undefined&&!ID.test(args.paperId)||args.invitationId!==undefined&&!ID.test(args.invitationId))throw new PaperError(400,'Invalid Paper or invitation');
+    if(args.copies!==undefined&&!['local','both'].includes(args.copies))throw new PaperError(400,'Choose local or both copies');
     const action=args.action||'list',roots=await workspaces();
     if(action==='sharing'){
       const result=[];
@@ -100,7 +106,7 @@ export function createHome(open){
       const items=[];
       for(const entry of roots){
         if(entry.unavailable)continue;
-        try{for(const item of await listTrash(await ownLibrary(entry)))items.push({...item,workspaceId:entry.id,workspaceName:entry.name});}catch{/* An unavailable library has nothing to restore right now. */}
+        try{const library=await ownLibrary(entry),deleted=await listTrash(library),linked=await summaries(library,deleted.map(p=>p.paperId));const byId=new Map(linked.papers.map(p=>[p.paperId,p]));for(const item of deleted)items.push({...item,notion:byId.get(item.paperId)||null,workspaceId:entry.id,workspaceName:entry.name});}catch{/* An unavailable library has nothing to restore right now. */}
       }
       return {items:items.sort((a,b)=>b.deletedAt-a.deletedAt).slice(0,500)};
     }
@@ -110,7 +116,7 @@ export function createHome(open){
         if(entry.unavailable){projects.push(entry);continue;}
         try{
           if(entry.id!=='personal')await fs.access(path.join(entry.root,'Paper'));
-          const library=await PaperLibrary.open(entry.root),found=await library.list();
+          const library=await PaperLibrary.open(entry.root),found=await library.list(),linked=await summaries(library,found.slice(0,200).map(p=>p.id)),notionById=new Map(linked.papers.map(p=>[p.paperId,p]));
           let server;
           try{const live=await inspectWorkspace(entry.root);server=live?{state:'running',...live}:{state:'stopped'};}
           catch(error){server={state:'unavailable',message:error.message};}
@@ -119,7 +125,7 @@ export function createHome(open){
             // The data URI stays in `thumbnail`, which model-facing output strips; `preview` is small metadata.
             let thumbnail=null,preview={state:'unavailable',revision:null};
             if(!paper.error)try{const made=await paperPreview(library,paper.id,previewBudget);previewBudget-=made.cost;thumbnail=made.src;preview=made.preview;}catch{/* Unavailable stays honest, never blank. */}
-            const {href,...info}=paper;papers.push({...info,thumbnail,preview,workspaceId:entry.id,workspaceName:entry.name,workspace:entry.root,folder:path.join(library.root,paper.id)});
+            const {href,...info}=paper;papers.push({...info,thumbnail,preview,notion:notionById.get(paper.id)||null,notionUnavailable:linked.unavailable||false,workspaceId:entry.id,workspaceName:entry.name,workspace:entry.root,folder:path.join(library.root,paper.id)});
           }
         }catch(error){if(!['ENOENT','ENOTDIR','EACCES'].includes(error.code))throw error;projects.push({id:entry.id,name:entry.name,count:0,unavailable:true});}
       }
@@ -136,12 +142,12 @@ export function createHome(open){
     }
     if(['rename','reveal','trash','restore'].includes(action)){
       const library=await ownLibrary(entry);
-      if(action==='restore')return {...await restorePaper(library,args.trashId),workspaceId:entry.id};
+      if(action==='restore'){const item=(await listTrash(library)).find(p=>p.trashId===args.trashId);if(!item)throw new PaperError(404,'This deleted Paper is unavailable');return transaction(library,item.paperId,()=>withNotion(library,async notion=>{if(args.copies==='both'){const checked=await notion.restoreLinked(item.paperId);if(!checked?.verified||checked.remoteTrashed!==false)throw new PaperError(409,'Notion restore could not be verified. The local copy remains in Recently deleted.');}const restored=await restorePaper(library,args.trashId);await notion.localRestored(restored.id);return {...restored,workspaceId:entry.id,copies:args.copies||'local'};}));}
       if(!args.paperId)throw new PaperError(400,'Choose a Paper');
       if(action==='rename')return renamePaper(library,args.paperId,args.name);
       if(action==='reveal')return revealPaper(library,args.paperId);
-      await library.folder(args.paperId);await stopSharing(entry.root,args.paperId);
-      return {...await trashPaper(library,args.paperId),workspaceId:entry.id};
+      await library.folder(args.paperId);
+      return transaction(library,args.paperId,()=>withNotion(library,async notion=>{await notion.prepareLocalTrash(args.paperId);try{if(args.copies==='both'){const checked=await notion.trashLinked(args.paperId);if(!checked?.verified||!checked.safeToTrashLocal)throw new PaperError(409,'Notion Trash could not be verified. Your local Paper was kept.');}await stopSharing(entry.root,args.paperId);const moved=await trashPaper(library,args.paperId);return {...moved,workspaceId:entry.id,copies:args.copies||'local'};}catch(error){try{await library.folder(args.paperId);await notion.localRestored(args.paperId);}catch{/* A completed local move keeps its Trash marker; uncertain cloud intent is never cleared. */}throw error;}}));
     }
     if(!['open','create'].includes(action))throw new PaperError(400,'Unknown Home action');
     const app=await open(entry.root);

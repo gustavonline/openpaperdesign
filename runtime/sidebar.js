@@ -1,13 +1,13 @@
 import {onSurfaceDispose} from './surface.js?v=da065f7b280e';
-import {SECTION_IDS,MIN_HEIGHTS,defaultSidebar,sidebarPreference,allocateSidebar,resizeSidebar} from './sidebar-layout.js?v=97975441aee8';
-const KEY='openpaperdesign:sidebar-sections:v1';
+import {SECTION_IDS,MIN_HEIGHTS,defaultSidebar,sidebarPreference,allocateSidebar,resizeSidebar} from './sidebar-layout.js?v=bf22f3faa83a';
+const KEY='openpaperdesign:sidebar-sections:v2';
 export function setupSidebar(){
   const container=document.querySelector('#sidebar-sections');
   const sections=Object.fromEntries(SECTION_IDS.map(id=>[id,container.querySelector(`[data-sidebar-section="${id}"]`)]));
   const separators=[...container.querySelectorAll('[data-sidebar-splitter]')];
   let state=defaultSidebar(),layout,drag=null;
   try{state=sidebarPreference(JSON.parse(localStorage.getItem(KEY)));}catch{/* Unavailable or old local preferences use the default. */}
-  const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify({version:1,...state}));}catch{/* The panel remains usable without storage. */}};
+  const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify({version:2,...state}));}catch{/* The panel remains usable without storage. */}};
   function render(){
     if(!container.clientHeight)return;
     layout=allocateSidebar(container.clientHeight,state);
@@ -18,7 +18,8 @@ export function setupSidebar(){
     }
     for(const separator of separators){
       const pair=layout.pairs.find(([id])=>id===separator.dataset.sidebarSplitter);
-      separator.hidden=!pair;if(!pair)continue;
+      separator.hidden=false;separator.setAttribute('aria-disabled',String(!pair));separator.tabIndex=pair?0:-1;
+      if(!pair){separator.setAttribute('aria-label',`Section divider after ${separator.dataset.sidebarSplitter}`);for(const attr of ['aria-valuemin','aria-valuemax','aria-valuenow','aria-valuetext'])separator.removeAttribute(attr);delete separator.dataset.next;continue;}
       const [first,second]=pair,total=layout.sizes[first]+layout.sizes[second];
       separator.dataset.next=second;
       const name=id=>id[0].toUpperCase()+id.slice(1);
@@ -38,7 +39,7 @@ export function setupSidebar(){
   for(const id of SECTION_IDS)sections[id].querySelector('[data-sidebar-toggle]').onclick=()=>setExpanded(id,!state.expanded[id]);
   for(const separator of separators){
     separator.addEventListener('pointerdown',e=>{
-      if(e.button!==0||!layout)return;e.preventDefault();e.stopPropagation();separator.focus({preventScroll:true});
+      if(e.button!==0||!layout||separator.getAttribute('aria-disabled')==='true')return;e.preventDefault();e.stopPropagation();separator.focus({preventScroll:true});
       drag={pointer:e.pointerId,y:e.clientY,state, sizes:{...layout.sizes},first:separator.dataset.sidebarSplitter,second:separator.dataset.next};
       separator.setPointerCapture(e.pointerId);container.classList.add('resizing');
     });
@@ -60,7 +61,7 @@ export function setupSidebar(){
     }
     if(!control)return;
     e.stopImmediatePropagation();
-    if(!separator||!['ArrowUp','ArrowDown','Home','End'].includes(e.key)||!layout)return;
+    if(!separator||separator.getAttribute('aria-disabled')==='true'||!['ArrowUp','ArrowDown','Home','End'].includes(e.key)||!layout)return;
     e.preventDefault();
     const first=separator.dataset.sidebarSplitter,second=separator.dataset.next;
     const delta=e.key==='Home'?-Infinity:e.key==='End'?Infinity:(e.key==='ArrowUp'?-1:1)*(e.shiftKey?48:16);

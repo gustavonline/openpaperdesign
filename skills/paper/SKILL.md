@@ -2,7 +2,7 @@
 name: paper
 description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the project and cloud snapshots in Notion. Use for Home, Paper files, Notion save/open, workspace setup and server controls.
 metadata:
-  version: "0.7.0-preview.17"
+  version: "0.7.0-preview.18"
 ---
 
 # Paper
@@ -40,7 +40,7 @@ For visual composition and design systems use [Design](../paper-design/SKILL.md)
 
 Share exports selected artwork to PNG or HTML, the layer records to JSON, or the complete editable Paper to `.paper.zip`. `paper_package` exports/imports a ZIP within the active workspace; import allocates a new Paper identity. The archive includes referenced images, guides and feedback; history and connection credentials stay local.
 
-For Notion use the existing Share/Home UI or `paper_notion`: status, connect, pages, save, open and disconnect. Read the [Notion workflow](references/notion.md) for authentication, destination selection and cloud conflicts. The UI operates directly; it does not ask the person to prompt an agent for each save. Cloud open creates a local copy; explicit saves update its linked page. Prefer an existing matching Paper/page before creating a duplicate. The person controls account consent and publishing. Never copy connection credentials into a Paper or notes.
+For Notion use the existing Share/Home UI or `paper_notion`: status, connect, pages, save, open and disconnect. Read the [Notion workflow](references/notion.md) for authentication, destination selection and cloud conflicts. The UI operates directly; it does not ask the person to prompt an agent for each save. Cloud open creates a local copy. A successful explicit save links its page and enables background file snapshots while the workspace server runs; pause/resume is in the Notion dialog. Status alone never starts saving. Prefer an existing matching Paper/page before creating a duplicate. The person controls account consent and publishing. Never copy connection credentials into a Paper or notes.
 
 Read [sharing](references/sharing.md) before configuring invitations, another agent or external hosting. Share → Internet uses optional cloudflared for a temporary HTTPS link, with no account or separate backend. Start public sharing only when the person requests it; never forward the owner server. Install the native CLI only when authorized; ordinary local use does not need it. Clean views receive live saves; conflicting edits are retained for reconciliation. A saved Notion snapshot and interactive preview do not turn Notion into the live editing server.
 
