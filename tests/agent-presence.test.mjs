@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createPresence} from '../server/presence.mjs';
+import {transitionAgent} from '../runtime/agent-motion.js';
 const rev=n=>'"'+n.toString(16).padStart(64,'0')+'"';
 const harness=t=>{let clock=0;const events=[],presence=createPresence({now:()=>clock,publish:e=>events.push(e)});t.after(()=>presence.close());return {presence,events,tick:ms=>clock+=ms};};
 
@@ -26,7 +27,7 @@ test('metadata is bounded per Paper and globally; scope removal and unknown file
  assert.equal(p.snapshot('paper0').commits.length,0);assert.equal(p.snapshot('paper65').commits.length,16);
  const a=p.update('scoped','invite','agent',{},'agent');p.committed({paperId:'scoped',baseRevision:rev(1),revision:rev(2),clientId:a.id});
  p.removeScope('invite');assert.deepEqual(p.snapshot('scoped'),{paperId:'scoped',peers:[],commits:[]});
- p.committed({paperId:'paper65',revision:rev(99)});assert.equal(p.snapshot('paper65').commits.length,0);
+ p.committed({paperId:'paper65',revision:rev(99)});assert.equal(p.snapshot('paper65').commits.length,1);assert.equal(p.snapshot('paper65').commits[0].actor,null);
  p.close();assert.equal(p.snapshot('paper64').commits.length,0);
 });
 test('humans remain explicit barriers and duplicate completion never extends commit lifetime',t=>{
@@ -50,4 +51,15 @@ test('late completion cannot relabel a human replay or upgrade an unknown save',
  commit(1,2,'unknown');commit(1,2,a.id);assert.equal(p.snapshot('paper').commits[0].actor,null);
  commit(2,3,'human');commit(3,2,'human');commit(1,2,a.id);
  assert.equal(p.snapshot('paper').commits.length,3);assert.equal(p.snapshot('paper').commits.at(-1).actor,null);
+});
+
+test('unknown file-write barriers survive an ABA replay and refuse late agent completion',t=>{
+ const {presence:p,tick}=harness(t),a=p.update('paper','owner','agent',{},'agent');
+ const save={paperId:'paper',baseRevision:rev(1),revision:rev(2),clientId:a.id};p.committed(save);
+ p.committed({paperId:'paper',revision:rev(3)});p.committed({paperId:'paper',revision:rev(2)});p.committed(save);
+ assert.equal(transitionAgent(rev(1),rev(2),p.snapshot('paper').commits),null);
+ assert.equal(p.snapshot('paper').commits[0].actor,null);
+ p.committed({paperId:'paper',baseRevision:rev(2),revision:rev(4),clientId:a.id});
+ assert.equal(transitionAgent(rev(2),rev(4),p.snapshot('paper').commits)?.id,a.id,'a new proved transition still animates');
+ tick(15001);assert.equal(p.snapshot('paper').commits.length,0);
 });

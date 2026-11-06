@@ -73,3 +73,20 @@ test('initial/forced loads, human or unknown writers and expired proof never ani
  h.receive('r2','r3');h.ui.documentChanged(doc([1]),doc([1,2]),{beforeRevision:'r2',revision:'r3',animate:false});assert.equal(h.changes().length,0);
  h.receive('r3','r4');t.mock.timers.tick(15001);h.ui.documentChanged(doc([1]),doc([1,2]),{beforeRevision:'r3',revision:'r4'});assert.equal(h.changes().length,0);assert.equal(h.animations.length,0);
 });
+
+test('a delayed document snapshot preserves newer completion while keeping exact artwork proof',t=>{
+ const h=harness(t),snapshot={paperId:'paper',peers:[peer],commits:[{baseRevision:'r0',revision:'r1',actor:peer,ttl:15000}]};
+ h.ui.receive(snapshot);const token=h.ui.snapshotToken();
+ h.ui.receive({paperId:'paper',peer:{...peer,status:'',pageId:null,nodeId:null,rect:null,ttl:90000}});
+ h.ui.receive(snapshot,token);assert.equal(h.layer.children.length,0,'completed work must stay cleared');
+ h.ui.documentChanged(doc([1]),doc([1,2]),{beforeRevision:'r0',revision:'r1'});assert.equal(h.changes().length,1,'the committed new artwork still reveals');
+ h.ui.clearEffects();const leaving=h.ui.snapshotToken();h.ui.receive({paperId:'paper',id:peer.id,peer:null});h.ui.receive(snapshot,leaving);
+ assert.equal(h.layer.children.length,0);assert.equal(h.roster.hidden,true,'a delayed snapshot cannot resurrect a departed peer');
+});
+
+test('a document or polling response from before disconnect cannot restore peers or effects',t=>{
+ const h=harness(t),token=h.ui.snapshotToken();h.ui.disconnect();
+ h.ui.receive({paperId:'paper',peers:[peer],commits:[{baseRevision:'r0',revision:'r1',actor:peer,ttl:15000}]},token);
+ h.ui.documentChanged(doc([1]),doc([1,2]),{beforeRevision:'r0',revision:'r1'});
+ assert.equal(h.layer.children.length,0);assert.equal(h.animations.length,0);
+});

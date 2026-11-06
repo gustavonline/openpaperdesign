@@ -18,7 +18,15 @@ export function createPresence({publish,now=Date.now}={}){
   // Only successful artwork saves reach this boundary. Keep identities at commit time,
   // so completion can clear activity before a polling renderer displays the save.
   function committed({paperId,baseRevision,revision:result,clientId}){
-    prune();if(!revision(baseRevision)||!revision(result)){commits.delete(paperId);return null;}if(baseRevision===result)return null;
+    prune();if(!revision(result)){commits.delete(paperId);return null;}
+    if(!revision(baseRevision)){
+      // Keep an explicit unknown-write barrier, including when bytes return to
+      // an older revision. A delayed completion cannot reclaim that result.
+      commits.delete(paperId);commits.set(paperId,[{baseRevision:null,revision:result,actor:null,until:now()+commitTTL}]);
+      if(commits.size>64)commits.delete(commits.keys().next().value);
+      return null;
+    }
+    if(baseRevision===result)return null;
     const peer=[...peers.values()].find(p=>p.paperId===paperId&&p.id===clientId&&p.kind==='agent');
     const actor=peer?Object.fromEntries(['id','name','avatar','color','kind'].map(k=>[k,peer[k]])):null;
     const list=commits.get(paperId)||[];

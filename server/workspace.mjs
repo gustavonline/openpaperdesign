@@ -64,5 +64,9 @@ export async function openWorkspaceServer(workspace,start){
 export function remotePresence(url,client,{agentMotion=0}={}){
   let currentPaper;
   const send=async(id,body)=>{currentPaper=id;const response=await fetch(`${url}/api/presence?paper=${encodeURIComponent(id)}`,{method:'POST',headers:{Origin:url,'Content-Type':'application/json','X-Paper-Client':client},body:JSON.stringify({...body,kind:'agent'}),signal:AbortSignal.timeout(3000)});const result=await response.json();if(!response.ok)throw new Error(result.error||'Paper server unavailable');return result.peer;};
-  return {update:(id,scope,who,patch,kind,edit,long)=>send(id,{...patch,long}),activity:(id,scope,who,patch)=>send(id,{...patch,activity:true}),restore:id=>send(id,{restore:true}),complete:(id,event,revision,baseRevision)=>send(id,{restore:true,event,revision,...(agentMotion===1?{baseRevision}:{})}),async close(){if(currentPaper)await send(currentPaper,{leave:true}).catch(()=>{});}};
+  // Legacy restore resumes the last announced activity. Clear it explicitly
+  // there, rather than reviving a finished/erroring operation for five minutes.
+  const idle={activity:true,status:'',pageId:null,nodeId:null,rect:null,cursor:null,drag:null};
+  const cleanup=()=>agentMotion===1?{restore:true}:idle;
+  return {update:(id,scope,who,patch,kind,edit,long)=>send(id,{...patch,long}),activity:(id,scope,who,patch)=>send(id,patch.status?{...patch,activity:true}:idle),restore:id=>send(id,cleanup()),complete:(id,event,revision,baseRevision)=>send(id,{...cleanup(),event,revision,...(agentMotion===1?{baseRevision}:{})}),async close(){if(currentPaper)await send(currentPaper,{leave:true}).catch(()=>{});}};
 }

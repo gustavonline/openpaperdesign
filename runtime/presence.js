@@ -16,14 +16,25 @@ export function setupPresence(host){
   const sizeObserver=new ResizeObserver(place);sizeObserver.observe(host.stage);sizeObserver.observe(roster);
   const delay=window.__paperNative?500:100,lifetime=new AbortController();
   const peers=new Map(),marks=new Map(),animations=new Set(),seenRevisions=new Set([host.revision()]);
-  const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');let commits=[],effectTimer=null,view=host.view();
+  const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');let commits=[],effectTimer=null,view=host.view(),updates=0,connection=0;
   function clearEffects(){clearTimeout(effectTimer);effectTimer=null;flashes=[];for(const a of animations){a.onfinish=null;a.cancel();}animations.clear();for(const [id,el] of marks)if(id.startsWith('change-')){el.remove();marks.delete(id);}}
   function visibility(){if(document.hidden)clearEffects();paint();}
   function motionPreference(){clearEffects();paint();}
   document.addEventListener('visibilitychange',visibility);reduced.addEventListener('change',motionPreference);
   let mine=null,stopped=false,cursor=null,pending=false,inflight=false,timer=null,rosterKey='',focus=null,flashes=[];
   const put=peer=>{peers.set(peer.id,{...peer,deadline:Date.now()+peer.ttl});};
-  function receive(data){if(stopped||data.paperId!==host.paperId)return;if(data.peers){commits=(data.commits||[]).slice(-16).map(c=>({...c,deadline:Date.now()+Math.min(15000,Math.max(0,c.ttl||0))}));peers.clear();for(const p of data.peers)put(p);}else if(data.peer)put(data.peer);else peers.delete(data.id);paint();}
+  const snapshotToken=()=>({updates,connection});
+  function receive(data,token){
+    if(stopped||data.paperId!==host.paperId||token&&token.connection!==connection)return;
+    if(data.peers){
+      // A fetched document's commit proof still belongs to that revision, but
+      // its older peer snapshot must not undo a newer live completion/leave.
+      commits=(data.commits||[]).slice(-16).map(c=>({...c,deadline:Date.now()+Math.min(15000,Math.max(0,c.ttl||0))}));
+      if(token&&token.updates!==updates)return;
+      peers.clear();for(const p of data.peers)put(p);
+    }else if(data.peer)put(data.peer);else peers.delete(data.id);
+    updates++;paint();
+  }
   function paint(){
     if(stopped)return;if(view!==host.view()){view=host.view();clearEffects();}const now=Date.now();for(const [id,p] of peers)if(p.deadline<=now)peers.delete(id);
     const list=[...peers.values()],key=JSON.stringify(list.map(p=>[p.id,p.name,p.kind,p.status]));
@@ -58,9 +69,9 @@ export function setupPresence(host){
   function depart(){if(stopped)return;fetch('/api/presence'+host.paperQuery,{method:'POST',headers:{...host.clientHeaders,'Content-Type':'application/json'},body:JSON.stringify({leave:true}),keepalive:true}).catch(()=>{});}
   window.addEventListener('pagehide',depart);const heartbeat=setInterval(changed,6000),expiry=setInterval(paint,1000);changed();
   return {
-    receive,paint,changed,
+    receive,paint,changed,snapshotToken,
     clearEffects,
-    disconnect(){clearEffects();commits=[];peers.clear();paint();},
+    disconnect(){connection++;updates++;clearEffects();commits=[];peers.clear();paint();},
     documentChanged(before,after,{beforeRevision,revision,animate=true}={}){
       clearEffects();const replay=seenRevisions.has(revision);seenRevisions.add(beforeRevision);seenRevisions.add(revision);
       while(seenRevisions.size>128)seenRevisions.delete(seenRevisions.values().next().value);

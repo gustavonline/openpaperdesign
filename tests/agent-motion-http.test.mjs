@@ -69,13 +69,33 @@ test('shared agent saves have the same proof; view-only tools cannot write or an
  await app.sharing.stop(made.id,edit.id);const after=await get('/api/updates');assert.equal(after.presence.commits.length,0);assert.ok(!after.presence.peers.some(p=>p.id===saved.agent.id));
 });
 
-test('attached completion keeps legacy API 1 presence bodies when motion is not advertised',async t=>{
- const bodies=[];t.mock.method(globalThis,'fetch',async(url,options)=>{
-  const body=JSON.parse(options.body);bodies.push(body);
-  // Legacy presence rejects extra fields rather than ignoring them.
-  assert.equal('baseRevision' in body,false);return Response.json({peer:{id:'legacy-agent',status:''}});
+test('attached completion and error cleanup clear remembered activity on legacy API 1 hosts',async t=>{
+ let remembered=null,peer={id:'legacy-agent',status:'',pageId:null,nodeId:null,rect:null};const bodies=[];
+ t.mock.method(globalThis,'fetch',async(url,options)=>{
+  const {kind,long,event,revision,leave,restore,activity,...patch}=JSON.parse(options.body);bodies.push(JSON.parse(options.body));
+  assert.equal('baseRevision' in patch,false,'legacy hosts reject unknown fields');
+  if(activity)remembered=patch.status?structuredClone(patch):null;
+  peer={...peer,...(restore?(remembered||{status:'',rect:null}):patch)};
+  return Response.json({peer});
  });
  const proxy=remotePresence('http://127.0.0.1:1','legacy-client');
- assert.equal((await proxy.complete('paper','paper-changed','result','base')).id,'legacy-agent');
- assert.deepEqual(bodies[0],{restore:true,event:'paper-changed',revision:'result',kind:'agent'});await proxy.close();
+ const target={status:'Drawing',pageId:'page',nodeId:1,rect:{x:0,y:0,w:20,h:20}};
+ await proxy.activity('paper','owner','agent',target);assert.equal(peer.status,'Drawing');
+ await proxy.update('paper','owner','agent',{status:'Saving'},'agent');
+ await proxy.complete('paper','paper-changed','result','base');
+ assert.equal(peer.status,'');assert.equal(peer.pageId,null);assert.equal(peer.nodeId,null);assert.equal(peer.rect,null);assert.equal(remembered,null);
+ await proxy.activity('paper','owner','agent',target);await proxy.restore('paper');
+ assert.equal(peer.status,'');assert.equal(peer.nodeId,null);assert.equal(remembered,null);
+ assert.ok(bodies.every(body=>!('baseRevision' in body)));await proxy.close();
+});
+
+test('late attached completion cannot claim bytes replayed through ordinary file edits',async t=>{
+ const {app,made,get}=await harness(t),first=await app.library.read(made.id),proxy=remotePresence(app.url,'aba-agent',{agentMotion:1});t.after(()=>proxy.close());
+ const peer=await proxy.activity(made.id,'owner','aba-agent',{status:'Drawing'});
+ first.paper.name='Agent result';const saved=await app.library.save(made.id,bytes(first.paper),first.revision,'paper',peer.id),file=path.join(made.path,'paper.json'),b=await fs.readFile(file);
+ const waitUnknown=async revision=>{for(let i=0;i<100;i++){const state=await get('/api/updates');if(state.presence.commits.at(-1)?.revision===revision&&state.presence.commits.at(-1)?.actor===null)return;await new Promise(r=>setTimeout(r,20));}assert.fail('Watcher did not publish the unknown-write barrier');};
+ const human=structuredClone(first.paper);human.name='Ordinary file edit';const c=bytes(human),cRevision='"'+createHash('sha256').update(c).digest('hex')+'"';
+ await fs.writeFile(file,c);await waitUnknown(cRevision);await fs.writeFile(file,b);await waitUnknown(saved.revision);
+ await proxy.complete(made.id,'paper-changed',saved.revision,first.revision);
+ const fetched=await get('/api/paper');assert.equal(fetched.revision,saved.revision);assert.equal(transitionAgent(first.revision,fetched.revision,fetched.presence.commits),null);
 });

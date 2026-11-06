@@ -1,6 +1,6 @@
 import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
-import {setupPresence} from './presence.js?v=04efe1e39f62';
+import {setupPresence} from './presence.js?v=00b95181a9bb';
 import { setupSharing } from './sharing.js?v=6d255ae1b910';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
@@ -1529,6 +1529,7 @@ async function remotePaper(force = false,silent=false) {
   if (!quiet()) { conflict = true; updateSaveState(); return; }
   reloading = true;
   try {
+    const presenceToken=presenceUI?.snapshotToken();
     const response = await fetch(sceneUrl, { cache: 'no-store',signal:AbortSignal.timeout(15000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const loaded = await response.json(), next = loaded.paper;
     if(!surfaceAlive())return;
@@ -1540,7 +1541,7 @@ async function remotePaper(force = false,silent=false) {
     if (pageId !== 'all' && !scene.pages.some(p => p.id === pageId)) pageId = scene.pages[0].id;
     selected = null; selection.clear();buildScene(); renderPages(); showTitle(); updateHistory();
     selectMany(keep.filter(key=>nodes.has(key)));
-    designText = null; renderDesign(); paintCamera();if(loaded.presence)presenceUI?.receive(loaded.presence);else presenceUI?.receive({paperId,peers:[]});presenceUI?.documentChanged(previous,next,{beforeRevision,revision,animate:!force});return true;
+    designText = null; renderDesign(); paintCamera();if(loaded.presence)presenceUI?.receive(loaded.presence,presenceToken);else presenceUI?.receive({paperId,peers:[]},presenceToken);presenceUI?.documentChanged(previous,next,{beforeRevision,revision,animate:!force});return true;
   } catch (error) { if(!silent)message(`This Paper changed elsewhere, but couldn’t be reloaded (${error.message}).`);return false; }
   finally { reloading = false;if(reloadAgain){reloadAgain=false;if(quiet()&&surfaceAlive())void remotePaper(false,silent);} }
 }
@@ -1584,11 +1585,11 @@ function listenForChanges() {
       if(polling||stopped)return;polling=true;
       try{
         if(document.hidden)return;
-        const seen=revision,seenNotes=feedback.revision;
+        const seen=revision,seenNotes=feedback.revision,presenceToken=presenceUI?.snapshotToken();
         const response=await fetch(`/api/updates${paperQuery}`,{cache:'no-store',signal:AbortSignal.timeout(6000)});
         if(stopped)return;if(response.status===401||response.status===403){revoked();return;}if(!response.ok)throw new Error('Connection unavailable');
         const data=await response.json();if(stopped)return;
-        if(data.presence)presenceUI?.receive(data.presence);
+        if(data.presence)presenceUI?.receive(data.presence,presenceToken);
         if(revision===seen&&data.revision!==seen&&quiet()&&await remotePaper(false,true)===false)throw new Error('Paper could not be refreshed');
         if(feedback.revision===seenNotes&&data.feedbackRevision!==seenNotes&&!feedback.saving&&feedback.pendingBytes===null&&!(editable(document.activeElement)&&$('#paper-inspection-root').contains(document.activeElement))&&await remoteFeedback(true)===false)throw new Error('Feedback could not be refreshed');
         if(guideRevision&&guideRevision!==data.guideRevision){designText=null;renderDesign();}guideRevision=data.guideRevision;
