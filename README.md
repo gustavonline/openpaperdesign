@@ -79,3 +79,5 @@ The browser and plugin use the same renderer. For UI development, install the de
 - [Doop](https://github.com/kgoedecke/doop) for presence inspiration, and [Diorama](https://github.com/bydiorama/ui) for design-method references.
 
 Apache-2.0. Bundled third-party licences and attribution are in [NOTICE.md](NOTICE.md).
+
+Pages, Layers and Library share the left sidebar with matching search controls and collapsible sections. Drag a single divider line, or focus it and use Arrow Up/Down (Shift for larger steps), Home or End. Sizes and expansion are local preferences; **Reset panel layout** restores the defaults without editing the Paper.

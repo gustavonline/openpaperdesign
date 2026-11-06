@@ -20,13 +20,8 @@ export function setupLibrary(host) {
     if(custom&&host.canEdit()){const remove=document.createElement('button');remove.type='button';remove.className='remove-symbol';remove.textContent='×';remove.title=`Remove ${item.name} from Scratchpad`;remove.setAttribute('aria-label',remove.title);remove.onclick=()=>{host.saveSymbols(host.getScene().symbols.filter(s=>s.id!==item.id));render();};wrap.append(remove);}
     return wrap;
   }
-  function position(){const r=toggle.getBoundingClientRect();panel.style.left=`${Math.max(12,Math.min(r.right+8,innerWidth-panel.offsetWidth-12))}px`;panel.style.top=`${Math.max(56,Math.min(r.bottom-panel.offsetHeight-48,innerHeight-panel.offsetHeight-64))}px`;}
-  function close(focus=false){panel.hidden=true;toggle.setAttribute('aria-expanded','false');if(focus)toggle.focus();}
-  function open(){panel.hidden=false;toggle.setAttribute('aria-expanded','true');position();search.focus();}
-  toggle.onclick=()=>panel.hidden?open():close();$('#library-close').onclick=()=>close(true);
-  window.addEventListener('resize',()=>{if(!panel.hidden)position();});
-  document.addEventListener('pointerdown',e=>{if(!panel.hidden&&!panel.contains(e.target)&&!toggle.contains(e.target))close();},true);
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden){e.preventDefault();e.stopImmediatePropagation();close(true);}},true);
+  function close(focus=false){host.sidebar.setExpanded('library',false);if(focus)toggle.focus({preventScroll:true});}
+  function open(){host.revealLibrary();host.sidebar.setExpanded('library',true);panel.scrollIntoView({block:'nearest'});search.focus({preventScroll:true});}
   function render(){
     const q=search.value.trim().toLowerCase();families.replaceChildren();categories.replaceChildren();
     for(const item of [...DIAGRAM_FAMILIES,{id:'scratch',name:'Scratchpad'}]){const b=document.createElement('button');b.type='button';b.textContent=item.name;b.setAttribute('aria-current',String(!q&&category===item.id));b.onclick=()=>{category=item.id;search.value='';render();};categories.append(b);}
@@ -66,7 +61,7 @@ export function setupLibrary(host) {
         if(!scene.assets[key]){const response=await fetch(`assets/kubernetes/${file}`);if(!response.ok)throw new Error('The built-in icon could not be loaded.');const {blob}=await raster(await response.blob()),asset=await upload(blob);if(scene!==host.getScene()||!host.canEdit())throw new Error('The Paper changed. Please insert again.');scene.assets[key]=asset.path;}
       }
       if(!custom && template.assets && !scene.assetCredits?.kubernetes){const response=await fetch('assets/kubernetes/LICENSE.txt');if(!response.ok)throw new Error('The icon licence could not be included.');const text=await response.text();if(scene!==host.getScene()||!host.canEdit())throw new Error('The Paper changed. Please insert again.');scene.assetCredits={...scene.assetCredits,kubernetes:{name:'Kubernetes Icons',license:'Apache-2.0',source:'https://github.com/kubernetes/community/tree/8ed8a77f278d4ca36d54b00aeda66d0c71d09510/icons',text}};}
-      host.switchToEdit();host.insert(template,drop);close();
+      host.switchToEdit();host.insert(template,drop);
     }catch(e){host.message(e.message);}finally{busy=false;}
   }
   async function importImage(blob,name,drop){
@@ -76,7 +71,7 @@ export function setupLibrary(host) {
       scene.assets[asset.asset]=asset.path;const scale=Math.min(1,360/rasterized.width,240/rasterized.height),w=Math.max(1,Math.round(rasterized.width*scale)),h=Math.max(1,Math.round(rasterized.height*scale));
       const template={name:name.slice(0,80)||'Image',root:1,nodes:[{id:1,type:'frame',name:name.slice(0,80)||'Image',rect:{x:0,y:0,w,h},diagram:{symbol:'custom-image',width:w,height:h},style:{fills:[],opacity:1},children:[2],visible:true,locked:false},{id:2,parent:1,name:'Image',type:'rect',rect:{x:0,y:0,w,h},style:{fills:[{type:'image',asset:asset.asset,mode:'fit'}],opacity:1},visible:true,locked:false}]};
       const symbols=scene.symbols||[];if(symbols.length>=100)throw new Error('Scratchpad holds up to 100 symbols. Remove one first.');host.saveSymbols([...symbols,{...template,id:symbolId()}]);
-      if(drop){host.switchToEdit();host.insert(template,drop);close();}
+      if(drop){host.switchToEdit();host.insert(template,drop);}
     }finally{busy=false;render();}
   }
   $('#save-symbol').onclick=()=>{if(!host.canEdit())return;const entry=host.getSelection();if(!entry||entry.root)return;const symbols=host.getScene().symbols||[];if(symbols.length>=100){host.message('Scratchpad holds up to 100 symbols.');return;}const template=captureSymbol(entry.page,entry.node.id,entry.node.name||'My symbol');if(template.nodes.length>1000){host.message('Save a smaller selection (up to 1,000 layers).');return;}host.saveSymbols([...symbols,{...template,id:symbolId()}]);category='scratch';search.value='';render();open();host.message('Saved to Scratchpad.');};

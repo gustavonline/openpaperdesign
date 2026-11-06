@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=1d0c11db519b"><link rel="stylesheet" href="canvas.css?v=692622597da9"><link rel="stylesheet" href="notion.css?v=0b98163e185d"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=1d0c11db519b"><link rel="stylesheet" href="canvas.css?v=dc7ecf3e44f4"><link rel="stylesheet" href="notion.css?v=0b98163e185d"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -42,12 +42,31 @@
     <button type="button" role="tab" id="tab-design-btn" data-tab="design" aria-controls="tab-design" aria-selected="false" tabindex="-1">Design</button>
   </div>
   <div id="tab-canvas" class="tab" role="tabpanel" aria-labelledby="tab-canvas-btn">
-    <section class="pages"><h2>Pages</h2><div id="pages" role="group" aria-label="Pages in this Paper"></div></section>
-    <section class="layers"><h2>Layers</h2>
-      <label class="search"><span class="sr-only">Find a layer on the shown pages</span><svg class="icon"><use href="#i-search"/></svg><input id="layer-search" class="field" type="search" placeholder="Find a layer" autocomplete="off"></label>
-      <div id="layer-tree" role="tree" aria-label="Layers"></div>
-    </section>
-    <section class="symbol-library"><button type="button" id="library-toggle" aria-expanded="false" aria-controls="library-panel"><svg class="icon"><use href="#i-grid"/></svg><span>Library</span><span class="library-hint">Shapes &amp; Scratchpad</span><span aria-hidden="true">↗</span></button></section>
+    <div id="sidebar-sections">
+      <section id="pages-section" class="sidebar-section" data-sidebar-section="pages">
+        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="pages-toggle" aria-expanded="true" aria-controls="pages-panel"><span class="section-chevron" aria-hidden="true">›</span>Pages</button></h2>
+        <div id="pages-panel" class="sidebar-body"><label class="search"><span class="sr-only">Find a page</span><svg class="icon"><use href="#i-search"/></svg><input id="page-search" class="field" type="search" placeholder="Find a page" autocomplete="off"></label><div id="pages" role="group" aria-label="Pages in this Paper"></div></div>
+      </section>
+      <div class="sidebar-splitter" data-sidebar-splitter="pages" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize · Arrow keys to adjust · Home/End for limits"></div>
+      <section id="layers-section" class="sidebar-section" data-sidebar-section="layers">
+        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="layers-toggle" aria-expanded="true" aria-controls="layers-panel"><span class="section-chevron" aria-hidden="true">›</span>Layers</button></h2>
+        <div id="layers-panel" class="sidebar-body">
+          <label class="search"><span class="sr-only">Find a layer on the shown pages</span><svg class="icon"><use href="#i-search"/></svg><input id="layer-search" class="field" type="search" placeholder="Find a layer" autocomplete="off"></label>
+          <div id="layer-tree" role="tree" aria-label="Layers"></div>
+        </div>
+      </section>
+      <div class="sidebar-splitter" data-sidebar-splitter="layers" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize · Arrow keys to adjust · Home/End for limits" hidden></div>
+      <section id="library-section" class="sidebar-section" data-sidebar-section="library">
+        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="library-toggle" aria-expanded="false" aria-controls="library-panel"><span class="section-chevron" aria-hidden="true">›</span>Library</button></h2>
+        <div id="library-panel" class="sidebar-body" hidden>
+  <label class="search"><span class="sr-only">Find a symbol</span><svg class="icon"><use href="#i-search"/></svg><input id="symbol-search" class="field" type="search" placeholder="Find a symbol" autocomplete="off"></label>
+  <div class="library-browser"><nav id="symbol-categories" aria-label="Symbol categories"></nav><div class="library-results"><div id="symbol-families"></div><section id="scratchpad" hidden><div id="saved-symbols"></div><div class="scratch-actions"><button type="button" class="btn" id="upload-symbol">Add image…</button><button type="button" class="btn" id="url-symbol">From URL…</button></div><p class="note">Drop images here, or save a selected layer.</p></section></div></div>
+  <footer>Click to insert · drag anywhere on the canvas</footer>
+  <input id="symbol-file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+        </div>
+      </section>
+    </div>
+    <div class="sidebar-footer"><button type="button" id="sidebar-reset" title="Restore default section sizes and open sections">Reset panel layout</button></div>
   </div>
   <div id="tab-design" class="tab" role="tabpanel" aria-labelledby="tab-design-btn" hidden>
     <section class="design-doc">
@@ -62,13 +81,7 @@
     </section>
   </div>
 </aside>
-<section id="library-panel" data-canvas-chrome class="float" role="dialog" aria-label="Library" hidden>
-  <header><strong>Library</strong><button type="button" id="library-close" class="ibtn" aria-label="Close Library">×</button></header>
-  <label class="search"><span class="sr-only">Find a symbol</span><svg class="icon"><use href="#i-search"/></svg><input id="symbol-search" class="field" type="search" placeholder="Find a symbol" autocomplete="off"></label>
-  <div class="library-browser"><nav id="symbol-categories" aria-label="Symbol categories"></nav><div class="library-results"><div id="symbol-families"></div><section id="scratchpad" hidden><div id="saved-symbols"></div><div class="scratch-actions"><button type="button" class="btn" id="upload-symbol">Add image…</button><button type="button" class="btn" id="url-symbol">From URL…</button></div><p class="note">Drop images here, or save a selected layer.</p></section></div></div>
-  <footer>Click to insert · drag anywhere on the canvas</footer>
-  <input id="symbol-file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
-</section>
+
 
 <div id="left-bar" data-canvas-chrome class="topbar">
   <button id="home" class="ibtn" type="button" title="Paper menu" aria-label="Paper menu" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu"><svg class="icon"><use href="#i-grid"/></svg></button>
@@ -211,5 +224,5 @@
 <div id="toast" data-canvas-chrome role="status" hidden></div>
 <dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is saved with this Paper.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="paper-inspection-root"></div>
-<script type="module" src="app.js?v=b2c20666461e"></script>
+<script type="module" src="app.js?v=712941e9cd35"></script>
 </body></html>
