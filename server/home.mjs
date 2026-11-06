@@ -5,14 +5,15 @@ import {createHash, randomBytes} from 'node:crypto';
 import {PaperLibrary, PaperError, ID} from './library.mjs';
 import {inspectWorkspace,stopWorkspace} from './workspace.mjs';
 import {VERSION} from './runtime.mjs';
-import {renamePaper,revealPaper,trashPaper,listTrash,restorePaper} from './paper-actions.mjs';
+import {renamePaper,revealPaper,trashPaper,listTrash,restorePaper,paperPreview} from './paper-actions.mjs';
 
 export const HOME_URI=`ui://openpaperdesign/home/${VERSION}/${randomBytes(8).toString('hex')}`;
 export const HOME_MIME='text/html;profile=mcp-app';
 export function isHomeResource(uri){
   if(typeof uri!=='string')return false;
+  const retained=uri.match(/^ui:\/\/openpaperdesign\/home\/(0\.7\.0-preview\.(?:12|13|14|15|16|17))\/[a-f0-9]{16}$/);
   const base=`ui://openpaperdesign/home/${VERSION}/`;
-  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
+  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||!!retained||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12,13,14,15,16,17].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
 }
 export function dataHome(){
   if(process.env.PAPER_HOME){if(!path.isAbsolute(process.env.PAPER_HOME))throw new Error('PAPER_HOME must be an absolute folder');return process.env.PAPER_HOME;}
@@ -70,7 +71,7 @@ async function sharingOverview(entry){
   let live;try{live=await inspectWorkspace(entry.root);}catch(error){return {state:'unavailable',message:error.message,invitations:[]};}
   if(!live)return {state:'stopped',invitations:[]};
   const server={state:'running',instance:live.instance,version:live.version,canStop:live.canStop};
-  let data;try{data=await owner(live,'GET','/api/sharing/overview');}catch(error){return {...server,message:error.status===409?'This server is from an older Paper version. Stop it, then reopen its Papers to manage sharing.':error.message,invitations:[]};}
+  let data;try{data=await owner(live,'GET','/api/sharing/overview');}catch(error){return {...server,message:error.status===409?'This server does not support these sharing controls. Existing Papers remain open.':error.message,invitations:[]};}
   const names=new Map(),invitations=[];let library;
   for(const i of Array.isArray(data.invitations)?data.invitations.slice(0,256):[]){
     if(!i||typeof i.paperId!=='string'||!ID.test(i.paperId)||typeof i.id!=='string'||!ID.test(i.id))continue;
@@ -115,12 +116,10 @@ export function createHome(open){
           catch(error){server={state:'unavailable',message:error.message};}
           projects.push({id:entry.id,name:entry.name,kind:entry.id==='personal'?'personal':'project',storageRoot:library.root,count:found.length,server});
           for(const paper of found.slice(0,200)){
-            let thumbnail=null;
-            try{if(paper.thumbnail&&previewBudget>0){
-              const paperFolder=await library.folder(paper.id),file=path.join(paperFolder,'assets','thumbnail.png'),real=await fs.realpath(file),st=await fs.lstat(file);
-              if(real.startsWith(paperFolder+path.sep)&&st.isFile()&&!st.isSymbolicLink()&&st.size<=Math.min(128*1024,previewBudget)){const bytes=await fs.readFile(real);previewBudget-=bytes.length;thumbnail=`data:image/png;base64,${bytes.toString('base64')}`;}
-            }}catch{thumbnail=null;}
-            const {href,...info}=paper;papers.push({...info,thumbnail,workspaceId:entry.id,workspaceName:entry.name,workspace:entry.root,folder:path.join(library.root,paper.id)});
+            // The data URI stays in `thumbnail`, which model-facing output strips; `preview` is small metadata.
+            let thumbnail=null,preview={state:'unavailable',revision:null};
+            if(!paper.error)try{const made=await paperPreview(library,paper.id,previewBudget);previewBudget-=made.cost;thumbnail=made.src;preview=made.preview;}catch{/* Unavailable stays honest, never blank. */}
+            const {href,...info}=paper;papers.push({...info,thumbnail,preview,workspaceId:entry.id,workspaceName:entry.name,workspace:entry.root,folder:path.join(library.root,paper.id)});
           }
         }catch(error){if(!['ENOENT','ENOTDIR','EACCES'].includes(error.code))throw error;projects.push({id:entry.id,name:entry.name,count:0,unavailable:true});}
       }

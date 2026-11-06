@@ -1,0 +1,9 @@
+# Copy-method sources
+
+Reviewed 6 November 2026 for [OpenPaperDesign #8](https://github.com/gustavonline/openpaperdesign/issues/8).
+
+- **Selected: [Impeccable / Clarify](https://github.com/pbakaus/impeccable/blob/c3bb418ee38ee49a6b999b7752c1368f3123a2bd/skill/reference/clarify.md)** by Paul Bakaus and contributors, revision `c3bb418ee38ee49a6b999b7752c1368f3123a2bd`, Apache-2.0. Relevant ideas: evaluate copy in its interaction context, choose a useful message hierarchy, keep terminology and factual meaning, and inspect the rendered result. Paper's adaptation selects text by artifact, protects approved wording, distinguishes proposed goals, and keeps authoring commentary off the artwork. No upstream command chain, setup hook, detector, runtime or plugin is required. The original licence is [IMPECCABLE-LICENSE.txt](IMPECCABLE-LICENSE.txt).
+- **Compared: [Humanizer](https://github.com/blader/humanizer/blob/0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0/SKILL.md)** by blader and contributors, revision `0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0`, MIT. Useful for reviewing artificial patterns in prose and preserving supplied facts. It was not adopted as a dependency or copied into the package: sentence-level cleanup alone does not decide whether a visual roadmap needs a slogan or another subtitle.
+- **Existing optional support: OSM Human Writing**, inspected in the installed OSM `0.30.1-setup-preview.3` package. It supports clarity, source meaning and the writer's voice. Paper Copy remains usable without it; do not load private owner context merely to write a diagram label.
+
+GitHub/X discovery was attempted. X returned sparse search results and denied direct access to the relevant author's feed (403); no unread post is used as implementation evidence. The selected method comes from the pinned GitHub source above. These sources informed editorial choices, not claims of detector evasion or demonstrated universal quality.

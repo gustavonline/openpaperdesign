@@ -78,3 +78,113 @@ export async function restorePaper(library,trashId){
   await fs.rm(path.join(folder,RECEIPT),{force:true});await fs.rmdir(folder).catch(()=>{});
   return {id:receipt.paperId,name:receipt.name};
 }
+
+// Home previews. A saved PNG is used only while it is at least as new as paper.json; otherwise a small SVG
+// is drawn from the native layers, so an old image can never imply that saved artwork disappeared.
+const PREVIEW_NODES=400,PREVIEW_BYTES=40*1024,PNG_MAGIC=Buffer.from([137,80,78,71,13,10,26,10]);
+const num=(value,fallback=0)=>Number.isFinite(value)?Math.round(Math.max(-1e6,Math.min(1e6,value))*100)/100:fallback;
+const colour=(value,fallback)=>typeof value==='string'&&/^#[0-9a-fA-F]{3,8}$/.test(value)?value:fallback;
+const escape=text=>String(text).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const solid=node=>node.style?.fills?.find(f=>f?.type==='solid');
+const hasImage=node=>!!node.style?.fills?.some(f=>f?.type==='image');
+const isBareArtboard=node=>node.type==='frame'&&!node.diagram&&node.canvas!==true&&!node.children?.length;
+function wrapText(text,width,size){
+  const per=Math.max(1,Math.floor(width/Math.max(1,size*.55))),lines=[];
+  for(const raw of String(text).slice(0,400).split('\n')){
+    let line='';
+    for(const word of raw.split(/\s+/).filter(Boolean)){
+      if(line&&line.length+word.length+1>per){lines.push(line);line=word;}else line=line?`${line} ${word}`:word;
+      while(line.length>per){lines.push(line.slice(0,per));line=line.slice(per);}
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+function drawNode(node,map,state){
+  if(!node||node.visible===false||state.count>=PREVIEW_NODES||state.bytes>PREVIEW_BYTES)return '';
+  state.count++;
+  const r=node.rect,x=num(r.x),y=num(r.y),w=Math.max(0,num(r.w)),h=Math.max(0,num(r.h)),s=node.style||{};
+  const fill=solid(node),opacity=Number.isFinite(s.opacity)?Math.max(0,Math.min(1,s.opacity)):1;
+  const stroke=colour(s.stroke,null),strokeWidth=Math.max(0,num(s.stroke_width??1,1));
+  const attrs=`${opacity<1?` opacity="${opacity}"`:''}${node.rotation?` transform="rotate(${num(node.rotation)} ${num(x+w/2)} ${num(y+h/2)})"`:''}`;
+  const paint=`fill="${fill?colour(fill.color,'#d4d4d0'):hasImage(node)?'#d3d6da':'none'}"${stroke?` stroke="${stroke}" stroke-width="${strokeWidth}"`:''}`;
+  let body='';
+  if(node.type==='ellipse')body=`<ellipse cx="${num(x+w/2)}" cy="${num(y+h/2)}" rx="${num(w/2)}" ry="${num(h/2)}" ${paint}/>`;
+  else if(node.type==='rect'||node.type==='frame'){
+    const radius=Math.max(0,num(s.corner_radius??0));
+    const shape=`<rect x="${x}" y="${y}" width="${w}" height="${h}"${radius?` rx="${Math.min(radius,w/2,h/2)}"`:''} ${paint}/>`;
+    // Images are not embedded; a quiet picture mark keeps the layer visible without copying asset bytes.
+    const mark=hasImage(node)&&w>0&&h>0?(()=>{const m=Math.min(w,h)*.45,mx=x+w/2-m/2,my=y+h/2-m/2;return `<path d="M${num(mx)} ${num(my+m)}L${num(mx+m*.35)} ${num(my+m*.4)}L${num(mx+m*.6)} ${num(my+m*.75)}L${num(mx+m*.75)} ${num(my+m*.55)}L${num(mx+m)} ${num(my+m)}Z" fill="#9aa0a8"/>`;})():'';
+    state.bytes+=shape.length+mark.length;
+    if(node.type==='frame'){
+      const kids=(node.children||[]).map(id=>drawNode(map.get(id),map,state)).join('');
+      const scale=node.diagram?.width>0&&node.diagram?.height>0?` scale(${num(w/node.diagram.width,1)} ${num(h/node.diagram.height,1)})`:'';
+      let inner=kids?`<g transform="translate(${x} ${y})${scale}">${kids}</g>`:'';
+      if(inner&&node.clip){const id=`c${state.clips++}`;state.defs.push(`<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath>`);inner=`<g clip-path="url(#${id})">${inner}</g>`;}
+      body=shape+mark+inner;
+    }else body=shape+mark;
+  }else if(node.type==='text'&&typeof node.text==='string'){
+    const size=Math.max(1,num(node.font_size??16,16)),lh=Math.max(.8,num(node.text_style?.line_height??1.3,1.3)),align=node.align==='center'?'middle':node.align==='right'?'end':'start';
+    const lines=wrapText(node.text,w||size*20,size).slice(0,Math.max(1,Math.min(20,Math.ceil(h/(size*lh))+1)));
+    const anchor=align==='middle'?x+w/2:align==='end'?x+w:x,color=colour(fill?.color,'#20201d');
+    body=`<text x="${num(anchor)}" y="${num(y+size)}" font-family="Inter,system-ui,sans-serif" font-size="${size}"${node.text_style?.bold?' font-weight="700"':''}${node.text_style?.italic?' font-style="italic"':''} text-anchor="${align}" fill="${color}">${lines.map((line,i)=>`<tspan x="${num(anchor)}" dy="${i?num(size*lh):0}">${escape(line)}</tspan>`).join('')}</text>`;
+  }else if(node.type==='stroke'&&Array.isArray(node.points)&&node.points.length){
+    const pts=node.points.slice(0,500).filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.y));
+    if(pts.length)body=`<path d="${pts.map((p,i)=>`${i?'L':'M'}${num(p.x)} ${num(p.y)}`).join('')}${node.closed?'Z':''}" fill="${node.closed&&fill?colour(fill.color,'none'):'none'}" stroke="${colour(s.stroke,'#222222')}" stroke-width="${num(node.width??s.stroke_width??2,2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }else if(node.type==='connector'&&Array.isArray(node.points)&&node.points.length>1){
+    const pts=node.points.slice(0,200).filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.y)),line=colour(s.stroke,'#222222'),sw=num(s.stroke_width??2,2);
+    let head='';
+    if(node.end_head==='arrow'&&pts.length>1){const a=pts[pts.length-2],b=pts[pts.length-1],angle=Math.atan2(b.y-a.y,b.x-a.x),len=Math.max(6,sw*4),spread=.45;head=`<path d="M${num(b.x)} ${num(b.y)}L${num(b.x-len*Math.cos(angle-spread))} ${num(b.y-len*Math.sin(angle-spread))}L${num(b.x-len*Math.cos(angle+spread))} ${num(b.y-len*Math.sin(angle+spread))}Z" fill="${line}"/>`;}
+    const kids=(node.children||[]).map(id=>drawNode(map.get(id),map,state)).join('');
+    body=`<g transform="translate(${x} ${y})"><path d="${pts.map((p,i)=>`${i?'L':'M'}${num(p.x)} ${num(p.y)}`).join('')}" fill="none" stroke="${line}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>${head}${kids}</g>`;
+  }
+  if(body&&!(node.type==='frame'&&!node.diagram&&node.canvas!==true&&node.parent==null))state.drawn++;
+  state.bytes+=body.length>0&&node.type!=='frame'?body.length:0;
+  return body?(attrs?`<g${attrs}>${body}</g>`:body):'';
+}
+// Returns {state:'art'|'empty'|'hidden', svg, bounds} for the first Page that holds artwork.
+export function previewSvg(paper){
+  const pages=Array.isArray(paper?.pages)?paper.pages:[];
+  const page=pages.find(p=>p.nodes?.some(n=>!isBareArtboard(n)||!p.root?.includes(n.id)))||pages[0];
+  if(!page)return {state:'empty'};
+  const map=new Map(page.nodes.map(n=>[n.id,n])),roots=page.root.map(id=>map.get(id)).filter(n=>n&&n.visible!==false);
+  const art=page.nodes.some(n=>!isBareArtboard(n)||!page.root.includes(n.id));
+  if(!roots.length)return {state:art?'hidden':'empty'};
+  const box=list=>{const x0=Math.min(...list.map(n=>n.rect.x)),y0=Math.min(...list.map(n=>n.rect.y)),x1=Math.max(...list.map(n=>n.rect.x+n.rect.w)),y1=Math.max(...list.map(n=>n.rect.y+n.rect.h));return {x:x0,y:y0,w:Math.max(1,x1-x0),h:Math.max(1,y1-y0)};};
+  let bounds=box(roots);
+  const boards=roots.filter(n=>n.type==='frame'&&!n.diagram&&n.canvas!==true);
+  // One far-away stray layer must not shrink the design to a speck.
+  if(boards.length){const b=box(boards);if(bounds.w*bounds.h>b.w*b.h*25)bounds=b;}
+  const state={count:0,clips:0,bytes:0,drawn:0,defs:[]};
+  const drawn=roots.map(n=>drawNode(n,map,state)).join('');
+  if(!drawn||art&&!state.drawn)return {state:art?'hidden':'empty'};
+  const pad=Math.max(bounds.w,bounds.h)*.02;
+  const view=`${num(bounds.x-pad)} ${num(bounds.y-pad)} ${num(bounds.w+pad*2)} ${num(bounds.h+pad*2)}`;
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${view}" preserveAspectRatio="xMidYMid meet">${state.defs.length?`<defs>${state.defs.join('')}</defs>`:''}${drawn}</svg>`;
+  return {state:art?'art':'empty',svg:Buffer.byteLength(svg)<=PREVIEW_BYTES*2?svg:null};
+}
+const previews=new Map();
+// One bounded cache entry per Paper, keyed by the files' identity so edits, imports and restores that
+// change paper.json (or add a newer thumbnail.png) are picked up on the next listing.
+export async function paperPreview(library,id,budget){
+  const folder=await library.folder(id),file=path.join(folder,'paper.json'),thumb=path.join(folder,'assets','thumbnail.png');
+  const [paperStat,thumbStat]=await Promise.all([fs.stat(file,{bigint:true}),entry(thumb)]);
+  const key=`${paperStat.mtimeNs}:${paperStat.size}:${paperStat.ino}:${thumbStat?`${thumbStat.mtimeMs}:${thumbStat.size}`:'-'}`,cacheKey=`${library.root}\0${id}`;
+  let found=previews.get(cacheKey);
+  if(found?.key!==key){
+    const {paper,revision}=await library.read(id);
+    const result=previewSvg(paper);let src=null,source=null;
+    if(result.state==='art'&&thumbStat?.isFile()&&!thumbStat.isSymbolicLink()&&thumbStat.size<=96*1024&&thumbStat.mtimeMs>=Number(paperStat.mtimeMs)){
+      try{
+        const real=await fs.realpath(thumb),bytes=await fs.readFile(real);
+        if(real.startsWith(folder+path.sep)&&bytes.subarray(0,8).equals(PNG_MAGIC)){src=`data:image/png;base64,${bytes.toString('base64')}`;source='file';}
+      }catch{/* Fall back to the drawn preview. */}
+    }
+    if(!src&&result.svg){src=`data:image/svg+xml;base64,${Buffer.from(result.svg).toString('base64')}`;source='drawn';}
+    found={key,preview:{state:src?result.state:result.state==='art'?'unavailable':result.state,revision,source},src};
+    previews.delete(cacheKey);previews.set(cacheKey,found);
+    while(previews.size>128)previews.delete(previews.keys().next().value);
+  }
+  if(found.src&&found.src.length<=budget)return {preview:found.preview,src:found.src,cost:found.src.length};
+  return {preview:found.src?{...found.preview,state:'unavailable',source:null}:found.preview,src:null,cost:0};
+}

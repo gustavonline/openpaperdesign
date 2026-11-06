@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {WORKSPACE_API,PAPER_DOCUMENT_VERSION} from '../runtime/workspace-protocol.js';
 import { createPresence } from './presence.mjs';
 import { discoverWorkspace, registerWorkspace, openWorkspaceServer, remotePresence } from './workspace.mjs';
 import { randomBytes } from 'node:crypto';
@@ -71,7 +72,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       if(pathname==='/api/events'&&req.method==='GET'){
         res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});res.write(': connected\n\n');res.paperId=url.searchParams.getAll('paper').length===1&&ID.test(url.searchParams.get('paper'))?url.searchParams.get('paper'):null;streams.add(res);if(res.paperId)res.write(`event: presence-snapshot\ndata: ${JSON.stringify(presence.snapshot(res.paperId))}\n\n`);req.on('close',()=>streams.delete(res));return;
       }
-      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
+      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION,instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
       if(pathname==='/api/server/stop'&&req.method==='POST'){
         const args=JSON.parse(await readBody(req,1024));
         if(args?.instance!==registration?.instance)throw new PaperError(409,'The server changed. Refresh Home before stopping it.');
@@ -183,13 +184,13 @@ async function connectWorkspace(root,agentClient){
   const opened=await openWorkspaceServer(root,port=>startServer(root,{port}));
   if(opened.library)return opened;
   const proxy=agentClient?remotePresence(opened.url,agentClient):null;
-  return {url:opened.url,instance:opened.instance,library:await PaperLibrary.open(root),presence:proxy,close:async()=>proxy?.close()};
+  return {...opened,library:await PaperLibrary.open(root),presence:proxy,close:async()=>proxy?.close()};
 }
 
 const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:['paper_list','paper_read','paper_read_feedback'].includes(name),destructiveHint:false,openWorldHint:false}});
 export const TOOLS=[
   {...tool('paper_ui','Use the owner API for the selected Paper library from the native app.',{key:string,workspaceId:string,origin:string,instance:string,path:string,method:{type:'string',enum:['GET','POST','PUT','DELETE']},headers:{type:'object',additionalProperties:{type:'string'}},body:string},['key','workspaceId','origin','instance','path']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},_meta:{ui:{visibility:['app']}}},
-  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop','sharing','stop-sharing','rename','reveal','trash','trash-list','restore']},workspaceId:string,paperId:string,name:string,instance:string,invitationId:string,trashId:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'}]}}},
+  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop','sharing','stop-sharing','rename','reveal','trash','trash-list','restore']},workspaceId:string,paperId:string,name:string,instance:string,invitationId:string,trashId:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]}}},
   {...tool('paper_join','Join a shared Paper invitation. Opens its live canvas and selects it for the artwork tools. No local workspace or extra MCP setup is needed. paper_open switches back to local Papers.',{url:string},['url']),title:'Open shared Paper',annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI}},
   tool('paper_open','Open a Paper workspace. Omit workspace for the personal library; select an absolute project folder for project-local Papers.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
   tool('paper_list','List saved Papers in the opened workspace.',{}),
@@ -226,7 +227,7 @@ export async function serveStdio() {
     if(name==='paper_open'){
       const root=await projectWorkspace(args.workspace===undefined?await personalWorkspace():args.workspace);
       await rememberWorkspace(root);active=await getApp(root);joined=null;
-      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:VERSION};
+      return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:VERSION,serverVersion:active.version??VERSION};
     }
     if(joined)return joined.tool(name,args);
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');

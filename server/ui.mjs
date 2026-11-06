@@ -2,7 +2,7 @@
 import {PaperError} from './library.mjs';
 import {MAX_BUNDLE_BYTES} from './bundle.mjs';
 import {runningHomeWorkspace} from './home.mjs';
-import {VERSION} from './runtime.mjs';
+import {compatibleWorkspace} from '../runtime/workspace-protocol.js';
 export function createUI(uiKey,home,guestFor=()=>null){
   return async({key,workspaceId='personal',origin,instance,path,method='GET',headers={},body}={})=>{
     if(!uiKey||key!==uiKey)throw new PaperError(403,'Open this operation from the Paper app.');
@@ -23,7 +23,7 @@ export function createUI(uiKey,home,guestFor=()=>null){
     if(workspaceId.startsWith('shared:')){const guest=guestFor(workspaceId.slice(7));if(!guest||guest.descriptor.origin!==origin||guest.descriptor.id!==instance)throw new PaperError(410,'Reopen the shared Paper invitation.');return guest.api(path,{method,headers,...(bytes&&method!=='GET'?{body:bytes}:{})});}
     const entry=await runningHomeWorkspace(workspaceId),server=entry.server;
     if(!server)return {status:410,headers:{'content-type':'application/json'},body:Buffer.from(JSON.stringify({error:'Paper server stopped.'})).toString('base64')};
-    if(server.url!==origin||server.instance!==instance||server.version!==VERSION)throw new PaperError(409,'The Paper server changed. Reopen Home to reconnect.');
+    if(server.url!==origin||server.instance!==instance||!compatibleWorkspace(server))throw new PaperError(409,'The Paper server changed. Reopen Home to reconnect.');
     const url=new URL(path,server.url);
     const api={home:['GET','POST'],access:['GET'],updates:['GET'],status:['GET'],paper:['GET','PUT'],scene:['GET','PUT'],feedback:['GET','PUT'],assets:['POST'],papers:['GET','POST'],presence:['GET','POST'],sharing:['GET','POST','DELETE'],'sharing/link':['POST'],'sharing/overview':['GET'],bundle:['GET'],import:['POST'],'notion/status':['GET'],'notion/connect':['POST'],'notion/connection':['DELETE'],'notion/pages':['POST'],'notion/save':['POST'],'notion/open':['POST']};
     const allowed=url.pathname.startsWith('/api/')?api[url.pathname.slice(5)]?.includes(method):method==='GET'&&/^\/(?:Paper\/|assets\/)/.test(url.pathname);

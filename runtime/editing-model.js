@@ -83,3 +83,26 @@ export function arrangeLayers(page,ids,operation){
   }else for(const v of rows){const x={left:minX,center:(minX+maxX-v.r.w)/2,right:maxX-v.r.w}[operation],y={top:minY,middle:(minY+maxY-v.r.h)/2,bottom:maxY-v.r.h}[operation];if(x===undefined&&y===undefined)throw new Error('Unknown arrangement.');moveLayer(v.node,x===undefined?0:(x-v.r.x)/v.p.sx,y===undefined?0:(y-v.r.y)/v.p.sy);}
   resolveConnections(page);return roots;
 }
+// A text layer can be edited in place only while it and every ancestor group, symbol or board is unlocked and shown.
+export function editableText(map,id){
+  let node=map.get(id);if(node?.type!=='text')return false;
+  const seen=new Set();
+  while(node){if(node.locked||node.visible===false||seen.has(node.id))return false;seen.add(node.id);node=map.get(node.parent);}
+  return true;
+}
+// Whether a layer hides whatever is painted beneath it at the pointer (a visibly filled, opaque shape).
+export function coversText(node){
+  if(!node||node.visible===false||(node.style?.opacity??1)<.9)return false;
+  if(!['rect','ellipse','frame'].includes(node.type))return false;
+  return !!node.style?.fills?.some(f=>f.type==='image'||(f.type==='solid'&&f.color&&f.color!=='transparent'));
+}
+// `ids` are the layers under the pointer, front to back. The first visible text layer wins, however deeply it is
+// nested; groups, symbols, connectors and unfilled shapes in front do not block it, an opaque shape in front does.
+export function textTarget(map,ids){
+  for(const id of ids){
+    const node=map.get(id);if(!node)continue;
+    if(node.type==='text')return editableText(map,id)?id:null;
+    if(coversText(node))return null;
+  }
+  return null;
+}

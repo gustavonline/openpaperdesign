@@ -17,6 +17,23 @@ function pageId(value) {
 }
 const pageURL=id=>`https://www.notion.so/${pageId(id).replace(/-/g,'')}`;
 const account=a=>a?.workspaceId||a?.client_id;
+// notionWorkspace is recorded only when Notion names it: client ids change on every reconnect and cannot prove an account switch.
+const identity=a=>({account:account(a),...(a?.workspaceId?{notionWorkspace:a.workspaceId}:{})});
+const otherWorkspace=(state,a)=>Boolean(state?.notionWorkspace&&a?.workspaceId&&state.notionWorkspace!==a.workspaceId);
+const REMOTE_CHECK_MS=10000;
+// One user-facing sync state per Paper; precedence puts the state needing a decision first.
+function syncState(r) {
+  if(!r.connected)return r.reconnect?'reconnect':'not-connected';
+  if(!r.link&&!r.needsReview)return 'unlinked';
+  if(r.saving)return 'saving';
+  if(r.needsReview)return 'needs-review';
+  if(r.accountMismatch)return 'other-account';
+  if(r.remote==='changed')return 'conflict';
+  if(r.remote==='denied')return 'no-access';
+  if(r.remote==='unavailable')return 'offline';
+  if(r.remote==='unchecked')return 'refresh-needed';
+  return r.changed?'local-changes':'saved';
+}
 function previewFiles(preview) {
   if(preview===undefined)return [];
   if(!preview||typeof preview!=='object'||Array.isArray(preview)||Object.keys(preview).some(k=>!['html','pngBase64'].includes(k)))fail(400,'Preview accepts only html and pngBase64');
@@ -71,7 +88,7 @@ function markup(managedId,remoteRevision,savedAt,files) {
 
 // Synchronous construction; all disk/network work is lazy and promise-based.
 export function createNotion({library,configDir,origin}) {
-  let client,folder,setup,closed=false,connectionError;
+  let client,statusClient,folder,setup,closed=false,connectionError;
   const pending=new Map(),inflight=new Set(),workspace=hex(library.workspace).slice(0,32);
   function currentOrigin() {
     let u;try{u=new URL(typeof origin==='function'?origin():origin);}catch{fail(500,'Notion needs the running workspace origin');}
@@ -83,14 +100,14 @@ export function createNotion({library,configDir,origin}) {
     if(!setup)setup=(async()=>{
       folder=await privateDirectory(configDir);
       if(folder===library.root||folder.startsWith(library.root+path.sep))fail(500,'Notion credentials must be stored outside Papers');
-      client=new NotionClient(folder);
+      client=new NotionClient(folder);statusClient=new NotionClient(folder,{refreshTokens:false});
     })().catch(e=>{setup=null;throw e;});
     await setup;
   }
   const linkFile=id=>path.join(folder,`notion-paper-${workspace}-${id}.json`);
   async function linked(id) {if(!ID.test(id||''))fail(400,'Invalid Paper identity');await library.folder(id);return readPrivate(linkFile(id),true);}
   async function authenticated() {await client.access();return client.auth();}
-  async function fetchPage(id) {return client.call('fetch',{id:pageId(id)});}
+  async function fetchPage(id,reader=client) {return reader.call('fetch',{id:pageId(id)});}
   async function remoteForSave(id) {
     try{return managed(await fetchPage(id));}
     catch(e){if(e.status===422)fail(409,'The remote Paper snapshot changed or is incomplete. Open it to compare; local and remote versions were preserved');throw e;}
@@ -139,24 +156,45 @@ export function createNotion({library,configDir,origin}) {
     try{return await completed(key,args);}
     catch(error){if(error.definiteNoWrite){if(previous)await record(id,previous);else await fs.rm(linkFile(id),{force:true});}throw error;}
   }
+  const differs=(remote,state)=>remote.remoteRevision!==state.link.remoteRevision||Boolean(state.managedHash)&&remote.managedHash!==state.managedHash;
+  // Read-only refresh of the linked page; a failure here is a status, never an exception, and never a write.
+  async function remoteState(state) {
+    let timer;
+    const check=(async()=>{
+      // A read may be repeated once after the client drops a cached session for a changed connection; writes never are.
+      const read=()=>fetchPage(state.link.pageId,statusClient).catch(e=>e.status===503?fetchPage(state.link.pageId,statusClient):Promise.reject(e));
+      try{return differs(managed(await read()),state)?'changed':'current';}
+      catch(e){return e.code==='NOTION_REFRESH_REQUIRED'?'unchecked':e.status===422||e.status===409?'changed':e.status===401?'reconnect':e.status===403?'denied':'unavailable';}
+    })();
+    const limit=new Promise(resolve=>{timer=setTimeout(resolve,REMOTE_CHECK_MS,'unavailable');});
+    try{return await Promise.race([check,limit]);}finally{clearTimeout(timer);}
+  }
   function sameRemote(remote,state) {
-    if(remote.remoteRevision!==state.link.remoteRevision||state.managedHash&&remote.managedHash!==state.managedHash)fail(409,'This Notion Paper changed since your last save. Open it as a new local Paper to compare; local and remote versions were preserved');
+    if(differs(remote,state))fail(409,'This Notion Paper changed since your last save. Open it as a new local Paper to compare; local and remote versions were preserved');
   }
   const methods={
     async status(paperId) {
       await ready();const a=await client.auth();
       const connected=Boolean(a?.access_token&&!a.reconnect&&!a.refreshing&&(!a.expiresAt||a.expiresAt>Date.now()||a.refresh_token));
-      const result={connected,...(connected&&a.name?{name:a.name}:{}),...(connectionError?{connectionError}:{})};
+      const reconnect=!connected&&Boolean(a?.reconnect||a?.access_token&&a.expiresAt&&a.expiresAt<=Date.now()&&!a.refresh_token);
+      const result={connected,...(reconnect?{reconnect:true}:{}),...(connected&&a.name?{name:a.name}:{}),...(connectionError?{connectionError}:{})};
       if(paperId) {
         const state=await linked(paperId);
         result.paperName=(await library.read(paperId)).paper.name;
         result.saving=inflight.has(paperId);
-        if(result.saving){if(state?.link)result.link=state.link;return result;}
-        if(state?.link) {
-          result.link=state.link;
-          result.changed=revision(await exportBundle(library,paperId))!==state.link.localRevision;
+        if(state?.link)result.link=state.link;
+        if(!result.saving) {
+          if(state?.link)result.changed=revision(await exportBundle(library,paperId))!==state.link.localRevision;
+          if(state?.pending){result.needsReview=true;const reviewId=state.pending.pageId||state.link?.pageId||state.pending.parentId;if(uuid(reviewId))result.reviewUrl=pageURL(reviewId);}
+          else if(connected&&state?.link) {
+            if(otherWorkspace(state,a))result.accountMismatch=true;
+            else {
+              result.remote=await remoteState(state);
+              if(result.remote==='reconnect'){result.connected=false;result.reconnect=true;delete result.name;}
+            }
+          }
         }
-        if(state?.pending){result.needsReview=true;const reviewId=state.pending.pageId||state.link?.pageId||state.pending.parentId;if(uuid(reviewId))result.reviewUrl=pageURL(reviewId);}
+        result.syncState=syncState(result);
       }
       return result;
     },
@@ -207,8 +245,8 @@ export function createNotion({library,configDir,origin}) {
       }catch(error){if(p?.returnTo){error.returnTo=p.returnTo;connectionError='Notion sign-in did not complete. Try connecting again.';}throw error;}
     },
     async disconnect() {
-      await ready();if(inflight.size)fail(423,'A Paper is saving to Notion. Complete the save before disconnecting');pending.clear();await withPrivateLock(folder,'notion-auth',()=>fs.rm(client.file,{force:true}));
-      client.close();client=new NotionClient(folder);return {connected:false};
+      await ready();if(inflight.size)fail(423,'A Paper is saving to Notion. Complete the save before disconnecting');pending.clear();connectionError=undefined;await withPrivateLock(folder,'notion-auth',()=>fs.rm(client.file,{force:true}));
+      client.close();statusClient.close();client=new NotionClient(folder);statusClient=new NotionClient(folder,{refreshTokens:false});return {connected:false};
     },
     async pages({query='',cursor}={}) {
       await ready();if(typeof query!=='string'||query.length>500||cursor!==undefined&&(typeof cursor!=='string'||cursor.length>4096))fail(400,'Invalid Notion page search');
@@ -240,6 +278,7 @@ export function createNotion({library,configDir,origin}) {
       if(inflight.has(paperId))fail(423,'This Paper is already saving to Notion');inflight.add(paperId);
       try{return await withPrivateLock(folder,`notion-save-${workspace}-${paperId}`,async()=>{
         const a=await authenticated(),existing=await linked(paperId),state=args.newCopy?null:existing;
+        if(state?.link&&otherWorkspace(state,a))fail(409,'This Paper is linked to a different Notion workspace than the one now connected. Connect that workspace again, or use Save elsewhere to create a separate page; nothing was written');
         if(existing?.link&&args.parentId&&!args.newCopy)fail(400,'Use Save elsewhere or newCopy:true to create a separate Notion page');
         if(state?.link&&args.title!==undefined)fail(400,'A title is only used when creating a new Notion page');
         if(state?.pending){const reviewId=state.pending.pageId||state.link?.pageId||state.pending.parentId;fail(409,`A previous Notion write is unverified. Inspect ${uuid(reviewId)?pageURL(reviewId):'the Notion page'} and Open the saved snapshot as a new Paper before saving again; a duplicate page was not created`);}
@@ -263,15 +302,15 @@ export function createNotion({library,configDir,origin}) {
           // Prepend a dated version on this same page; preserve every older snapshot and human note.
           await guardedWrite(paperId,existing,{...existing,pending:{kind:'update',at:savedAt}},'update-page',{page_id:id,command:'insert_content',content:section,position:{type:'start'},allow_async:false});
         } else {
-          const created=await guardedWrite(paperId,existing,{...existing,account:account(a),pending:{kind:'create',at:savedAt,parentId:parent}},'create-pages',{...(parent?{parent:{page_id:parent}}:{}),pages:[{properties:{title:args.title?.trim()||snapshot.paper.name},content:section}],allow_async:false});
+          const created=await guardedWrite(paperId,existing,{...existing,...identity(a),pending:{kind:'create',at:savedAt,parentId:parent}},'create-pages',{...(parent?{parent:{page_id:parent}}:{}),pages:[{properties:{title:args.title?.trim()||snapshot.paper.name},content:section}],allow_async:false});
           id=created.pages?.length===1?created.pages[0].id:null;
           if(!uuid(id))fail(502,'Notion did not confirm the new page identity. Inspect the chosen parent before retrying; no save success was recorded');
-          await record(paperId,{...existing,account:account(a),pending:{kind:'verify',at:savedAt,pageId:id,url:pageURL(id)}});
+          await record(paperId,{...existing,...identity(a),pending:{kind:'verify',at:savedAt,pageId:id,url:pageURL(id)}});
         }
         const confirmed=managed(await fetchPage(id));
         if(confirmed.managedId!==managedId||confirmed.remoteRevision!==remoteRevision||files.some(f=>!confirmed.section.includes(f.filename)&&f.tag!=='embed')||files.some(f=>f.tag==='embed')&&!/<embed\b/.test(confirmed.section))fail(502,'Notion did not retain the complete managed snapshot. Inspect the page; no save success was recorded');
         const link={pageId:id,url:pageURL(id),name:args.title?.trim()||state?.link?.name||snapshot.paper.name,savedAt,localRevision,remoteRevision};
-        await record(paperId,{account:account(a),link,managedHash:confirmed.managedHash});
+        await record(paperId,{...identity(a),link,managedHash:confirmed.managedHash});
         return {saved:true,link,changed:revision(await exportBundle(library,paperId))!==localRevision};
       });}finally{inflight.delete(paperId);}
     },
@@ -285,11 +324,11 @@ export function createNotion({library,configDir,origin}) {
       const imported=await importBundle(library,downloaded.body);
       try {
         const localRevision=revision(await exportBundle(library,imported.id));
-        await record(imported.id,{account:account(a),link:{pageId:id,url:pageURL(id),savedAt:remote.savedAt||new Date().toISOString(),localRevision,remoteRevision:remote.remoteRevision},managedHash:remote.managedHash});
+        await record(imported.id,{...identity(a),link:{pageId:id,url:pageURL(id),savedAt:remote.savedAt||new Date().toISOString(),localRevision,remoteRevision:remote.remoteRevision},managedHash:remote.managedHash});
       }catch{fail(500,`Paper imported as ${imported.id}, but its private Notion link could not be stored. The imported Paper is safe; check dataHome permissions`);}
       return {id:imported.id,name:imported.name,href:imported.href};
     },
-    close(){closed=true;pending.clear();client?.close();}
+    close(){closed=true;pending.clear();client?.close();statusClient?.close();}
   };
   // Public errors never include fetch exceptions, OAuth codes, tokens or remote response bodies.
   return Object.fromEntries(Object.entries(methods).map(([name,method])=>[name,name==='close'?method:async(...args)=>{
