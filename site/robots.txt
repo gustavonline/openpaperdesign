@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://openpaperdesign.arcitai.com/sitemap.xml
+Sitemap: https://openpaperdesign.gustavonline.com/sitemap.xml

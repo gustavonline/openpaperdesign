@@ -23,3 +23,10 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&offers.open){offers
 offers.addEventListener('focusout',e=>{if(!offers.contains(e.relatedTarget))offers.open=false;});
 const previews={design:['A design in the plugin editor. Actual browser/plugin development preview.','A design open in the OpenPaperDesign plugin editor in the browser. Development preview.'],diagram:['A diagram built from Library symbols. Actual browser/plugin development preview.','An editable diagram of Library symbols joined by connectors in the plugin editor. Development preview.'],home:['Home lists saved Papers. Actual browser/plugin development preview.','OpenPaperDesign Home listing saved Papers in the plugin. Development preview.']};
 document.querySelectorAll('[data-preview]').forEach(button=>button.addEventListener('click',()=>{const key=button.dataset.preview;if(!previews[key])return;document.querySelectorAll('[data-preview]').forEach(x=>x.setAttribute('aria-pressed',String(x===button)));const image=document.querySelector('#product-screenshot');image.src=`/assets/product-plugin-${key}.png`;document.querySelector('#preview-open').href=image.src;image.alt=previews[key][1];document.querySelector('#preview-caption').textContent=previews[key][0];}));
+
+const copyStatus=document.querySelector('#copy-status');
+for(const button of document.querySelectorAll('[data-copy]'))button.addEventListener('click',async()=>{
+  const code=document.getElementById(button.dataset.copy);
+  try{await navigator.clipboard.writeText(code.textContent);copyStatus.textContent=button.dataset.copy==='install-prompt'?'Install prompt copied. Paste it into your agent.':'Commands copied.';}
+  catch{const selection=getSelection();const range=document.createRange();range.selectNodeContents(code);selection.removeAllRanges();selection.addRange(range);copyStatus.textContent='Copy is unavailable. The text is selected; press Command+C or Ctrl+C to copy.';code.tabIndex=-1;code.focus({preventScroll:true});}
+});

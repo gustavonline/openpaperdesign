@@ -17,7 +17,7 @@ test('the active page offers no standalone download, counter or release-API call
 });
 
 test('install section states the real requirements and boundaries',()=>{
-  for(const phrase of [/Node\.js 22 or later/,/outside the plugin cache|never inside the plugin cache/,/manual snapshot/,/not live sync/,/optional/i,/earlier standalone app are preserved/,/different format/,/not converted automatically/,/not a standalone desktop app/])assert.match(text,phrase);
+  for(const phrase of [/Node\.js 22 or later/,/outside the plugin cache|never inside the plugin cache/,/complete snapshots in Notion/,/Reopen a snapshot as a local Paper/,/optional/i])assert.match(text,phrase);
   assert.match(html,/id="install"/);
   assert.equal([...html.matchAll(/href="#install"/g)].length,3);
 });
@@ -40,7 +40,7 @@ test('project links point at the successor and its published preview packages',(
   assert.ok(links.includes('https://github.com/gustavonline/openpaperdesign#install'));
   assert.ok(links.includes('https://github.com/gustavonline/openpaperdesign/releases'));
   assert.ok(!links.some(u=>u.startsWith('https://github.com/arcitai/openpaperdesign/releases')||u.includes('/blob/328623852a')));
-  assert.ok(links.includes('https://github.com/arcitai/openpaperdesign'),'old repository stays reachable as history');
+  assert.ok(!links.includes('https://github.com/arcitai/openpaperdesign'),'product page does not refer visitors to retired app');
   assert.doesNotMatch(html,/\.zip"|\.tar\.gz"|\.dmg"/);
 });
 
@@ -53,7 +53,7 @@ test('the gallery uses exactly the three browser/plugin development previews',()
   for(const key of tabs)assert.match(script,new RegExp(`${key}:\\['`));
   assert.match(script,/product-plugin-\$\{key\}\.png/);
   assert.match(text,/browser\/plugin development previews/);
-  assert.match(text,/not captures of the earlier native app and have not been release-qualified/);
+  assert.doesNotMatch(text,/Earlier desktop project|An Arc’IT AI project/);
   const alts=[...html.matchAll(/<img[^>]*src="\/assets\/product-[^>]*>/g)].map(m=>m[0]);
   assert.equal(alts.length,4);
   for(const img of alts)assert.match(img,/alt="[^"]*[Dd]evelopment preview\.?"/);
@@ -66,7 +66,7 @@ test('unsupported feature claims stay off the page',()=>{
 
 test('theme, navigation and family links of the established layout remain',()=>{
   for(const id of ['theme-toggle','menu-toggle','menu-close','mobile-navigation','preview-open','product-screenshot','preview-caption'])assert.match(html,new RegExp(`id="${id}"`));
-  for(const href of ['https://arcitai.com/','https://onlinesourdough.com/','https://onlinesourdough.com/fermentary/','https://gustavonline.com/'])assert.ok(html.includes(`href="${href}"`),href);
+  for(const href of ['https://arcitai.com/','https://onlinesourdough.com/','https://gustavonline.com/'])assert.ok(html.includes(`href="${href}"`),href);
   assert.match(html,/class="family-links"/);
   assert.match(script,/openpaperdesign-site-theme/);
   assert.match(html,/Independent of Paper \(paper\.design\)/);
