@@ -5,7 +5,7 @@ import { setupSharing } from './sharing.js?v=6d255ae1b910';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText} from './editing-model.js?v=6f3b93cc6712';
-import {setupNotion,notionIcon} from './notion-ui.js?v=f4fa90dc79e3';
+import {setupNotion,notionIcon} from './notion-ui.js?v=6878eb830ec9';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
 const stage = $('#stage'), world = $('#world'), body = document.body, form = $('#properties'), tree = $('#layer-tree');

@@ -468,3 +468,18 @@ test('schema-gated update-page Trash fallback accepts exact single-page state ac
  const h=await harness(t);h.fake.state.disableTrashTools=true;await saveFirst(h);h.fake.state.fetchMetadata=false;await h.notion.prepareLocalTrash(h.id);
  assert.equal((await h.notion.trashLinked(h.id)).safeToTrashLocal,true);assert.equal((await h.notion.restoreLinked(h.id)).remoteTrashed,false);
 });
+
+
+test('a verified Notion copy already in Trash allows local Trash without readable archive or another deletion',async t=>{
+  const h=await harness(t);await saveFirst(h);await h.notion.prepareLocalTrash(h.id);
+  h.fake.state.contexts.set(PAGE,{id:PAGE,in_trash:true});
+  const result=await h.notion.trashLinked(h.id);
+  assert.equal(result.safeToTrashLocal,true);assert.equal(result.verified,true);assert.equal(h.fake.state.trashCalls.length,0);
+  assert.equal((await localState(h)).remoteTrashed,true);assert.equal((await localState(h)).autosync.enabled,false);
+});
+
+test('a missing Notion page is not assumed trashed and offers the independent local-only choice',async t=>{
+  const h=await harness(t);await saveFirst(h);await h.notion.prepareLocalTrash(h.id);h.fake.state.pages.delete(PAGE);
+  await assert.rejects(h.notion.trashLinked(h.id),error=>error.status===409&&/Only this computer/.test(error.message));
+  await h.library.folder(h.id);assert.equal(h.fake.state.trashCalls.length,0);assert.equal((await localState(h)).pending,undefined);
+});

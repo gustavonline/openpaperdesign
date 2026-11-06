@@ -1,6 +1,6 @@
 import {compatibleWorkspace} from './workspace-protocol.js?v=78da2eb567e7';
 import {surfaceReady,surfaceStopped,onSurfaceDispose,inPaperSurface} from './surface.js?v=da065f7b280e';
-const VERSION='0.7.0-preview.18';
+const VERSION='0.7.0-preview.19';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper'),cardMenu=document.getElementById('card-menu');
 let menuCard=null,selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,optionsKey='';
 
@@ -130,7 +130,7 @@ async function openFromNotion(){
   openMenu.hidePopover();
   await opening(async()=>{const workspaceId=selected==='all'?'personal':selected,url=await targetURL(workspaceId);
     if(url.origin!==location.origin){url.searchParams.set('collection',workspaceId);url.hash='notion';return navigate(url.href);}
-    if(!notionHome){const module=await import('./notion-ui.js?v=f4fa90dc79e3');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
+    if(!notionHome){const module=await import('./notion-ui.js?v=6878eb830ec9');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
     await notionHome.open();
   },'Opening Notion…');
 }

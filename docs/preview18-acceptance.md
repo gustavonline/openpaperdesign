@@ -16,3 +16,7 @@ Candidate for PR #10. Preview.17 remains the released plugin. Website deployment
 Automated evidence includes mocked provider sync/trash/restore/conflict cases, real local HTTP autosync, SSE watcher deduplication, Home transaction coordination and browser fixtures. No owner Notion page was uploaded, trashed or restored during those checks. Real Notion cloud mutation and native Codex acceptance are still required on the qualified candidate backend.
 
 Automatic snapshots update the complete editable file archive. A manual Save refreshes the rendered Notion preview. Autosync requires the workspace server to be running. Provider responses that cannot prove a cloud Trash/restore result preserve local data and require review; restoring locally remains available.
+
+## Preview.19 follow-up
+
+Successful explicit Notion saves close the dialog and show canvas feedback. New local edits made while saving remain identified in that feedback; errors stay visible. Trash choices use natural radio sizes, wrap long URLs and remain usable on narrow screens. A verified page already in Notion Trash needs no second delete or readable archive. A missing page is not assumed deleted: local files are preserved and the dialog explains the local-only alternative. Browser fixtures cover successful save/feedback/reopen plus both Trash choices at desktop/mobile widths. Regression tests cover metadata-only Trash proof and missing-page refusal.

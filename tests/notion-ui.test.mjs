@@ -35,7 +35,7 @@ const {setupNotion}=await import('../runtime/notion-ui.js');
 const paper='p1',link={pageId:'11111111111111111111111111111111',url:'https://www.notion.so/11111111111111111111111111111111',savedAt:'2026-11-05T10:00:00.000Z'};
 const controllers=new Set();
 function harness(statuses,{access,save,pages,autosync}={}) {
-  const calls=[],requests=[],queue=[...statuses];
+  const calls=[],requests=[],messages=[],queue=[...statuses];
   const request=async(path,{method='GET',body}={})=>{
     requests.push({path,method,body});
     calls.push(`${method} ${path.split('?')[0]}`);
@@ -46,12 +46,12 @@ function harness(statuses,{access,save,pages,autosync}={}) {
     if(path.startsWith('/api/notion/connection'))return {connected:false};
     throw new Error(`unexpected ${path}`);
   };
-  const ui=setupNotion({paperId:paper,access,request});controllers.add(ui);
+  const ui=setupNotion({paperId:paper,access,request,message:text=>messages.push(text)});controllers.add(ui);
   const dialog=()=>document.body.children.at(-1);
   const text=()=>dialog().textContent;
   const buttons=()=>dialog().querySelectorAll('button').map(b=>b.textContent.trim());
   const press=label=>dialog().querySelectorAll('button').find(b=>b.textContent.trim()===label).fire('click');
-  return {ui,calls,requests,text,buttons,press};
+  return {ui,calls,requests,text,buttons,press,messages,dialog};
 }
 const connected={connected:true,name:'Workspace',link,paperName:'P'};
 const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
@@ -115,8 +115,8 @@ test('returning focus revalidates an open dialog and redraws state-driven views'
 test('a save that finishes after a local edit reports the edit as still unsaved',async()=>{
   const h=harness([{...connected,syncState:'local-changes',changed:true}],{save:async()=>({pageId:link.pageId,link:{...link,savedAt:'2026-11-05T11:00:00.000Z'},changed:true})});
   await h.ui.save();h.press('Save changes');await settle();await settle();
-  assert.match(h.text(),/edited this Paper while it was saving/);
-  assert.ok(h.buttons().includes('Save changes'));
+  assert.equal(h.dialog().open,false);
+  assert.match(h.messages.at(-1),/New local edits are waiting to sync/);
 });
 
 test('an unchanged focus refresh keeps the existing keyboard target',async()=>{
@@ -130,12 +130,14 @@ test('an unchanged focus refresh keeps the existing keyboard target',async()=>{
   }finally{Date.now=now;h.ui.destroy();}
 });
 
-test('the first refresh after saving preserves the Open in Notion target',async()=>{
+test('a successful save closes; reopening retains a stable Open in Notion target',async()=>{
   const savedLink={...link,savedAt:'2026-11-05T11:00:00.000Z'};
   const h=harness([{...connected,syncState:'local-changes',changed:true},{...connected,link:savedLink,syncState:'saved',changed:false,remote:'current'}],{save:async()=>({pageId:link.pageId,link:savedLink,changed:false})});
   const now=Date.now;
   try{
     await h.ui.save();h.press('Save changes');await settle();await settle();
+    assert.equal(h.dialog().open,false);assert.match(h.messages.at(-1),/Paper saved to Notion/);
+    await h.ui.save();
     const target=document.body.children.at(-1).querySelector('a[href]');
     target.focus();Date.now=()=>now()+6000;windowEvents.fire('focus');await settle();
     assert.equal(document.activeElement,target);assert.equal(target.isConnected,true);
@@ -203,4 +205,17 @@ test('Trash and uncertain-write views never offer resume or a save that could re
     assert.equal(h.buttons().some(label=>/Resume autosync|Save changes|Save again|Save a separate copy/.test(label)),false);
     h.ui.destroy();document.body.children=[];
   }
+});
+
+
+test('a failed save keeps the dialog and its error visible without a success toast',async()=>{
+  const h=harness([{...connected,syncState:'local-changes',changed:true}],{save:async()=>{throw Object.assign(new Error('Offline'),{status:503});}});
+  await h.ui.save();h.press('Save changes');await settle();await settle();
+  assert.equal(h.dialog().open,true);assert.match(h.text(),/Could not save to Notion/);assert.deepEqual(h.messages,[]);
+});
+
+test('a save acknowledged by a follow-up status closes with honest success feedback',async()=>{
+  const h=harness([{...connected,syncState:'local-changes',changed:true},{...connected,link:{...link,savedAt:'2026-11-06T10:00:00Z'},changed:false,syncState:'saved'}],{save:async()=>{throw Object.assign(new Error('Response lost'),{status:502});}});
+  await h.ui.save();h.press('Save changes');await settle();await settle();
+  assert.equal(h.dialog().open,false);assert.match(h.messages.at(-1),/Paper saved to Notion/);
 });

@@ -545,6 +545,12 @@ export function setupNotion({
     if (progress.focused?.isConnected && !progress.focused.disabled) progress.focused.focus();
   }
 
+  function finishSave(changed) {
+    dialog.close();
+    notify(changed ? 'Snapshot saved to Notion. New local edits are waiting to sync.' :
+      connectionState.autosync?.enabled ? 'Paper saved to Notion. Autosync is on.' : 'Paper saved to Notion.');
+  }
+
   async function savePaper(token, parentId,newCopy=false,pageTitle) {
     if (!alive(token) || mutating || !owner()) return;
     mutating = true;
@@ -566,12 +572,11 @@ export function setupNotion({
       const changed = result.changed === true;
       connectionState = { ...connectionState, link: result.link||result, ...(result.autosync?{autosync:result.autosync}:{}), changed, needsReview: false, saving: false, remote: 'current', syncState: changed ? 'local-changes' : 'saved' };
       mutating = false;
-      savedView(token, true);
-      notify('Paper saved to Notion.');
+      finishSave(changed);
     } catch (error) {
       if (!current(token, screenId)) return;
       mutating = false;
-      try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(next.saving){savingView(token);return;}if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview){savedView(token,true);return;}if(next.needsReview||!next.connected){resume(token);if(!next.connected)showError(failure(error));return;}}catch{/* Preserve the original failure if status is unavailable too. */}
+      try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(next.saving){savingView(token);return;}if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview){finishSave(next.changed===true);return;}if(next.needsReview||!next.connected){resume(token);if(!next.connected)showError(failure(error));return;}}catch{/* Preserve the original failure if status is unavailable too. */}
       if (errorStatus(error) === 409) conflictView(token, error);
       else {
         releaseBusy(progress);

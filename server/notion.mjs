@@ -297,9 +297,17 @@ export function createNotion({library,configDir,origin,autosync:timing={}}) {
       if(!state?.link)fail(409,'This Paper has no linked Notion page');
       if(state.pending&&(trashed!==null||!['trash','restore'].includes(state.pending.kind)))fail(409,'A Notion write is unverified. Preserve the local Paper and verify that operation first');
       if(trashed===true&&!state.localTrashed)fail(409,'Prepare local Trash before moving the linked Notion page');
-      const auth=await verifyAccount(state),remote=await fetchPage(state.link.pageId),observed=trashState(remote);
+      const auth=await verifyAccount(state);
+      let remote;
+      try{remote=await fetchPage(state.link.pageId);}catch(error){
+        if(error.status===404||error.remoteStatus===404)fail(409,'Notion could not find the linked page. It may be in Trash or no longer accessible. Choose Only this computer to leave Notion as it is');
+        throw error;
+      }
+      const observed=trashState(remote);
       if(observed===null&&trashed===null)fail(409,'Notion did not expose a verifiable Trash state. Preserve the local Paper and check Notion');
-      sameRemote(managed(remote),state);
+      // A verified page already in Trash needs no mutation or readable file archive.
+      // Missing/inaccessible pages are never inferred to be trashed.
+      if(!(observed===true&&trashed!==false))sameRemote(managed(remote),state);
       if(trashed===null) {
         if(state.pending&&observed!==(state.pending.kind==='trash'))fail(409,'The remote Trash result is still unverified. Preserve the local Paper; no retry was made');
       } else if(observed!==trashed) {
