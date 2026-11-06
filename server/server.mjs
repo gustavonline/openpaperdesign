@@ -60,8 +60,9 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
   const presence=createPresence({publish:data=>emit('presence',data)});
   const sharing=createSharing({library,editor,presence,publicUrl:shareUrl,port:sharePort});
   const notion=createNotion({library,configDir:dataHome(),origin:()=>`http://127.0.0.1:${server.address().port}`});
-  const emit=(event,data)=>{const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
-  library.onChange=emit;
+  const lastChanges=new Map();
+  const emit=(event,data)=>{if(['paper-changed','feedback-changed'].includes(event)&&data?.revision){const key=event+':'+data.paperId;lastChanges.set(key,data.revision);if(lastChanges.size>1024)lastChanges.delete(lastChanges.keys().next().value);}const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
+  library.onChange=(event,data)=>{emit(event,data);if(data?.paperId&&['paper-changed','feedback-changed','guide-changed'].includes(event))void notion.changed(data.paperId).catch(error=>process.stderr.write(`Notion queue: ${error.message}\n`));};
   const server=http.createServer(async(req,res)=>{
     try {
       const address=server.address(),host=req.headers.host,validHost=host===`127.0.0.1:${address.port}`||host===`localhost:${address.port}`;
@@ -72,7 +73,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       if(pathname==='/api/events'&&req.method==='GET'){
         res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});res.write(': connected\n\n');res.paperId=url.searchParams.getAll('paper').length===1&&ID.test(url.searchParams.get('paper'))?url.searchParams.get('paper'):null;streams.add(res);if(res.paperId)res.write(`event: presence-snapshot\ndata: ${JSON.stringify(presence.snapshot(res.paperId))}\n\n`);req.on('close',()=>streams.delete(res));return;
       }
-      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION,instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
+      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION,features:{notionAutosync:1},instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
       if(pathname==='/api/server/stop'&&req.method==='POST'){
         const args=JSON.parse(await readBody(req,1024));
         if(args?.instance!==registration?.instance)throw new PaperError(409,'The server changed. Refresh Home before stopping it.');
@@ -100,7 +101,9 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
           catch(error){destination=error.returnTo==='/home.html?notion_connected=1'?'/home.html?notion_connected=1&notion_error=1':'/home.html?notion_error=1#notion';}
           res.writeHead(303,{'Location':destination,'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});res.end();return;
         }
-        if(pathname==='/api/notion/status'&&req.method==='GET')return json(res,200,await notion.status(url.search?paperId(url):undefined));
+        if(pathname==='/api/notion/restore'&&req.method==='POST'){const body=JSON.parse(await readBody(req,512));if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)throw new PaperError(400,'Restore takes no options');return json(res,200,await notion.restoreLinked(paperId(url)));}
+        if(pathname==='/api/notion/autosync'&&req.method==='POST')return json(res,200,await notion.setAutosync(paperId(url),await readBody(req,4096).then(b=>JSON.parse(b))));
+      if(pathname==='/api/notion/status'&&req.method==='GET')return json(res,200,await notion.status(url.search?paperId(url):undefined));
         if(pathname==='/api/notion/connect'&&req.method==='POST'){if(url.search)throw new PaperError(400,'Unexpected connection query');const bytes=await readBody(req,4096),args=bytes.length?JSON.parse(bytes):{};if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>k!=='returnTo'))throw new PaperError(400,'Invalid connection options');return json(res,200,await notion.connect(args));}
         if(pathname==='/api/notion/connection'&&req.method==='DELETE')return json(res,200,await notion.disconnect());
         if(pathname==='/api/notion/pages'&&req.method==='POST')return json(res,200,await notion.pages(JSON.parse(await readBody(req,8192))));
@@ -171,12 +174,13 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
     watcher=watch(library.root,{recursive:true},(_event,file)=>{
       const parts=String(file||'').split(path.sep);if(parts.length!==2||!ID.test(parts[0])||!['paper.json','feedback.json','DESIGN.md','CONTEXT.md'].includes(parts[1]))return;
       const key=parts.join('/');clearTimeout(timers.get(key));timers.set(key,setTimeout(async()=>{
-        timers.delete(key);try{const kind=parts[1]==='paper.json'?'paper':parts[1]==='feedback.json'?'feedback':'guide',data=kind==='guide'?(await library.notes(parts[0]))[parts[1]]:await library.read(parts[0],kind);emit(`${kind}-changed`,{paperId:parts[0],revision:data.revision,clientId:''});}catch(error){process.stderr.write(`Paper file change: ${error.message}\n`);}
+        timers.delete(key);try{const kind=parts[1]==='paper.json'?'paper':parts[1]==='feedback.json'?'feedback':'guide',data=kind==='guide'?(await library.notes(parts[0]))[parts[1]]:await library.read(parts[0],kind);if(lastChanges.get(`${kind}-changed:${parts[0]}`)!==data.revision)emit(`${kind}-changed`,{paperId:parts[0],revision:data.revision,clientId:''});void notion.changed(parts[0]).catch(error=>process.stderr.write(`Notion queue: ${error.message}\n`));}catch(error){process.stderr.write(`Paper file change: ${error.message}\n`);}
       },120));
     });
     watcher.on('error',error=>{process.stderr.write(`File watching stopped: ${error.message}. API updates still notify open browsers.\n`);watcher.close();});
   }catch(error){process.stderr.write(`File watching unavailable: ${error.message}. API updates still notify open browsers.\n`);}
-  app={library,server,sharing,presence,notion,url:`http://127.0.0.1:${server.address().port}`,get closed(){return !!closingPromise;},close(){return closingPromise??=(async()=>{for(const child of homeApps.values())await child.close();notion.close();presence.close();clearInterval(heartbeat);watcher?.close();for(const t of timers.values())clearTimeout(t);for(const res of streams)res.end();streams.clear();await sharing.close();await new Promise(resolve=>server.close(resolve));await registration.close();})();}};
+  app={library,server,sharing,presence,notion,url:`http://127.0.0.1:${server.address().port}`,get closed(){return !!closingPromise;},close(){return closingPromise??=(async()=>{for(const child of homeApps.values())await child.close();await notion.close();presence.close();clearInterval(heartbeat);watcher?.close();for(const t of timers.values())clearTimeout(t);for(const res of streams)res.end();streams.clear();await sharing.close();await new Promise(resolve=>server.close(resolve));await registration.close();})();}};
+  try{await notion.start();}catch(error){process.stderr.write(`Notion autosync unavailable: ${error.message}\n`);}
   return app;
 }
 
@@ -190,7 +194,7 @@ async function connectWorkspace(root,agentClient){
 const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:['paper_list','paper_read','paper_read_feedback'].includes(name),destructiveHint:false,openWorldHint:false}});
 export const TOOLS=[
   {...tool('paper_ui','Use the owner API for the selected Paper library from the native app.',{key:string,workspaceId:string,origin:string,instance:string,path:string,method:{type:'string',enum:['GET','POST','PUT','DELETE']},headers:{type:'object',additionalProperties:{type:'string'}},body:string},['key','workspaceId','origin','instance','path']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},_meta:{ui:{visibility:['app']}}},
-  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop','sharing','stop-sharing','rename','reveal','trash','trash-list','restore']},workspaceId:string,paperId:string,name:string,instance:string,invitationId:string,trashId:string}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]}}},
+  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop','sharing','stop-sharing','rename','reveal','trash','trash-list','restore']},workspaceId:string,paperId:string,name:string,instance:string,invitationId:string,trashId:string,copies:{type:'string',enum:['local','both'],description:'Omitted means local only. Use both only after the user confirmed the linked Notion destination.'}}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]}}},
   {...tool('paper_join','Join a shared Paper invitation. Opens its live canvas and selects it for the artwork tools. No local workspace or extra MCP setup is needed. paper_open switches back to local Papers.',{url:string},['url']),title:'Open shared Paper',annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI}},
   tool('paper_open','Open a Paper workspace. Omit workspace for the personal library; select an absolute project folder for project-local Papers.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
   tool('paper_list','List saved Papers in the opened workspace.',{}),
@@ -203,7 +207,7 @@ export const TOOLS=[
   tool('paper_activity','Show your current activity and optional work area. Empty status clears it. Temporary, not saved artwork.',{paperId:string,status:{type:'string',maxLength:120},pageId:string,nodeId:{type:'integer'},rect:{type:'object',properties:{x:{type:'number'},y:{type:'number'},w:{type:'number'},h:{type:'number'}},required:['x','y','w','h'],additionalProperties:false}},['paperId','status']),
   tool('paper_write_note','Update DESIGN.md or CONTEXT.md with its read revision.',{paperId:string,file:{type:'string',enum:['DESIGN.md','CONTEXT.md']},revision:string,text:string},['paperId','file','revision','text']),
   tool('paper_package','Export a complete portable .paper.zip or import one as a new Paper. Files must be inside the selected workspace. Export never replaces an existing file.',{action:{type:'string',enum:['export','import']},paperId:string,file:string},['action','file']),
-  {...tool('paper_notion','Connect the official Notion account, list accessible pages, save/update a Paper, or open a cloud snapshot as a new local Paper. Login completes in the browser. Save is explicit; remote changes are never silently overwritten.',{action:{type:'string',enum:['status','connect','disconnect','pages','save','open']},paperId:string,parentId:string,pageId:string,title:string,query:string,cursor:string,newCopy:{type:'boolean'}},['action']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true}},
+  {...tool('paper_notion','Connect the official Notion account, list accessible pages, save/update a Paper, or open a cloud snapshot as a new local Paper. Login completes in the browser. Save is explicit; remote changes are never silently overwritten.',{action:{type:'string',enum:['status','connect','disconnect','pages','save','open','autosync']},paperId:string,parentId:string,pageId:string,title:string,query:string,cursor:string,newCopy:{type:'boolean'},enabled:{type:'boolean'}},['action']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true}},
 ];
 export async function serveStdio() {
   // An installed version can be pruned while this process is still attached to its host.
@@ -238,10 +242,11 @@ export async function serveStdio() {
       const bytes=await exportBundle(active.library,args.paperId);await fs.writeFile(path.join(directory,path.basename(args.file)),bytes,{flag:'wx',mode:0o600});return {file:args.file,bytes:bytes.length};
     }
     if(name==='paper_notion'){
-      const route={status:['GET','status'],connect:['POST','connect'],disconnect:['DELETE','connection'],pages:['POST','pages'],save:['POST','save'],open:['POST','open']}[args.action];if(!route)throw new PaperError(400,'Unknown Notion action');
+      const route={status:['GET','status'],connect:['POST','connect'],disconnect:['DELETE','connection'],pages:['POST','pages'],save:['POST','save'],open:['POST','open'],autosync:['POST','autosync']}[args.action];if(!route)throw new PaperError(400,'Unknown Notion action');
       if(args.paperId&&!ID.test(args.paperId))throw new PaperError(400,'Invalid Paper identity');
-      const query=['save','status'].includes(args.action)&&args.paperId?`?paper=${encodeURIComponent(args.paperId)}`:'';
-      const body=args.action==='pages'?Object.fromEntries(['query','cursor'].filter(k=>args[k]!==undefined).map(k=>[k,args[k]])):args.action==='save'?{...(args.parentId?{parentId:args.parentId}:{}),...(args.newCopy!==undefined?{newCopy:args.newCopy}:{}),...(args.title!==undefined?{title:args.title}:{})}:args.action==='open'?{pageId:args.pageId}:{};
+      if(args.action==='autosync'&&!args.paperId)throw new PaperError(400,'Choose a Paper for autosync');
+      const query=['save','status','autosync'].includes(args.action)&&args.paperId?`?paper=${encodeURIComponent(args.paperId)}`:'';
+      const body=args.action==='pages'?Object.fromEntries(['query','cursor'].filter(k=>args[k]!==undefined).map(k=>[k,args[k]])):args.action==='save'?{...(args.parentId?{parentId:args.parentId}:{}),...(args.newCopy!==undefined?{newCopy:args.newCopy}:{}),...(args.title!==undefined?{title:args.title}:{})}:args.action==='open'?{pageId:args.pageId}:args.action==='autosync'?{enabled:args.enabled}:{};
       const response=await fetch(`${active.url}/api/notion/${route[1]}${query}`,{method:route[0],headers:{Origin:active.url,'Content-Type':'application/json'},...(route[0]==='POST'?{body:JSON.stringify(body)}:{})});const result=await response.json();if(!response.ok)throw new PaperError(response.status,result.error||'Notion request failed');return result;
     }
     if(name==='paper_list')return {papers:await active.library.list()};

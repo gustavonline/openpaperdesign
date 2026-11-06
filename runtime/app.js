@@ -1,11 +1,11 @@
-import {setupSidebar} from './sidebar.js?v=c6521d10e441';
+import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
 import {setupPresence} from './presence.js?v=7259cc25cb5c';
-import { setupSharing } from './sharing.js?v=48aa310546f2';
+import { setupSharing } from './sharing.js?v=6d255ae1b910';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText} from './editing-model.js?v=6f3b93cc6712';
-import {setupNotion,notionIcon} from './notion-ui.js?v=83a96945da7c';
+import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
 const stage = $('#stage'), world = $('#world'), body = document.body, form = $('#properties'), tree = $('#layer-tree');
@@ -31,7 +31,7 @@ if (access.shared) { for (const item of document.querySelectorAll(inPaperSurface
 if(access.shared&&!inPaperSurface)$('#home').hidden=true;
 if(!canEdit)for(const item of document.querySelectorAll('[data-action="rename"],#undo,#redo'))item.hidden=true;
 if (!canEdit) { for (const field of form.querySelectorAll('input,textarea,select')) field.disabled = true; $('[data-action="rename"]').disabled = true; $('#title-text').disabled = true; }
-const sharingUI=setupSharing({paperId,access,closeMenu,onCancel:()=>{if(inspectionHost.stableMode==='edit')setTool('select');else inspectionHost.api?.resetInspect();}});
+const sharingUI=setupSharing({paperId,access,closeMenu,getPaperName:()=>scene?.name||'Untitled Paper',notify:message,onCancel:()=>{if(inspectionHost.stableMode==='edit')setTool('select');else inspectionHost.api?.resetInspect();}});
 const notionUI=setupNotion({paperId,access,beforeSave:async()=>{commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your local changes before continuing.');},preview:paperPreview,onOpen:async href=>{if(!await flushSave()||!await flushFeedback())throw new Error('Save your current Paper before opening another.');leaving=true;location.assign(href);},message});
 $('#notion-share-icon').innerHTML=notionIcon;
 $('#save-notion').addEventListener('click',()=>{closeMenu();notionUI.save();});
@@ -701,10 +701,14 @@ function startTextEdit(key, selectAll = false) {
   element.contentEditable = 'plaintext-only'; if (element.contentEditable !== 'plaintext-only') element.contentEditable = 'true';
   element.focus({ preventScroll: true }); textEdit = key; textCancel = false;
   if (selectAll) { const range = document.createRange(); range.selectNodeContents(element); getSelection().removeAllRanges(); getSelection().addRange(range); }
+  let editedHeight=before.rect.h;
+  const fitText=()=>{element.style.height='auto';editedHeight=Math.max(before.rect.h,Math.ceil(element.scrollHeight));element.style.height=editedHeight+'px';};
+  element.addEventListener('input',fitText);
   element.addEventListener('blur', () => {
+    element.removeEventListener('input',fitText);
     textEdit = null; element.contentEditable = 'false';
-    if (!textCancel) entry.node.text = element.innerText.replace(/\n$/, '');
-    textCancel = false; paint(key); if (entry.node.text !== before.text) record(key, before, copy(entry.node)); populateInspector();
+    if (!textCancel) {entry.node.text = element.innerText.replace(/\n$/, '');entry.node.rect.h=editedHeight;}
+    textCancel = false; paint(key); if (entry.node.text !== before.text||entry.node.rect.h!==before.rect.h) record(key, before, copy(entry.node)); populateInspector();
   }, { once: true });
 }
 function cancelTextEdit() { if (textEdit) { textCancel = true; dom.get(textEdit)?.blur(); } }

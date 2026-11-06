@@ -112,7 +112,7 @@ export function setupNotion({
       const next = await status();
       if (!current(token, screenId) || mutating) return;
       const flipped = next.connected !== connectionState.connected;
-      const visible = state => JSON.stringify([state.connected === true, state.reconnect === true, state.syncState, state.changed === true, state.link?.savedAt, state.link?.url, state.link?.pageId, state.paperName, state.needsReview === true, state.saving === true, state.reviewUrl, state.connectionError]);
+      const visible = state => JSON.stringify([state.connected === true, state.reconnect === true, state.syncState, state.changed === true, state.link?.savedAt, state.link?.url, state.link?.pageId, state.paperName, state.needsReview === true, state.saving === true, state.reviewUrl, state.connectionError, state.autosync, state.autosyncRunning, state.localTrashed, state.remoteTrashed]);
       const changed = visible(next) !== visible(connectionState);
       connectionState = next;
       if (flipped || viewKind === 'saved' && changed) resume(token);
@@ -265,7 +265,7 @@ export function setupNotion({
     else if(mode==='save'&&connectionState.needsReview){
       screen();body.append(live('The previous save could not be confirmed. Check its Notion page before saving again.'));
       const url=notionURL(connectionState.reviewUrl||connectionState.link?.url);
-      body.append(actions(...(url?[externalLink('Check in Notion',url)]:[]),button('Open Notion version…',()=>{mode='open';title.textContent='Open from Notion';picker(token);})));body.append(note('After checking Notion, you can save a separate copy instead. This creates another page.'));body.append(button('Save a separate copy…',()=>picker(token,true),'notion-quiet'));cancel.textContent='Close';
+      body.append(actions(...(url?[externalLink('Check in Notion',url)]:[]),button('Open Notion version…',()=>{mode='open';title.textContent='Open from Notion';picker(token);})));body.append(note('Autosync is paused. Open the verified snapshot as a separate local Paper before saving again.'));cancel.textContent='Close';
     }
     else if (mode === 'save' && connectionState.link?.pageId) savedView(token, false);
     else picker(token);
@@ -315,10 +315,50 @@ export function setupNotion({
     }
   }
 
+  function syncControls(token) {
+    const sync=connectionState.autosync;
+    if(!sync||!connectionState.link)return;
+    const section=element('section','notion-sync');section.setAttribute('aria-label','Paper sync');
+    const blocked=connectionState.needsReview||connectionState.localTrashed||connectionState.remoteTrashed||connectionState.syncState==='trashed';
+    const reasons={'user':'by you','conflict':'because the Notion page needs checking','other-account':'because the connected workspace changed','no-access':'because access was denied','reconnect':'until you reconnect','needs-review':'until the previous write is verified','local-trash':'for local Trash','remote-trash':'for Notion Trash','offline':'after repeated offline failures','error':'because a request needs checking','verification-required':'until Notion can verify that the page is active'};
+    const attention=['conflict','other-account','no-access','reconnect'].includes(connectionState.syncState);
+    const text=attention?`Autosync needs attention: ${reasons[connectionState.syncState]||'check the connected account'}.`:!sync.enabled&&sync.paused==='manual'?'Manual saves. Save once or enable autosync for this Paper.':
+      sync.paused?`Autosync paused ${reasons[sync.paused]||'until you check the connection'}.`:
+      connectionState.saving?'Syncing this Paper…':sync.state==='offline'?'Offline. Autosync will retry safely; your local changes are saved.':
+      connectionState.autosyncRunning===false?'Autosync enabled. Waiting for the background service.':connectionState.changed?'Autosync enabled. Local changes are waiting to sync.':'Autosync enabled. Latest local changes saved to Notion.';
+    section.append(live(text));
+    const enabled=sync.enabled&&!sync.paused;
+    if(!blocked)section.append(button(enabled?'Pause autosync':sync.paused==='manual'?'Enable autosync':'Resume autosync',async()=>{
+      if(mutating||!current(token,view))return;
+      const screenId=view;mutating=true;
+      const progress=setBusy(enabled?'Pausing autosync…':'Resuming autosync…');
+      try{
+        await beforeSave();if(!current(token,screenId))return;
+        const result=await transport(`/api/notion/autosync${paperQuery}`,{method:'POST',body:{enabled:!enabled}});
+        if(!current(token,screenId))return;
+        connectionState={...connectionState,autosync:result.autosync};mutating=false;resume(token);
+      }catch(error){if(current(token,screenId)){mutating=false;releaseBusy(progress);showError(failure(error));}}
+      finally{mutating=false;}
+    },'notion-quiet'));
+    body.append(section);
+  }
+
   function savedView(token, justSaved) {
     const link = connectionState.link, state = connectionState.syncState;
+    if(state==='trashed'){
+      screen('saved');body.append(live('Autosync is paused for Trash. Restore the copies explicitly before resuming.'));
+      const url=notionURL(link?.url);if(url)body.append(actions(externalLink('Open in Notion',url)));
+      if(connectionState.remoteTrashed&&!connectionState.localTrashed&&!connectionState.needsReview)body.append(actions(button('Restore Notion copy',async()=>{
+        if(mutating)return;mutating=true;const progress=setBusy('Restoring Notion copy…');
+        try{await beforeSave();await transport(`/api/notion/restore${paperQuery}`,{method:'POST',body:{}});mutating=false;await launch(mode);}
+        catch(error){mutating=false;releaseBusy(progress);showError(failure(error));}
+      },'notion-primary')));
+      else body.append(note('Your local copy is preserved until the Trash action is verified.'));
+      syncControls(token);return;
+    }
     if (!justSaved && state === 'conflict') { conflictView(token, { data: { link } }); return; }
     screen('saved');
+    syncControls(token);
     const time = savedTime(link?.savedAt);
     const url = notionURL(link?.url);
     const changed = connectionState.changed === true;
@@ -350,14 +390,14 @@ export function setupNotion({
   function savingView(token){
     const screenId=screen('saving'),previousSave=connectionState.link?.savedAt;body.append(live('Saving to Notion… You can close this window; the save will continue.'));cancel.textContent='Close';
     const check=button('Check status',poll,'notion-quiet');body.append(actions(check));
-    async function poll(){clearTimeout(searchTimer);if(!current(token,screenId))return;check.disabled=true;try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(!next.saving){if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview)savedView(token,true);else{resume(token);if(!next.needsReview)showError('The save was not confirmed. Your local Paper is safe.');}return;}}catch(error){if(current(token,screenId))showError(failure(error));}finally{check.disabled=false;if(current(token,screenId))searchTimer=setTimeout(poll,2000);}}
+    async function poll(){clearTimeout(searchTimer);if(!current(token,screenId))return;check.disabled=true;try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(!next.saving){if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview)finishSave(next.changed===true);else{resume(token);if(!next.needsReview)showError('The save was not confirmed. Your local Paper is safe.');}return;}}catch(error){if(current(token,screenId))showError(failure(error));}finally{check.disabled=false;if(current(token,screenId))searchTimer=setTimeout(poll,2000);}}
     searchTimer=setTimeout(poll,1500);
   }
 
   function picker(token, elsewhere = false) {
     const screenId = screen('picker');
     let pages = [], cursor = null, selected = null, query = '', listRequest = 0, loading = false;
-    body.append(note(mode === 'save' ? 'Create a new Notion page for this Paper. Choose its name and where it belongs.' : 'Choose a Notion page containing a saved Paper. It opens as a local copy with its editable layers and files.'));
+    body.append(note(mode === 'save' ? (connectionState.autosync?'Save here once; later local changes sync automatically.':'Choose a destination for this Paper. This running backend saves manual snapshots; autosync needs the newer backend.') : 'Choose a Notion page containing a saved Paper. It opens as a local copy with its editable layers and files.'));
     let pageTitle;
     if(mode==='save'){const titleLabel=element('label','notion-search-label','New page name');pageTitle=element('input','notion-search');pageTitle.type='text';pageTitle.maxLength=160;pageTitle.value=connectionState.paperName||'Untitled Paper';titleLabel.append(pageTitle);body.append(titleLabel);}
     const label = element('label', 'notion-search-label', mode==='save'?'Save under':'Find a saved Paper');
@@ -369,6 +409,7 @@ export function setupNotion({
     const list = element('div', 'notion-pages');
     list.setAttribute('role', 'group');
     list.setAttribute('aria-label', 'Accessible Notion pages');
+    const selectedDestination=live('No destination selected.');selectedDestination.className+=' notion-selection';selectedDestination.hidden=true;
     const state = live('Loading pages…');
     const more = button('Show more pages', () => load(true), 'notion-quiet');
     more.hidden = true;
@@ -378,9 +419,19 @@ export function setupNotion({
       else openPaper(token, selected.id);
     }, 'notion-primary');
     primary.disabled = true;
-    body.append(label, list, state, more, actions(primary,
+    body.append(label, list, state, selectedDestination, more, actions(primary,
       ...(elsewhere && connectionState.link?.pageId ? [button('Back', () => savedView(token, false))] : [])));
 
+    function locationText(page) {
+      if(typeof page.breadcrumb==='string'&&page.breadcrumb)return page.breadcrumb;
+      if(typeof page.parent?.title==='string')return `Parent: ${page.parent.title} · Full path unavailable`;
+      if(page.parent?.type==='workspace')return 'Workspace level';
+      if(page.parent?.id)return `Parent ${['database_id','data_source_id'].includes(page.parent.type)?'database':'page'} · ${page.parent.id.slice(0,8)}… · Full path unavailable`;
+      return page.id==='private'?'New private page in the connected workspace':'Location unavailable from Notion';
+    }
+    function selection() {
+      selectedDestination.hidden=!selected;selectedDestination.textContent=selected?`${mode==='save'?'Save under':'Selected page'}: ${selected.title||'Untitled page'}`:'';
+    }
     function renderRows() {
       list.replaceChildren();
       for (const page of pages) {
@@ -388,12 +439,15 @@ export function setupNotion({
           selected = page;
           for (const item of list.children) item.setAttribute('aria-pressed', String(item === row));
           primary.disabled = loading || mutating || mode==='save'&&!pageTitle.value.trim();
-          state.textContent=mode==='save'?`A new page will be created in “${page.title||'Untitled page'}”.`:page.title||'Selected Paper';
+          selection();
           alert.hidden = true;
         }, 'notion-page');
         row.setAttribute('aria-pressed', String(selected?.id === page.id));
-        row.append(element('span', 'notion-page-title', page.title || 'Untitled page'));
-        row.title=page.title||'Untitled page';
+        const heading=element('span','notion-page-heading');
+        const icon=element('span','notion-page-icon',page.icon?.type==='emoji'&&typeof page.icon.emoji==='string'?page.icon.emoji:'▤');icon.setAttribute('aria-hidden','true');
+        heading.append(icon,element('span', 'notion-page-title', page.title || 'Untitled page'));
+        row.append(heading,element('span','notion-page-location',locationText(page)));
+        row.title=`${page.title||'Untitled page'} · ${locationText(page)}${page.icon?.reason==='image-or-unsupported'?' · Custom image icon unavailable in this view':''}`;
         row.disabled = mutating;
         list.append(row);
       }
@@ -407,7 +461,7 @@ export function setupNotion({
       primary.disabled = true;
       more.disabled = true;
       list.setAttribute('aria-busy', 'true');
-      state.textContent = append ? 'Loading more pages…' : 'Loading pages…';
+      state.hidden=false;state.textContent = append ? 'Loading more pages…' : 'Loading pages…';
       alert.hidden = true;
       try {
         const result = await transport('/api/notion/pages', { method: 'POST', body: {
@@ -419,17 +473,17 @@ export function setupNotion({
           throw new Error('Notion returned an invalid page list.');
         }
         const unique = new Map((append ? pages : []).map(page => [page.id, page]));
-        if(mode==='save'&&result.canCreatePrivate===true){unique.set('private',{id:'private',title:'Private pages'});if(!selected&&!query)selected=unique.get('private');}
+        if(mode==='save'&&result.canCreatePrivate===true)unique.set('private',{id:'private',title:'Private pages'});
         for (const page of result.pages) unique.set(page.id, page);
         pages = [...unique.values()];
         cursor = typeof result.cursor === 'string' && result.cursor && result.cursor !== usedCursor ? result.cursor : null;
-        renderRows();
+        renderRows();selection();
         state.textContent = pages.length ? (mode==='save'?'Choose where to create your new page.':'Select a page to open its saved Paper.') :
           query ? 'No matching pages. Try another search.' : 'Search for a Notion page by its title.';
-        more.hidden = !cursor;
+        state.hidden=pages.length>0;more.hidden = !cursor;
       } catch (error) {
         if (!current(token, screenId) || requestId !== listRequest) return;
-        state.textContent = 'Could not load pages.';
+        state.hidden=false;state.textContent = 'Could not load pages.';
         showError(failure(error), () => load(append));
       } finally {
         if (current(token, screenId) && requestId === listRequest) {
@@ -446,7 +500,7 @@ export function setupNotion({
       listRequest++; // Invalidate an in-flight response before the debounce fires.
       query = search.value.trim();
       pages = [];
-      selected = null;
+      selected = null;selection();
       cursor = null;
       loading = true;
       list.replaceChildren();
@@ -467,7 +521,7 @@ export function setupNotion({
       rows[next].focus();
     });
     pageTitle?.addEventListener('input',()=>{primary.disabled=!selected||loading||mutating||!pageTitle.value.trim();});
-    if(pageTitle){pageTitle.focus();pageTitle.select();}else search.focus();
+    if(pageTitle){pageTitle.focus();pageTitle.select?.();}else search.focus();
     void load();
   }
 
@@ -491,6 +545,12 @@ export function setupNotion({
     if (progress.focused?.isConnected && !progress.focused.disabled) progress.focused.focus();
   }
 
+  function finishSave(changed) {
+    dialog.close();
+    notify(changed ? 'Snapshot saved to Notion. New local edits are waiting to sync.' :
+      connectionState.autosync?.enabled ? 'Paper saved to Notion. Autosync is on.' : 'Paper saved to Notion.');
+  }
+
   async function savePaper(token, parentId,newCopy=false,pageTitle) {
     if (!alive(token) || mutating || !owner()) return;
     mutating = true;
@@ -510,14 +570,13 @@ export function setupNotion({
       if (!result || typeof result.pageId !== 'string' || !result.pageId) throw new Error('Notion did not return the saved Paper page.');
       if (!current(token, screenId)) return;
       const changed = result.changed === true;
-      connectionState = { ...connectionState, link: result.link||result, changed, needsReview: false, saving: false, remote: 'current', syncState: changed ? 'local-changes' : 'saved' };
+      connectionState = { ...connectionState, link: result.link||result, ...(result.autosync?{autosync:result.autosync}:{}), changed, needsReview: false, saving: false, remote: 'current', syncState: changed ? 'local-changes' : 'saved' };
       mutating = false;
-      savedView(token, true);
-      notify('Paper saved to Notion.');
+      finishSave(changed);
     } catch (error) {
       if (!current(token, screenId)) return;
       mutating = false;
-      try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(next.saving){savingView(token);return;}if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview){savedView(token,true);return;}if(next.needsReview||!next.connected){resume(token);if(!next.connected)showError(failure(error));return;}}catch{/* Preserve the original failure if status is unavailable too. */}
+      try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(next.saving){savingView(token);return;}if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview){finishSave(next.changed===true);return;}if(next.needsReview||!next.connected){resume(token);if(!next.connected)showError(failure(error));return;}}catch{/* Preserve the original failure if status is unavailable too. */}
       if (errorStatus(error) === 409) conflictView(token, error);
       else {
         releaseBusy(progress);
@@ -530,6 +589,7 @@ export function setupNotion({
 
   function conflictView(token, error) {
     screen('saved');
+    syncControls(token);
     body.append(live('This Paper changed in Notion since your last save. Nothing was overwritten.'));
     body.append(note('Keep your local Paper and open the Notion version as a separate local Paper to compare them. To keep your version in Notion, save it to a separate page.'));
     const link = error?.data?.link || connectionState.link;

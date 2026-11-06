@@ -131,3 +131,5 @@ This integration is desktop-local. A cloud stdio host cannot expose files on ano
 Call `paper_home {}` before assuming a Paper is absent. Match its name/id and collection. `paper_home {action:"open",workspaceId,paperId}` returns the real workspace path; select it with `paper_open {workspace}` before `paper_read` or edits. Both personal Papers and remembered project Papers are discoverable this way; no directory scan is required.
 
 For a host that cannot expose the complete MCP toolset, `node <plugin-root>/server/server.mjs --list` returns Home metadata without starting a listener. Each Paper includes its absolute workspace and folder; thumbnails are omitted from CLI output. Use the selected folder for ordinary file reads.
+
+Owner-only `POST /api/notion/autosync?paper=ID` accepts `{enabled:true|false}`. `POST /api/notion/restore?paper=ID` accepts `{}` and explicitly restores the linked Notion copy, leaving autosync paused. Home Trash/Restore accepts `copies:"local"|"both"`; omitted retains legacy local-only behavior. The UI confirms the linked destination before sending `both`. No permanent cloud deletion is exposed.
