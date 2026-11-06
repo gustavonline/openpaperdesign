@@ -61,7 +61,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
   const sharing=createSharing({library,editor,presence,publicUrl:shareUrl,port:sharePort});
   const notion=createNotion({library,configDir:dataHome(),origin:()=>`http://127.0.0.1:${server.address().port}`});
   const lastChanges=new Map();
-  const emit=(event,data)=>{if(event==='paper-changed')presence.committed(data);if(['paper-changed','feedback-changed'].includes(event)&&data?.revision){const key=event+':'+data.paperId;lastChanges.set(key,data.revision);if(lastChanges.size>1024)lastChanges.delete(lastChanges.keys().next().value);}const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
+  const emit=(event,data)=>{if(event==='paper-changed')presence.committed(data);if(['paper-changed','feedback-changed'].includes(event)&&data?.revision){const key=event+':'+data.paperId;lastChanges.set(key,{revision:data.revision});if(lastChanges.size>1024)lastChanges.delete(lastChanges.keys().next().value);}const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
   library.onChange=(event,data)=>{emit(event,data);if(data?.paperId&&['paper-changed','feedback-changed','guide-changed'].includes(event))void notion.changed(data.paperId).catch(error=>process.stderr.write(`Notion queue: ${error.message}\n`));};
   const server=http.createServer(async(req,res)=>{
     try {
@@ -174,10 +174,30 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
   const timers=new Map();
   try {
     watcher=watch(library.root,{recursive:true},(_event,file)=>{
+      if(closingPromise)return;
       const parts=String(file||'').split(path.sep);if(parts.length!==2||!ID.test(parts[0])||!['paper.json','feedback.json','DESIGN.md','CONTEXT.md'].includes(parts[1]))return;
-      const key=parts.join('/');clearTimeout(timers.get(key));timers.set(key,setTimeout(async()=>{
-        timers.delete(key);try{const kind=parts[1]==='paper.json'?'paper':parts[1]==='feedback.json'?'feedback':'guide',data=kind==='guide'?(await library.notes(parts[0]))[parts[1]]:await library.read(parts[0],kind);if(lastChanges.get(`${kind}-changed:${parts[0]}`)!==data.revision)emit(`${kind}-changed`,{paperId:parts[0],revision:data.revision,clientId:''});void notion.changed(parts[0]).catch(error=>process.stderr.write(`Notion queue: ${error.message}\n`));}catch(error){process.stderr.write(`Paper file change: ${error.message}\n`);}
-      },120));
+      const key=parts.join('/');clearTimeout(timers.get(key));
+      let lockRetries=0;
+      const busy=async()=>{try{await fs.lstat(path.join(library.root,parts[0],'.write-lock'));return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}};
+      const retry=()=>{if(!closingPromise&&!timers.has(key))timers.set(key,setTimeout(notify,120));};
+      const notify=async()=>{
+        timers.delete(key);if(closingPromise)return;const kind=parts[1]==='paper.json'?'paper':parts[1]==='feedback.json'?'feedback':'guide',eventKey=`${kind}-changed:${parts[0]}`,seen=lastChanges.get(eventKey);
+        try{
+          // A rename is visible before the writer has synced and released its
+          // lock. Let that writer publish its authoritative completion first.
+          if(await busy()){if(++lockRetries<25)retry();return;}
+          const data=kind==='guide'?(await library.notes(parts[0]))[parts[1]]:await library.read(parts[0],kind);
+          if(closingPromise)return;
+          if(await busy()){if(++lockRetries<25)retry();return;}
+          if(closingPromise)return;
+          // A known save can finish during this read. Retry current bytes rather
+          // than publish the older read over its event and commit identity.
+          if(lastChanges.get(eventKey)!==seen){retry();return;}
+          if(seen?.revision!==data.revision)emit(`${kind}-changed`,{paperId:parts[0],revision:data.revision,clientId:''});
+          void notion.changed(parts[0]).catch(error=>process.stderr.write(`Notion queue: ${error.message}\n`));
+        }catch(error){process.stderr.write(`Paper file change: ${error.message}\n`);}
+      };
+      timers.set(key,setTimeout(notify,120));
     });
     watcher.on('error',error=>{process.stderr.write(`File watching stopped: ${error.message}. API updates still notify open browsers.\n`);watcher.close();});
   }catch(error){process.stderr.write(`File watching unavailable: ${error.message}. API updates still notify open browsers.\n`);}
@@ -190,7 +210,11 @@ async function connectWorkspace(root,agentClient){
   const opened=await openWorkspaceServer(root,port=>startServer(root,{port}));
   if(opened.library)return opened;
   const proxy=agentClient?remotePresence(opened.url,agentClient,opened.features):null;
-  return {...opened,library:await PaperLibrary.open(root),presence:proxy,close:async()=>proxy?.close()};
+  const save=async(id,bytes,revision,kind='paper',actor='')=>{
+    const response=await fetch(`${opened.url}/api/${kind==='feedback'?'feedback':'paper'}?paper=${encodeURIComponent(id)}`,{method:'PUT',headers:{Origin:opened.url,'Content-Type':'application/json','If-Match':revision,'X-Paper-Client':actor},body:bytes,signal:AbortSignal.timeout(30000)});
+    const result=await response.json();if(!response.ok)throw new PaperError(response.status,result.error||'Paper save did not complete');return result;
+  };
+  return {...opened,library:await PaperLibrary.open(root),presence:proxy,save,close:async()=>proxy?.close()};
 }
 
 const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:['paper_list','paper_read','paper_read_feedback'].includes(name),destructiveHint:false,openWorldHint:false}});
@@ -237,6 +261,7 @@ export async function serveStdio() {
     }
     if(joined)return joined.tool(name,args);
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
+    const save=(...values)=>active.save?active.save(...values):active.library.save(...values);
     if(name==='paper_package'){
       if(!['export','import'].includes(args.action)||typeof args.file!=='string'||!path.isAbsolute(args.file))throw new PaperError(400,'Choose export/import and an absolute workspace file');
       if(args.action==='import'){const source=await fs.realpath(args.file);if(!inside(active.library.workspace,source)||(await fs.stat(source)).size>MAX_BUNDLE_BYTES)throw new PaperError(400,'Choose a Paper file within this workspace and 50 MB');return importBundle(active.library,await fs.readFile(source));}
@@ -258,7 +283,7 @@ export async function serveStdio() {
       return {revision:read.revision,path:path.join(folder,'paper.json'),folder,assetsDir:path.join(folder,'assets'),historyDir:path.join(folder,'.history'),feedback:{path:path.join(folder,'feedback.json'),revision:feedback.revision,exists:!!await fs.stat(path.join(folder,'feedback.json')).catch(()=>null)},summary:{name:read.paper.name,pages:read.paper.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length,artboards:p.nodes.filter(n=>p.root.includes(n.id)&&isArtboard(n)).length}))},notes:Object.fromEntries(Object.entries(notes).map(([name,note])=>[name,{...note,text:note.text.slice(0,8000),truncated:note.text.length>8000,path:path.join(folder,name)}])),...(args.includePaper?{paper:read.paper}:{})};
     }
     if(name==='paper_read_feedback')return active.library.read(args.paperId,'feedback');
-    if(name==='paper_save_feedback')return active.library.save(args.paperId,Buffer.from(JSON.stringify(args.workspace)),args.revision,'feedback',peerId);
+    if(name==='paper_save_feedback')return save(args.paperId,Buffer.from(JSON.stringify(args.workspace)),args.revision,'feedback',peerId);
     if(name==='paper_add_asset'){
       if((args.base64===undefined)===(args.sourceFile===undefined))throw new PaperError(400,'Supply exactly one of base64 or sourceFile');
       let bytes;
@@ -271,7 +296,7 @@ export async function serveStdio() {
       let bytes;
       if(args.sourceFile!==undefined){if(typeof args.sourceFile!=='string'||!path.isAbsolute(args.sourceFile))throw new PaperError(400,'Choose an absolute edited source file');const candidate=await fs.realpath(args.sourceFile);if(!inside(active.library.workspace,candidate)||(await fs.stat(candidate)).size>MAX_PAPER_BYTES)throw new PaperError(400,'Edited source file must be inside this workspace and within size limits');bytes=await fs.readFile(candidate);}
       else bytes=Buffer.from(JSON.stringify(args.paper));
-      return active.library.save(args.paperId,bytes,args.revision,'paper',peerId);
+      return save(args.paperId,bytes,args.revision,'paper',peerId);
     }
     return active.library.saveNote(args.paperId,args.file,args.text,args.revision,peerId);
   };

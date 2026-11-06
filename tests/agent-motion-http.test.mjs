@@ -4,6 +4,7 @@ import {promises as fs} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {spawn} from 'node:child_process';
 import {PaperLibrary} from '../server/library.mjs';
 import {remotePresence,discoverWorkspace,presenceOperation} from '../server/workspace.mjs';
 import {transitionAgent} from '../runtime/agent-motion.js';
@@ -43,7 +44,7 @@ test('attached MCP completion proves its exact base/result; stale completion can
  const {app,made,get,dir}=await harness(t),advertised=await discoverWorkspace(dir),proxy=remotePresence(app.url,'attached-agent',advertised.features),external=await PaperLibrary.open(dir);
  t.after(()=>proxy.close());assert.equal(advertised.features.agentMotion,1);assert.equal(advertised.features.agentCompletion,1);
  const first=await external.read(made.id),peer=await proxy.activity(made.id,'owner','attached-agent',{status:'Drawing',pageId:first.paper.pages[0].id,nodeId:1});
- first.paper.name='Attached save';const saved=await external.save(made.id,bytes(first.paper),first.revision,'paper',peer.id);
+ first.paper.name='Attached save';const response=await fetch(app.url+'/api/paper?paper='+made.id,{method:'PUT',headers:{Origin:app.url,'Content-Type':'application/json','If-Match':first.revision,'X-Paper-Client':peer.id},body:bytes(first.paper)});assert.equal(response.status,200);const saved=await response.json();
  await proxy.complete(made.id,'paper-changed',saved.revision,first.revision,peer[presenceOperation]);
  const poll=await get('/api/updates');assert.equal(transitionAgent(first.revision,saved.revision,poll.presence.commits)?.id,peer.id);assert.equal(poll.presence.peers[0].status,'');
  const second=await external.read(made.id);second.paper.name='Attached second';const attached=await external.save(made.id,bytes(second.paper),second.revision,'paper',peer.id);
@@ -104,4 +105,52 @@ test('late attached completion cannot claim file replays after receipt expiry',a
  const newer=await proxy.update(made.id,'owner','aba-agent',{status:'Reading'},'agent');assert.notEqual(newer[presenceOperation],peer[presenceOperation]);assert.ok(!JSON.stringify(peer).includes(peer[presenceOperation]),'operation tokens stay internal to their tool call');
  await proxy.complete(made.id,'paper-changed',saved.revision,first.revision,peer[presenceOperation]);
  const fetched=await get('/api/paper');assert.equal(fetched.revision,saved.revision);assert.equal(transitionAgent(first.revision,fetched.revision,fetched.presence.commits),null);
+});
+
+test('an older watcher read cannot overwrite newer trusted save events, including ABA revisions',async t=>{
+ const {app,made,get,post}=await harness(t),initial=await app.library.read(made.id);initial.paper.name='Known A';
+ const a=await app.library.save(made.id,bytes(initial.paper),initial.revision,'paper','initial-writer');
+ const peer=await post('agent',{kind:'agent',status:'Drawing'}),original=app.library.read.bind(app.library);
+ let captured,release,blocked=false;const capture=new Promise(r=>captured=r),gate=new Promise(r=>release=r);
+ t.mock.method(app.library,'read',async(id,kind)=>{const value=await original(id,kind);if(!blocked&&id===made.id&&kind==='paper'){blocked=true;captured(value);await gate;}return value;});
+ try{
+  const c=structuredClone(initial.paper);c.name='Older watcher snapshot C';await fs.writeFile(path.join(made.path,'paper.json'),bytes(c));
+  let timeout;const old=await Promise.race([capture,new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error('No watcher read')),3000)})]);clearTimeout(timeout);
+  const b=structuredClone(old.paper);b.name='Known B';const savedB=await app.library.save(made.id,bytes(b),old.revision,'paper',peer.id);
+  const savedA=await app.library.save(made.id,bytes(initial.paper),savedB.revision,'paper',peer.id);assert.equal(savedA.revision,a.revision);
+  release();await new Promise(r=>setTimeout(r,300));
+  const loaded=await get('/api/paper');assert.equal(loaded.revision,a.revision);assert.equal(transitionAgent(savedB.revision,a.revision,loaded.presence.commits)?.id,peer.id);
+ }finally{release();}
+});
+
+test('watchers do not preempt a successful writer while its durability lock is held',async t=>{
+ const {app,made,get,post}=await harness(t),before=await app.library.read(made.id),peer=await post('writer',{kind:'agent',status:'Saving'});
+ const original=app.library.atomic.bind(app.library);let captured,release;const capture=new Promise(r=>captured=r),gate=new Promise(r=>release=r);
+ t.mock.method(app.library,'atomic',async(...args)=>{await original(...args);captured();await gate;});
+ before.paper.name='Committed after unlock';const save=app.library.save(made.id,bytes(before.paper),before.revision,'paper',peer.id);
+ try{
+  await capture;await new Promise(r=>setTimeout(r,300));
+  assert.equal((await get('/api/presence')).commits.length,0,'visible bytes under the write lock are not an unknown external commit');
+  release();const saved=await save;await new Promise(r=>setTimeout(r,250));
+  const loaded=await get('/api/paper');assert.equal(transitionAgent(before.revision,saved.revision,loaded.presence.commits)?.id,peer.id);
+ }finally{release();await save;}
+});
+
+test('an attached stdio agent saves through the owning backend and preserves conflict checks',async t=>{
+ const {app,made,get,dir}=await harness(t),original=app.library.save.bind(app.library);let ownerWrites=0;
+ t.mock.method(app.library,'save',(...args)=>{ownerWrites++;return original(...args);});
+ const child=spawn(process.execPath,[new URL('../server/server.mjs',import.meta.url).pathname,'--stdio'],{env:{...process.env,PAPER_HOME:dir},stdio:['pipe','pipe','pipe']});
+ let seq=1,buffer='',stderr='';const waiting=new Map(),exited=new Promise(r=>child.once('exit',r));child.stderr.on('data',b=>{stderr=(stderr+b).slice(-4000)});
+ child.stdout.on('data',b=>{buffer+=b;for(let i;(i=buffer.indexOf('\n'))>=0;){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(!line.trim())continue;const r=JSON.parse(line);waiting.get(r.id)?.(r);waiting.delete(r.id);}});
+ const request=(method,params={})=>new Promise((resolve,reject)=>{const id=seq++,timer=setTimeout(()=>reject(Error('MCP timeout: '+stderr)),10000);waiting.set(id,r=>{clearTimeout(timer);resolve(r)});child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n')});
+ const call=async(name,args={})=>{const r=await request('tools/call',{name,arguments:args});if(r.error||r.result?.isError)throw Error(r.error?.message||r.result.content[0].text);return JSON.parse(r.result.content[0].text)};
+ try{
+  await request('initialize',{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'attached-test',version:'1'}});child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
+  assert.equal((await call('paper_open',{workspace:dir})).apiBase,app.url);
+  const before=await call('paper_read',{paperId:made.id,includePaper:true});before.paper.name='Owned backend save';
+  const saved=await call('paper_save',{paperId:made.id,revision:before.revision,paper:before.paper});assert.equal(ownerWrites,1);
+  assert.equal(transitionAgent(before.revision,saved.revision,(await get('/api/paper')).presence.commits)?.id,saved.agent.id);
+  await assert.rejects(call('paper_save',{paperId:made.id,revision:before.revision,paper:before.paper}),/changed elsewhere/);
+  assert.equal((await get('/api/paper')).revision,saved.revision);assert.equal((await get('/api/presence')).peers.filter(p=>p.kind==='agent').every(p=>!p.status),true);
+ }finally{child.stdin.end();let timer;try{await Promise.race([exited,new Promise((_,reject)=>{timer=setTimeout(()=>{child.kill();reject(Error('Attached MCP did not exit'))},5000)})]);}finally{clearTimeout(timer);}}
 });
