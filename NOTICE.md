@@ -16,3 +16,5 @@ The lightweight presence pattern was informed by [Doop](https://github.com/kgoed
 The Paper Copy method adapts interface-copy guidance from Paul Bakaus and contributors' Impeccable (Apache-2.0), with local changes for artifact selection, approved wording and native-layer review. Pinned source notes and the original licence are in `skills/paper-copy/references/`. No Impeccable runtime or detector is bundled.
 
 Not affiliated with Paper (paper.design).
+
+The product website in `site/` was moved from the owner's MIT-licensed arcitai/openpaperdesign source (PR49, commit 72abdbf5a6237c5ea4bd3090a4e4e0ef6bde60a0). Its original licence is retained at `site/LEGACY-LICENSE.txt`; artwork/font notices and asset provenance remain in the site assets.
