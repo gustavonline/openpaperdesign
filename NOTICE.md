@@ -13,4 +13,6 @@ This repository's code is licensed under Apache-2.0. Bundled third-party work ke
 
 The lightweight presence pattern was informed by [Doop](https://github.com/kgoedecke/doop). No Doop source or runtime is bundled. The diagram symbols are independent common-notation drawings, alongside the attributed Kubernetes icons; no draw.io or Excalidraw runtime is bundled.
 
+The Paper Copy method adapts interface-copy guidance from Paul Bakaus and contributors' Impeccable (Apache-2.0), with local changes for artifact selection, approved wording and native-layer review. Pinned source notes and the original licence are in `skills/paper-copy/references/`. No Impeccable runtime or detector is bundled.
+
 Not affiliated with Paper (paper.design).

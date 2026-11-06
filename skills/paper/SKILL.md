@@ -2,7 +2,7 @@
 name: paper
 description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the project and cloud snapshots in Notion. Use for Home, Paper files, Notion save/open, workspace setup and server controls.
 metadata:
-  version: "0.7.0-preview.14"
+  version: "0.7.0-preview.15"
 ---
 
 # Paper
@@ -34,7 +34,7 @@ For layer JSON, text, images and coordinates read the [Paper format](references/
 
 Call `paper_activity` before external work such as image generation or research, with a factual status and optional target layer/rectangle. Clear the status when finished or cancelled. People and agents receive automatic display names and avatars.
 
-For visual composition and design systems use [Design](../paper-design/SKILL.md). For architecture, process, data or infrastructure diagrams use [Diagrams](../paper-diagram/SKILL.md). Both use the same editor and files. Keep existing React/HTML, Mermaid, draw.io and Excalidraw sources in their native format when appropriate; see [native routes](references/native-routes.md).
+For visual composition and design systems use [Design](../paper-design/SKILL.md). For architecture, process, data or infrastructure diagrams use [Diagrams](../paper-diagram/SKILL.md). For text inside either artifact use [Paper Copy](../paper-copy/SKILL.md), which returns to the selected Design/Diagram workflow for layout and rendered review. All use the same editor and files. Keep existing React/HTML, Mermaid, draw.io and Excalidraw sources in their native format when appropriate; see [native routes](references/native-routes.md).
 
 ## Share and manage servers
 

@@ -91,7 +91,7 @@ async function checkEditorFiles(editorFiles) {
 const NOTICES = ['LICENSE', 'NOTICE.md', 'runtime/assets/OFL.txt', 'runtime/assets/MESURER-LICENSE.txt', 'runtime/assets/SNAPDOM-LICENSE.txt',
   'runtime/assets/REACT-LICENSE.txt', 'runtime/assets/kubernetes/LICENSE.txt', 'runtime/assets/kubernetes/UPSTREAM-README.txt',
   'runtime/assets/kubernetes/provenance.json', 'skills/paper/references/CRAFT-LICENSE.txt', 'skills/paper/references/DIORAMA-LICENSE.txt',
-  'skills/paper/references/UI-SKILLS-LICENSE.txt'];
+  'skills/paper/references/UI-SKILLS-LICENSE.txt', 'skills/paper-copy/references/IMPECCABLE-LICENSE.txt'];
 async function checkNotices() {
   for (const file of NOTICES) {
     const stat = await fs.stat(at(file)).catch(() => null);

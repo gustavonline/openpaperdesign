@@ -38,7 +38,7 @@ test('archive from the current commit is complete, deterministic and works unpac
 
   const files = (await fs.readdir(plugin, {recursive: true, withFileTypes: true})).filter(entry => entry.isFile()).map(entry => path.relative(plugin, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'));
   assert.deepEqual(files.filter(file => FORBIDDEN.test(file)), []);
-  for (const required of ['LICENSE', 'NOTICE.md', 'runtime/assets/OFL.txt', 'runtime/assets/kubernetes/LICENSE.txt', 'skills/paper/references/CRAFT-LICENSE.txt', 'PACKAGE-INFO.json', 'docs/releases.md'])
+  for (const required of ['LICENSE', 'NOTICE.md', 'runtime/assets/OFL.txt', 'runtime/assets/kubernetes/LICENSE.txt', 'skills/paper/references/CRAFT-LICENSE.txt', 'PACKAGE-INFO.json', 'docs/releases.md', 'skills/paper-copy/SKILL.md', 'skills/paper-copy/references/IMPECCABLE-LICENSE.txt'])
     assert.ok(files.includes(required), `${required} ships in the archive`);
   const info = JSON.parse(await fs.readFile(path.join(plugin, 'PACKAGE-INFO.json'), 'utf8'));
   assert.deepEqual([info.commit, info.version], [commit, one.version]);

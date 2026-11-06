@@ -2,18 +2,20 @@
 name: paper-diagram
 description: Create, revise or review editable architecture, process, data and infrastructure diagrams in Paper. Use for C4, UML-style structure, BPMN-style workflows, ER models, Kubernetes topology, flowcharts and source-backed system explanations.
 metadata:
-  version: "0.7.0-preview.14"
+  version: "0.7.0-preview.15"
 ---
 
 # Diagram in Paper
 
-Use the existing canvas, layers and save contract. The useful chain is **source facts → notation and scope → layout and bindings → semantic and rendered review**. Begin with the question the diagram should answer and its audience. Reuse the current Paper/diagram when asked to change it.
+Use the existing canvas, layers and save contract. The useful chain is **source facts → notation and scope → copy when needed → layout and bindings → semantic and rendered review**. Begin with the question the diagram should answer and its audience. Reuse the current Paper/diagram when asked to change it.
 
 ## Establish the facts
 
-Read the relevant brief, repository code/configuration or supplied model. Identify actual actors, runnable units, stores, responsibilities and directed relationships. Distinguish facts from assumptions. Do not invent a cloud, service, authentication step or data flow to fill a template. Carry important uncertainty in the supporting narrative/CONTEXT.md rather than presenting it as implemented architecture.
+Read the relevant brief, repository code/configuration or supplied model. Identify actual actors, runnable units, stores, responsibilities and directed relationships. Distinguish facts from assumptions. Do not invent a cloud, service, authentication step or data flow to fill a template. Label a proposed or uncertain view when that changes its interpretation. Keep additional evidence and rationale in the supporting narrative/CONTEXT.md; do not present a proposal as implemented architecture.
 
 Choose one primary view and a consistent abstraction level. Use [notation selection](references/notation.md) when the choice is unclear. A precise formal UML/BPMN/interchange request must retain the existing native model or name the unsupported capability; the bundled common shapes alone do not establish formal semantics.
+
+When drafting or revising labels and explanations, use [Paper Copy](../paper-copy/SKILL.md) with this same source basis before layout. Keep actual entities, relationships, conditions and necessary uncertainty; omit slogans and commentary about producing the diagram. Return here for bindings, notation and rendered review. Do not load a second brief or rewrite approved labels for a geometry-only change.
 
 ## Build on the same layers
 

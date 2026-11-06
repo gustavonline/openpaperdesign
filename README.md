@@ -36,7 +36,7 @@ The Home command opens the dashboard in your browser.
 
 ## Use it
 
-Ask your agent to create a Paper, revise a design or draw a diagram. The plugin includes [Paper](skills/paper/SKILL.md), [Design](skills/paper-design/SKILL.md) and [Diagrams](skills/paper-diagram/SKILL.md) skills.
+Ask your agent to create a Paper, revise a design or draw a diagram. The plugin includes [Paper](skills/paper/SKILL.md), [Design](skills/paper-design/SKILL.md), [Diagrams](skills/paper-diagram/SKILL.md) and [Paper Copy](skills/paper-copy/SKILL.md) skills. Design and Diagrams use Paper Copy when drafting or revising text, then check it in the rendered artifact. A roadmap gets useful goals and labels; a promotional headline is used when the brief calls for one.
 
 Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Pencil stays active between strokes; Escape or V returns to Select. The participant avatars can be dragged out of the way.
 

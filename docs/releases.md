@@ -11,7 +11,7 @@ Two different questions are answered separately:
 
 Pull requests and pushes to `main` run on Node 22 and 24 (Ubuntu) and Node 22 (macOS). Windows is not covered.
 
-1. `node scripts/check.mjs`: every server, runtime and script file parses; `package.json`, the lockfile, both plugin manifests, the three skills, `server/runtime.mjs`, `runtime/home.js`, `runtime/native-host.js` and `runtime/native.js` carry one version; every file in `EDITOR_FILES` exists and everything the pages and modules load is listed; the licences and notices exist; the MCP manifests point at a real server.
+1. `node scripts/check.mjs`: every server, runtime and script file parses; `package.json`, the lockfile, both plugin manifests, the bundled skills, `server/runtime.mjs`, `runtime/home.js`, `runtime/native-host.js` and `runtime/native.js` carry one version; every file in `EDITOR_FILES` exists and everything the pages and modules load is listed; the licences and notices exist; the MCP manifests point at a real server.
 2. `node --test "tests/*.mjs"`, which uses Node's built-in runner and needs no install:
    - a disposable Paper is created, read, saved, reopened, refused when saved from a stale revision, exported as a bundle, and imported;
    - the source tree answers MCP `initialize`, `tools/list` and a create/save/read round trip;
