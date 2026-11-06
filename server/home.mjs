@@ -11,8 +11,9 @@ export const HOME_URI=`ui://openpaperdesign/home/${VERSION}/${randomBytes(8).toS
 export const HOME_MIME='text/html;profile=mcp-app';
 export function isHomeResource(uri){
   if(typeof uri!=='string')return false;
+  const retained=uri.match(/^ui:\/\/openpaperdesign\/home\/(0\.7\.0-preview\.(?:12|13|14|15|16|17))\/[a-f0-9]{16}$/);
   const base=`ui://openpaperdesign/home/${VERSION}/`;
-  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12,13,14,15].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
+  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||!!retained||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12,13,14,15,16,17].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
 }
 export function dataHome(){
   if(process.env.PAPER_HOME){if(!path.isAbsolute(process.env.PAPER_HOME))throw new Error('PAPER_HOME must be an absolute folder');return process.env.PAPER_HOME;}
@@ -70,7 +71,7 @@ async function sharingOverview(entry){
   let live;try{live=await inspectWorkspace(entry.root);}catch(error){return {state:'unavailable',message:error.message,invitations:[]};}
   if(!live)return {state:'stopped',invitations:[]};
   const server={state:'running',instance:live.instance,version:live.version,canStop:live.canStop};
-  let data;try{data=await owner(live,'GET','/api/sharing/overview');}catch(error){return {...server,message:error.status===409?'This server is from an older Paper version. Stop it, then reopen its Papers to manage sharing.':error.message,invitations:[]};}
+  let data;try{data=await owner(live,'GET','/api/sharing/overview');}catch(error){return {...server,message:error.status===409?'This server does not support these sharing controls. Existing Papers remain open.':error.message,invitations:[]};}
   const names=new Map(),invitations=[];let library;
   for(const i of Array.isArray(data.invitations)?data.invitations.slice(0,256):[]){
     if(!i||typeof i.paperId!=='string'||!ID.test(i.paperId)||typeof i.id!=='string'||!ID.test(i.id))continue;

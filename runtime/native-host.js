@@ -1,5 +1,6 @@
+import {compatibleWorkspace,WORKSPACE_API,PAPER_DOCUMENT_VERSION} from './workspace-protocol.js';
 import {createScope} from './native-scope.js';
-const VERSION='0.7.0-preview.16',pending=new Map();let sequence=0,scope,current,activeTransport,booted=false,input,output,invoked,handled=false,navigating=false,queued,downloadMode;
+const VERSION='0.7.0-preview.17',pending=new Map();let sequence=0,scope,current,activeTransport,booted=false,input,output,invoked,handled=false,navigating=false,queued,downloadMode;
 const invocation=new Promise(resolve=>invoked=resolve),nativeFetch=globalThis.fetch.bind(globalThis),nativeAdd=globalThis.addEventListener.bind(globalThis);
 const sharedViews=new Map();
 function rpc(method,params={}){return new Promise((resolve,reject)=>{const id=`paper-native-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(new Error('Paper did not respond. Try again.'));},method==='tools/call'?90000:15000);pending.set(id,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id,method,params},'*');});}
@@ -29,11 +30,11 @@ async function navigate(value){
     let url=new URL(value,current?.url);
     if(current?.workspaceId.startsWith('shared:')&&url.origin===current.url.origin&&!url.searchParams.has('paper')){if(url.pathname==='/join'){status('This invitation ended. Ask the owner for a new link.',()=>openHome(),'Open Home');return;}url=new URL('http://127.0.0.1:0/home.html');}
     const guest=sharedViews.get(url.hash.startsWith('#shared=')?url.hash.slice(8):'');let project;
-    if(guest){if(url.origin!==guest.origin||url.pathname!=='/'||url.searchParams.get('paper')!==guest.paperId||[...url.searchParams.keys()].some(k=>k!=='paper'))throw new Error('This invitation opens one Paper only.');project={id:'shared:'+guest.id,server:{url:guest.origin,instance:guest.id,version:VERSION}};}
+    if(guest){if(url.origin!==guest.origin||url.pathname!=='/'||url.searchParams.get('paper')!==guest.paperId||[...url.searchParams.keys()].some(k=>k!=='paper'))throw new Error('This invitation opens one Paper only.');project={id:'shared:'+guest.id,server:{url:guest.origin,instance:guest.id,version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION}};}
     else{if(url.protocol!=='http:'||url.hostname!=='127.0.0.1'||url.username||url.password||!['/','/home.html'].includes(url.pathname))throw new Error('Invalid local Paper address.');const library=await home({action:'list'});project=library.projects.find(p=>url.port==='0'?p.id==='personal':p.server?.url===url.origin);}
     if(!project)throw new Error('This Paper server is no longer running. Reopen Home.');const virtual=url.port==='0';
     if(virtual&&url.searchParams.has('paper'))throw new Error('Choose a Paper from Home.');
-    if(url.searchParams.has('paper')&&project.server?.version!==VERSION)throw new Error('This Paper uses an older server. Stop it in Home → Sharing, then reopen the Paper.');
+    if(url.searchParams.has('paper')&&!compatibleWorkspace(project.server))throw new Error('This server uses an unsupported Paper API. Update its OpenPaperDesign plugin; existing Papers can remain open.');
     if(scope)try{await scope.dispose()}catch(error){leaveFailed=true;throw error}scope=null;
     current={url,workspaceId:project.id};const view=url.searchParams.has('paper')?'editor':'home',markup=__paperMarkup[view],parsed=new DOMParser().parseFromString(markup.html,'text/html'),body=document.importNode(parsed.body,true);
     const style=document.getElementById('paper-view-style');style.textContent=__paperMarkup.css+markup.css;document.body.replaceWith(body);document.title=parsed.title;body.className=parsed.body.className;

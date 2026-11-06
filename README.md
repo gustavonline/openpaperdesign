@@ -81,3 +81,5 @@ The browser and plugin use the same renderer. For UI development, install the de
 Apache-2.0. Bundled third-party licences and attribution are in [NOTICE.md](NOTICE.md).
 
 Pages, Layers and Library share the left sidebar with matching search controls and collapsible sections. Drag a single divider line, or focus it and use Arrow Up/Down (Shift for larger steps), Home or End. Sizes and expansion are local preferences; **Reset panel layout** restores the defaults without editing the Paper.
+
+Compatible renderer versions reuse the running workspace server, so multiple Papers and windows can stay open during a preview update. Compatibility follows the owner API and document contract, while revision checks prevent stale saves from overwriting another window. Reuse preserves the existing backend version; it does not silently upgrade or stop it.

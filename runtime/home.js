@@ -1,7 +1,8 @@
+import {compatibleWorkspace} from './workspace-protocol.js?v=78da2eb567e7';
 import {surfaceReady,surfaceStopped,onSurfaceDispose,inPaperSurface} from './surface.js?v=da065f7b280e';
-const VERSION='0.7.0-preview.16';
+const VERSION='0.7.0-preview.17';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper'),cardMenu=document.getElementById('card-menu');
-let menuCard=null,selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,optionsKey='',serverVersion=null;
+let menuCard=null,selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,optionsKey='';
 
 async function request(args={}){
   const response=await fetch('/api/home',{cache:'no-store',signal:AbortSignal.timeout(15000),...(Object.keys(args).length?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)}:{})});
@@ -14,7 +15,7 @@ function localURL(value){
 }
 function runningURL(workspaceId,paperId){
   const server=projects.find(p=>p.id===workspaceId)?.server;if(server?.state!=='running')return null;
-  if(serverVersion&&server.version!==serverVersion)return null;
+  if(!compatibleWorkspace(server))return null;
   try{const url=localURL(server.url);url.pathname=paperId?'/':'/home.html';url.search=paperId?new URLSearchParams({paper:paperId}).toString():'';url.hash='';return url;}catch{return null;}
 }
 async function targetURL(workspaceId,paperId){return runningURL(workspaceId,paperId)||localURL((await request({action:'open',workspaceId,...(paperId?{paperId}:{})})).url);}
@@ -83,7 +84,6 @@ function filter(){
 }
 function choose(id){selected=id;const url=new URL(location.href);if(id==='personal')url.searchParams.delete('collection');else url.searchParams.set('collection',id);history.replaceState(null,'',url.pathname+url.search+url.hash);filter();}
 function render(data){
-  serverVersion=data.version||null;
   projects=data.projects||[];if(selected!=='all'&&!projects.some(p=>p.id===selected))selected='personal';
   const nextOptions=JSON.stringify(projects.map(p=>[p.id,p.name])),known=new Map(cards.map(c=>[c.key,c]));
   cards=(data.papers||[]).map(p=>{const old=known.get(cardKey(p));if(old){old.update(p);return old;}return card(p);});

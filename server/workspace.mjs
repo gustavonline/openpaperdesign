@@ -4,16 +4,16 @@ import {promises as fs} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
-import {VERSION} from './runtime.mjs';
+import {compatibleWorkspace} from '../runtime/workspace-protocol.js';
 const digest=workspace=>createHash('sha256').update(workspace).digest('hex');
 export function workspacePorts(workspace){const first=20000+parseInt(digest(workspace).slice(0,6),16)%35000;return Array.from({length:4},(_,slot)=>first+slot);}
 const registry=(workspace,legacy=false)=>path.join(os.tmpdir(),(legacy?'osm-paper-':'openpaperdesign-')+digest(workspace).slice(0,32));
 async function probe(url,workspace,instance,compatible=true){
   const response=await fetch(url+'/api/status',{signal:AbortSignal.timeout(1500)}),status=await response.json();
   if(!response.ok||status.workspace!==workspace)return null;
-  if(compatible&&status.version!==VERSION)throw new Error('This workspace is open in another Paper version. Stop its server in Home, then reopen it.');
+  if(compatible&&!compatibleWorkspace(status))throw new Error('This workspace server uses an unsupported Paper API. Update its OpenPaperDesign plugin; existing Papers can remain open.');
   if(!status.instance||(instance&&status.instance!==instance))throw new Error('Paper workspace is restarting; retry paper_open');
-  return {url,instance:status.instance,version:status.version,canStop:status.canStop===true,sharingCount:status.sharingCount||0};
+  return {url,instance:status.instance,version:status.version,canStop:status.canStop===true,sharingCount:status.sharingCount||0,...(status.workspaceApi!==undefined?{workspaceApi:status.workspaceApi}:{}),...(status.paperDocumentVersion!==undefined?{paperDocumentVersion:status.paperDocumentVersion}:{})};
 }
 async function inspectRegistration(file,workspace,compatible){
   let record;
@@ -56,7 +56,7 @@ export async function openWorkspaceServer(workspace,start){
     // Another MCP process can bind just before publishing its instance; do not spawn a second host.
     for(let attempt=0;attempt<10;attempt++){
       try{const peer=await probe(`http://127.0.0.1:${port}`,workspace);if(peer)return peer;break;}
-      catch(error){if(/another Paper version/.test(error.message))throw error;if(attempt===9)throw new Error('Paper server is starting or busy; retry paper_open');await new Promise(resolve=>setTimeout(resolve,40));}
+      catch(error){if(/unsupported Paper API/.test(error.message))throw error;if(attempt===9)throw new Error('Paper server is starting or busy; retry paper_open');await new Promise(resolve=>setTimeout(resolve,40));}
     }
   }
   throw new Error('Paper could not find a free workspace port');
