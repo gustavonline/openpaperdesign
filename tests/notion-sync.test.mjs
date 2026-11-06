@@ -20,7 +20,7 @@ function fakeNotion() {
     if(message.method.startsWith('notifications/'))return undefined;
     const {name,arguments:args}=message.params,tool=name.replace('notion-','');state.calls.push(tool);
     const out=value=>({structuredContent:value});
-    if(tool==='fetch'){if(state.contexts.has(args.id))return out(state.contexts.get(args.id));const page=state.pages.get(args.id);if(!page)throw Object.assign(new Error('x'),{http:404});return out({text:render(page),...(state.fetchMetadata?{in_trash:Boolean(page.trashed)}:{})});}
+    if(tool==='fetch'){if(state.contexts.has(args.id))return out(state.contexts.get(args.id));const page=state.pages.get(args.id);if(!page)throw Object.assign(new Error('x'),{http:404});return out({url:`https://www.notion.so/${args.id}`,text:render(page),...(state.fetchMetadata?{in_trash:Boolean(page.trashed)}:{})});}
     if(tool==='get-self')return out({workspace:{id:state.workspaceId}});
     if(tool==='search')return out({results:state.searchRows});
     if(tool==='delete-pages'||tool==='restore-pages'){
