@@ -179,7 +179,7 @@ export class PaperLibrary {
       try { previous = await fs.readFile(file); } catch(error) { if(error.code!=='ENOENT')throw error; }
       await this.atomic(folder,`${kind}.json`,bytes,previous,authorize); return {revision:revision(bytes),saved:true};
     });
-    this.cache.delete(id); this.onChange(`${kind}-changed`,{paperId:id,revision:saved.revision,clientId}); return saved;
+    this.cache.delete(id); this.onChange(`${kind}-changed`,{paperId:id,baseRevision:expected,revision:saved.revision,clientId}); return saved;
   }
   async addAsset(id, bytes, authorize = () => {}) {
     fail(Buffer.isBuffer(bytes) && bytes.length > 24 && bytes.length <= 5*1024*1024, 'Image must fit within 5 MB');

@@ -2,7 +2,7 @@
 name: paper
 description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the project and cloud snapshots in Notion. Use for Home, Paper files, Notion save/open, workspace setup and server controls.
 metadata:
-  version: "0.7.0-preview.19"
+  version: "0.7.0-preview.20"
 ---
 
 # Paper
@@ -32,7 +32,7 @@ Use `paper_save` with the read revision and exactly one of `paper` or an in-work
 
 For layer JSON, text, images and coordinates read the [Paper format](references/paper-format.md). For image uploads, feedback, recovery and transport details read the [MCP/HTTP contract](references/http-api.md). Uploading an image does not place it: add the returned asset/path to `paper.assets`, use it in a layer fill, then save. Verify the actual rendered result and reopen the saved Paper.
 
-Call `paper_activity` before external work such as image generation or research, with a factual status and optional target layer/rectangle. Clear the status when finished or cancelled. People and agents receive automatic display names and avatars.
+Call `paper_activity` before external work such as image generation or research, with a factual status and optional target layer/rectangle. Use a known Page/layer/rectangle only when it is the real work area; omit the location for research with no canvas target. Clear the status when finished or cancelled; completed or failed Paper tool calls clear their temporary activity. Successful artwork saves can briefly reveal added visible layers and label changed layers. These are transient editor effects, never saved artwork. People and agents receive automatic display names and avatars.
 
 For visual composition and design systems use [Design](../paper-design/SKILL.md). For architecture, process, data or infrastructure diagrams use [Diagrams](../paper-diagram/SKILL.md). For text inside either artifact use [Paper Copy](../paper-copy/SKILL.md), which returns to the selected Design/Diagram workflow for layout and rendered review. All use the same editor and files. Keep existing React/HTML, Mermaid, draw.io and Excalidraw sources in their native format when appropriate; see [native routes](references/native-routes.md).
 

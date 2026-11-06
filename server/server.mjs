@@ -61,7 +61,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
   const sharing=createSharing({library,editor,presence,publicUrl:shareUrl,port:sharePort});
   const notion=createNotion({library,configDir:dataHome(),origin:()=>`http://127.0.0.1:${server.address().port}`});
   const lastChanges=new Map();
-  const emit=(event,data)=>{if(['paper-changed','feedback-changed'].includes(event)&&data?.revision){const key=event+':'+data.paperId;lastChanges.set(key,data.revision);if(lastChanges.size>1024)lastChanges.delete(lastChanges.keys().next().value);}const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
+  const emit=(event,data)=>{if(event==='paper-changed')presence.committed(data);if(['paper-changed','feedback-changed'].includes(event)&&data?.revision){const key=event+':'+data.paperId;lastChanges.set(key,data.revision);if(lastChanges.size>1024)lastChanges.delete(lastChanges.keys().next().value);}const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
   library.onChange=(event,data)=>{emit(event,data);if(data?.paperId&&['paper-changed','feedback-changed','guide-changed'].includes(event))void notion.changed(data.paperId).catch(error=>process.stderr.write(`Notion queue: ${error.message}\n`));};
   const server=http.createServer(async(req,res)=>{
     try {
@@ -73,7 +73,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       if(pathname==='/api/events'&&req.method==='GET'){
         res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});res.write(': connected\n\n');res.paperId=url.searchParams.getAll('paper').length===1&&ID.test(url.searchParams.get('paper'))?url.searchParams.get('paper'):null;streams.add(res);if(res.paperId)res.write(`event: presence-snapshot\ndata: ${JSON.stringify(presence.snapshot(res.paperId))}\n\n`);req.on('close',()=>streams.delete(res));return;
       }
-      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION,features:{notionAutosync:1},instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
+      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION,features:{notionAutosync:1,agentMotion:1},instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
       if(pathname==='/api/server/stop'&&req.method==='POST'){
         const args=JSON.parse(await readBody(req,1024));
         if(args?.instance!==registration?.instance)throw new PaperError(409,'The server changed. Refresh Home before stopping it.');
@@ -120,13 +120,14 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         if(req.method==='GET')return json(res,200,presence.snapshot(id));
         if(req.method==='POST'){
           const body=JSON.parse(await readBody(req,2048));if(!body||typeof body!=='object'||Array.isArray(body))throw new PaperError(400,'Invalid presence');
-          const {kind='human',long=false,event,revision,leave=false,restore=false,activity=false,...patch}=body,who=client(req);
+          const {kind='human',long=false,event,revision,baseRevision,leave=false,restore=false,activity=false,...patch}=body,who=client(req);
           if(!who||!['human','agent'].includes(kind)||typeof long!=='boolean'||typeof leave!=='boolean'||typeof restore!=='boolean'||typeof activity!=='boolean')throw new PaperError(400,'Invalid presence');
           if(event!==undefined&&(!['paper-changed','feedback-changed','guide-changed'].includes(event)||!/^"[a-f0-9]{64}"$/.test(revision||'')))throw new PaperError(400,'Invalid saved change');
+          if(baseRevision!==undefined&&(!event||!/^"[a-f0-9]{64}"$/.test(baseRevision)))throw new PaperError(400,'Invalid base revision');
           if(kind!=='agent'&&(event!==undefined||long||restore||activity))throw new PaperError(400,'Invalid participant activity');
           if(leave){presence.leave('owner',who);return json(res,200,{left:true});}
           const peer=presence.update(id,'owner',who,patch,kind,true,long,restore,activity);
-          if(event)emit(event,{paperId:id,revision,clientId:peer.id});return json(res,200,{peer});
+          if(event&&(event!=='paper-changed'||!baseRevision||(await library.read(id)).revision===revision))emit(event,{paperId:id,baseRevision,revision,clientId:peer.id});return json(res,200,{peer});
         }
       }
       if(pathname==='/api/sharing/overview'&&req.method==='GET')return json(res,200,sharing.overview());
@@ -144,7 +145,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       }
       if(['/api/paper','/api/scene','/api/feedback'].includes(pathname)){
         const id=paperId(url),kind=pathname==='/api/feedback'?'feedback':'paper';
-        if(req.method==='GET'){const result=await library.read(id,kind);if(pathname==='/api/scene')return json(res,200,{revision:result.revision,scene:result.paper});return json(res,200,result);}
+        if(req.method==='GET'){const result=await library.read(id,kind);if(pathname==='/api/scene')return json(res,200,{revision:result.revision,scene:result.paper});return json(res,200,{...result,...(kind==='paper'?{presence:presence.snapshot(id)}:{})});}
         if(req.method==='PUT')return json(res,200,await library.save(id,await readBody(req,kind==='paper'?MAX_PAPER_BYTES:5*1024*1024),req.headers['if-match'],kind,client(req)));
       }
       if(pathname.startsWith('/api/'))throw new PaperError(404,'Unknown API action');
@@ -187,7 +188,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
 async function connectWorkspace(root,agentClient){
   const opened=await openWorkspaceServer(root,port=>startServer(root,{port}));
   if(opened.library)return opened;
-  const proxy=agentClient?remotePresence(opened.url,agentClient):null;
+  const proxy=agentClient?remotePresence(opened.url,agentClient,opened.features):null;
   return {...opened,library:await PaperLibrary.open(root),presence:proxy,close:async()=>proxy?.close()};
 }
 
@@ -283,7 +284,7 @@ export async function serveStdio() {
     const peer=await soft(()=>active.presence.update(args.paperId,'owner',agentClient,{status:labels[name]||'Working on the Paper'},'agent'));
     try{
       const result=await rawCall(name,args,peer?.id||'agent-mcp'),event={paper_save:'paper-changed',paper_save_feedback:'feedback-changed',paper_write_note:'guide-changed'}[name];
-      const finished=await soft(()=>active.presence.complete?active.presence.complete(args.paperId,event,result.revision):active.presence.restore(args.paperId,'owner',agentClient));
+      const finished=await soft(()=>active.presence.complete?active.presence.complete(args.paperId,event,result.revision,args.revision):active.presence.restore(args.paperId,'owner',agentClient));
       return {...result,agent:finished||peer};
     }catch(error){await soft(()=>active.presence.restore(args.paperId,'owner',agentClient));throw error;}
   };

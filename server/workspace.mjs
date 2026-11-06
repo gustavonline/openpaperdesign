@@ -13,7 +13,7 @@ async function probe(url,workspace,instance,compatible=true){
   if(!response.ok||status.workspace!==workspace)return null;
   if(compatible&&!compatibleWorkspace(status))throw new Error('This workspace server uses an unsupported Paper API. Update its OpenPaperDesign plugin; existing Papers can remain open.');
   if(!status.instance||(instance&&status.instance!==instance))throw new Error('Paper workspace is restarting; retry paper_open');
-  return {url,instance:status.instance,version:status.version,canStop:status.canStop===true,sharingCount:status.sharingCount||0,...(status.workspaceApi!==undefined?{workspaceApi:status.workspaceApi}:{}),...(status.paperDocumentVersion!==undefined?{paperDocumentVersion:status.paperDocumentVersion}:{})};
+  return {url,instance:status.instance,version:status.version,canStop:status.canStop===true,sharingCount:status.sharingCount||0,...(status.features?.agentMotion===1?{features:{agentMotion:1}}:{}),...(status.workspaceApi!==undefined?{workspaceApi:status.workspaceApi}:{}),...(status.paperDocumentVersion!==undefined?{paperDocumentVersion:status.paperDocumentVersion}:{})};
 }
 async function inspectRegistration(file,workspace,compatible){
   let record;
@@ -61,8 +61,8 @@ export async function openWorkspaceServer(workspace,start){
   }
   throw new Error('Paper could not find a free workspace port');
 }
-export function remotePresence(url,client){
+export function remotePresence(url,client,{agentMotion=0}={}){
   let currentPaper;
   const send=async(id,body)=>{currentPaper=id;const response=await fetch(`${url}/api/presence?paper=${encodeURIComponent(id)}`,{method:'POST',headers:{Origin:url,'Content-Type':'application/json','X-Paper-Client':client},body:JSON.stringify({...body,kind:'agent'}),signal:AbortSignal.timeout(3000)});const result=await response.json();if(!response.ok)throw new Error(result.error||'Paper server unavailable');return result.peer;};
-  return {update:(id,scope,who,patch,kind,edit,long)=>send(id,{...patch,long}),activity:(id,scope,who,patch)=>send(id,{...patch,activity:true}),restore:id=>send(id,{restore:true}),complete:(id,event,revision)=>send(id,{restore:true,event,revision}),async close(){if(currentPaper)await send(currentPaper,{leave:true}).catch(()=>{});}};
+  return {update:(id,scope,who,patch,kind,edit,long)=>send(id,{...patch,long}),activity:(id,scope,who,patch)=>send(id,{...patch,activity:true}),restore:id=>send(id,{restore:true}),complete:(id,event,revision,baseRevision)=>send(id,{restore:true,event,revision,...(agentMotion===1?{baseRevision}:{})}),async close(){if(currentPaper)await send(currentPaper,{leave:true}).catch(()=>{});}};
 }

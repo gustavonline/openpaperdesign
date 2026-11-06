@@ -133,3 +133,11 @@ Call `paper_home {}` before assuming a Paper is absent. Match its name/id and co
 For a host that cannot expose the complete MCP toolset, `node <plugin-root>/server/server.mjs --list` returns Home metadata without starting a listener. Each Paper includes its absolute workspace and folder; thumbnails are omitted from CLI output. Use the selected folder for ordinary file reads.
 
 Owner-only `POST /api/notion/autosync?paper=ID` accepts `{enabled:true|false}`. `POST /api/notion/restore?paper=ID` accepts `{}` and explicitly restores the linked Notion copy, leaving autosync paused. Home Trash/Restore accepts `copies:"local"|"both"`; omitted retains legacy local-only behavior. The UI confirms the linked destination before sending `both`. No permanent cloud deletion is exposed.
+
+## Optional agent motion (preview.20)
+
+`/api/status` advertises `features.agentMotion:1`; workspace API 1 and Paper document v1 stay compatible. Owner and invited GET `/api/paper` responses optionally include a `presence` snapshot, also returned by `/api/updates`. Its optional `commits` array carries chronological `{baseRevision,revision,actor,ttl}` artwork-save receipts. An actor is an anonymous agent identity captured at commit time, or null for a human/unknown writer. Receipts last at most 15 seconds, with at most 16 per Paper and 64 Papers per host. They are memory only, never Paper/export data. Scope revocation removes that invitation’s agent receipts.
+
+The renderer requires an exact transition or a contiguous same-agent suffix ending at the fetched revision. Gaps, mixed writers, missing proof, replay and expired receipts use ordinary refresh. An SSE `clientId` cannot attribute a newer fetch. Attached owner MCP completion supplies the successful save’s base/result using the existing private-loopback presence route; a result that is already superseded is not attributed. Older hosts without receipts continue to render ordinary saves. No new public mutation endpoint is introduced.
+
+Activity completion/error restores an idle agent with no work area; explicitly clear `paper_activity` after external work or cancellation. Unknown locations have a roster status only. Effects never move the camera or edit layers, selection or undo. See [agent motion](agent-motion.md).

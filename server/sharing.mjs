@@ -132,7 +132,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
       }
       if(pathname==='/api/paper'||pathname==='/api/feedback'){
         scoped(grant,url);const kind=pathname==='/api/paper'?'paper':'feedback';
-        if(req.method==='GET')return json(res,200,await library.read(grant.paperId,kind));
+        if(req.method==='GET'){const result=await library.read(grant.paperId,kind);return json(res,200,{...result,...(kind==='paper'?{presence:presence.snapshot(grant.paperId)}:{})});}
         if(req.method==='PUT'){if(req.headers.origin!==requestOrigin)throw new PaperError(403,'Use the Paper editor or MCP to save');budget(grant);return json(res,200,await library.save(grant.paperId,await readBody(req,GUEST_BYTES),req.headers['if-match'],kind,clientFor(grant,req),()=>writable(grant)));}
       }
       if(pathname==='/api/assets'&&req.method==='POST'){

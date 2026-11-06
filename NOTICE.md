@@ -11,7 +11,7 @@ This repository's code is licensed under Apache-2.0. Bundled third-party work ke
 - Editor chrome is adapted from Michael Shimeles’ [Sketch / paper-rs](https://github.com/michaelshimeles/sketch), under its MIT/Apache-2.0 terms. The Paper logo/icon is credited to Arc’IT AI under Apache-2.0. Local integration changes are licensed with this repository.
 - Method references adapted from ui-skills, Diorama and Craft retain their MIT notices in `skills/paper/references/`.
 
-The lightweight presence pattern was informed by [Doop](https://github.com/kgoedecke/doop). No Doop source or runtime is bundled. The diagram symbols are independent common-notation drawings, alongside the attributed Kubernetes icons; no draw.io or Excalidraw runtime is bundled.
+The lightweight presence pattern was informed by [Doop](https://github.com/kgoedecke/doop). No Doop source or runtime is bundled. The live artwork-arrival experience was also informed by [Antidraw](https://github.com/AntidrawHQ/antidraw/tree/89d3c50b3409c46f26e9073ac224ff881e459397) (MIT, copyright 2026 AntidrawHQ). OpenPaperDesign’s activity/commit effects are independently written vanilla JavaScript; no Antidraw source, React Flow or Motion dependency is bundled. Pinned research notes are in `skills/paper/references/agent-motion.md`. The diagram symbols are independent common-notation drawings, alongside the attributed Kubernetes icons; no draw.io or Excalidraw runtime is bundled.
 
 The Paper Copy method adapts interface-copy guidance from Paul Bakaus and contributors' Impeccable (Apache-2.0), with local changes for artifact selection, approved wording and native-layer review. Pinned source notes and the original licence are in `skills/paper-copy/references/`. No Impeccable runtime or detector is bundled.
 

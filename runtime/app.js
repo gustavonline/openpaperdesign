@@ -1,6 +1,6 @@
 import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
-import {setupPresence} from './presence.js?v=7259cc25cb5c';
+import {setupPresence} from './presence.js?v=04efe1e39f62';
 import { setupSharing } from './sharing.js?v=6d255ae1b910';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
@@ -220,6 +220,7 @@ function layoutBoards() {
   for (const [key, b] of boards) { b.offset = offsetForPage(scene.pages.indexOf(b.page)); b.wrapper.hidden = pageId !== 'all' && b.page.id !== pageId; paint(key); }
 }
 function buildScene() {
+  presenceUI?.clearEffects();
   world.replaceChildren(); dom.clear(); nodes.clear(); boards.clear(); entries.clear();
   for (const page of scene.pages) entries.set(page.id, new Map(page.nodes.map(n => [n.id, n])));
   for (const page of scene.pages) resolveConnections(page,entries.get(page.id));
@@ -1522,25 +1523,26 @@ function migrateFeedback() {
 // A remote feedback change reloads the notes (remount) unless this tab's notes are unsaved, which is a
 // conflict that keeps them. A guide change re-reads DESIGN.md.
 const quiet = () => !pending && !saving && !saveError && !conflict && !textEdit && !liveEdit && titleInput.hidden && !gesture;
-let reloading = false;
-async function remotePaper(force = false,actor = null,silent=false) {
-  if (conflict || reloading) return;
+let reloading = false,reloadAgain=false;
+async function remotePaper(force = false,silent=false) {
+  if(conflict||!surfaceAlive())return;if(reloading){reloadAgain=true;return;}
   if (!quiet()) { conflict = true; updateSaveState(); return; }
   reloading = true;
   try {
     const response = await fetch(sceneUrl, { cache: 'no-store',signal:AbortSignal.timeout(15000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const loaded = await response.json(), next = loaded.paper;
+    if(!surfaceAlive())return;
     if (loaded.revision === revision && !force) return true;
     if (!isPaperFormat(next?.format) || next.version !== 1 || !Array.isArray(next.pages) || !next.pages.length) throw new Error('unknown format');
     if (!quiet()) { conflict = true; updateSaveState(); return; }
     const keep = [...selection];
-    const previous=scene;scene = next; revision = loaded.revision; lastSaved = JSON.stringify(scene); history.length = 0; future.length = 0;
+    const previous=scene,beforeRevision=revision;scene = next; revision = loaded.revision; lastSaved = JSON.stringify(scene); history.length = 0; future.length = 0;
     if (pageId !== 'all' && !scene.pages.some(p => p.id === pageId)) pageId = scene.pages[0].id;
     selected = null; selection.clear();buildScene(); renderPages(); showTitle(); updateHistory();
     selectMany(keep.filter(key=>nodes.has(key)));
-    designText = null; renderDesign(); paintCamera();presenceUI?.documentChanged(previous,next,actor);return true;
+    designText = null; renderDesign(); paintCamera();if(loaded.presence)presenceUI?.receive(loaded.presence);else presenceUI?.receive({paperId,peers:[]});presenceUI?.documentChanged(previous,next,{beforeRevision,revision,animate:!force});return true;
   } catch (error) { if(!silent)message(`This Paper changed elsewhere, but couldn’t be reloaded (${error.message}).`);return false; }
-  finally { reloading = false; }
+  finally { reloading = false;if(reloadAgain){reloadAgain=false;if(quiet()&&surfaceAlive())void remotePaper(false,silent);} }
 }
 let reloadingFeedback = false;
 async function remoteFeedback(silent=false) {
@@ -1586,25 +1588,28 @@ function listenForChanges() {
         const response=await fetch(`/api/updates${paperQuery}`,{cache:'no-store',signal:AbortSignal.timeout(6000)});
         if(stopped)return;if(response.status===401||response.status===403){revoked();return;}if(!response.ok)throw new Error('Connection unavailable');
         const data=await response.json();if(stopped)return;
-        if(revision===seen&&data.revision!==seen&&quiet()&&await remotePaper(false,null,true)===false)throw new Error('Paper could not be refreshed');
+        if(data.presence)presenceUI?.receive(data.presence);
+        if(revision===seen&&data.revision!==seen&&quiet()&&await remotePaper(false,true)===false)throw new Error('Paper could not be refreshed');
         if(feedback.revision===seenNotes&&data.feedbackRevision!==seenNotes&&!feedback.saving&&feedback.pendingBytes===null&&!(editable(document.activeElement)&&$('#paper-inspection-root').contains(document.activeElement))&&await remoteFeedback(true)===false)throw new Error('Feedback could not be refreshed');
         if(guideRevision&&guideRevision!==data.guideRevision){designText=null;renderDesign();}guideRevision=data.guideRevision;
-        if(data.presence)presenceUI?.receive(data.presence);
         if(failures>=3){const badge=$('.access-badge');if(badge)badge.textContent=canEdit?'Can edit':'View only';}failures=0;
-      }catch{if(!stopped&&++failures===3){const badge=$('.access-badge');if(badge)badge.textContent='Reconnecting…';message(access.shared?'Shared connection unavailable. Your local changes are kept. Ask the owner if the link has stopped.':'Paper server unavailable. Your changes stay here. Reopen Home when the server is running again.');}}
+      }catch{presenceUI?.disconnect();if(!stopped&&++failures===3){const badge=$('.access-badge');if(badge)badge.textContent='Reconnecting…';message(access.shared?'Shared connection unavailable. Your local changes are kept. Ask the owner if the link has stopped.':'Paper server unavailable. Your changes stay here. Reopen Home when the server is running again.');}}
       finally{polling=false;if(!stopped)timer=setTimeout(poll,failures>=3?10000:2000);}
     }
+    onSurfaceDispose(()=>{stopped=true;clearTimeout(timer);});
     window.addEventListener('pagehide',()=>{stopped=true;clearTimeout(timer);});
     window.addEventListener('pageshow',e=>{if(e.persisted&&!accessRevoked){stopped=false;presenceUI?.changed();void poll();}});void poll();return;
   }
   if(!window.EventSource)return;
   events=new EventSource(`/api/events${paperQuery}`);
   const ours=e=>{try{const d=JSON.parse(e.data);return d?.paperId===paperId&&d.clientId!==clientId?d:null;}catch{return null;}};
-  events.addEventListener('paper-changed',e=>{const d=ours(e);if(d&&d.revision!==revision)remotePaper(false,d.clientId);});
+  events.addEventListener('paper-changed',e=>{const d=ours(e);if(d&&d.revision!==revision)remotePaper();});
   events.addEventListener('feedback-changed',e=>{const d=ours(e);if(d&&d.revision!==feedback.revision)remoteFeedback();});
   events.addEventListener('guide-changed',e=>{if(ours(e)){designText=null;renderDesign();}});
   for(const type of ['presence','presence-snapshot'])events.addEventListener(type,e=>{try{presenceUI?.receive(JSON.parse(e.data));}catch{}});
+  events.addEventListener('error',()=>presenceUI?.disconnect());
   events.addEventListener('access-revoked',revoked);
+  onSurfaceDispose(()=>{stopped=true;clearTimeout(timer);events.close();});
 }
 
 async function start() {
@@ -1634,6 +1639,10 @@ async function start() {
     } else if (backup) keepBackup(null);
   } catch { /* An unreadable local backup never replaces the saved file. */ }
   presenceUI=setupPresence({paperId,paperQuery,clientHeaders,stage,
+    revision:()=>revision,view:()=>pageId,
+    element:(id,node)=>dom.get(id+':'+node),
+    visible(id,node){const el=dom.get(id+':'+node);if(!el)return false;if(el.checkVisibility){if(!el.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))return false;}else for(let p=el;p&&p!==world;p=p.parentElement){const s=window.getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}const r=this.bounds(id,node);return !!r&&r.x+r.w>0&&r.y+r.h>0&&r.x<stage.clientWidth&&r.y<stage.clientHeight;},
+    pageBounds(id){const page=scene.pages.find(p=>p.id===id),rects=(page?.root||[]).map(node=>this.bounds(id,node)).filter(Boolean);if(!rects.length)return null;const x=Math.min(...rects.map(r=>r.x)),y=Math.min(...rects.map(r=>r.y));return {x,y,w:Math.max(...rects.map(r=>r.x+r.w))-x,h:Math.max(...rects.map(r=>r.y+r.h))-y};},
     hit(target){return hitSymbol(target)||target.closest?.('[data-board]')?.dataset.board||null;},
     local(focus){const entry=inspection?nodes.get(focus):nodes.get(selected),p=entry?.page||scene.pages.find(p=>p.id===pageId)||scene.pages[0];const active=gesture?.moved&&['node','resize'].includes(gesture.kind)?nodes.get(gesture.key):null;return {pageId:p.id,nodeId:entry?.node.id??null,drag:canEdit&&active?nodeBounds(active.node,entries.get(active.page.id)):null,status:active?(gesture.kind==='resize'?'Resizing':'Moving'):''};},
     toPage(point,id){const offset=offsetForPage(scene.pages.findIndex(p=>p.id===id));return {x:(point.x-camera.x)/camera.z-offset.x,y:(point.y-camera.y)/camera.z-offset.y};},
