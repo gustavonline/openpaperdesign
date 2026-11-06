@@ -130,7 +130,7 @@ async function openFromNotion(){
   openMenu.hidePopover();
   await opening(async()=>{const workspaceId=selected==='all'?'personal':selected,url=await targetURL(workspaceId);
     if(url.origin!==location.origin){url.searchParams.set('collection',workspaceId);url.hash='notion';return navigate(url.href);}
-    if(!notionHome){const module=await import('./notion-ui.js?v=6878eb830ec9');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
+    if(!notionHome){const module=await import('./notion-ui.js?v=99d6e92293a7');document.querySelector('.notion-open-icon').innerHTML=module.notionIcon;notionHome=module.setupNotion({onOpen:href=>location.assign(href)});}
     await notionHome.open();
   },'Opening Notion…');
 }

@@ -30,6 +30,15 @@ const trashState=result=>{
   // Missing metadata never proves that a trashed page was restored.
   return null;
 };
+function matchesPageIdentity(result,expected) {
+  const normalize=value=>value.replace(/-/g,'').toLowerCase(),ids=[];
+  for(const part of [result,result?.metadata,result?.page]) {
+    if(!part||typeof part!=='object')continue;
+    for(const key of ['id','page_id'])if(part[key]!==undefined){if(!uuid(part[key]))return false;ids.push(part[key]);}
+    if(part.url!==undefined){try{ids.push(pageId(part.url));}catch{return false;}}
+  }
+  return ids.length>0&&ids.every(id=>normalize(id)===normalize(expected));
+}
 const activePage=result=>{
   if(trashState(result)===true)pause('remote-trash','The linked Notion page is in Trash. Restore it explicitly before saving');
   return result;
@@ -307,7 +316,8 @@ export function createNotion({library,configDir,origin,autosync:timing={}}) {
       if(observed===null&&trashed===null)fail(409,'Notion did not expose a verifiable Trash state. Preserve the local Paper and check Notion');
       // A verified page already in Trash needs no mutation or readable file archive.
       // Missing/inaccessible pages are never inferred to be trashed.
-      if(!(observed===true&&trashed!==false))sameRemote(managed(remote),state);
+      if(observed===true&&trashed!==false){if(!matchesPageIdentity(remote,state.link.pageId))fail(409,'Notion did not confirm the linked page identity. Preserve the local Paper and check Notion');}
+      else sameRemote(managed(remote),state);
       if(trashed===null) {
         if(state.pending&&observed!==(state.pending.kind==='trash'))fail(409,'The remote Trash result is still unverified. Preserve the local Paper; no retry was made');
       } else if(observed!==trashed) {

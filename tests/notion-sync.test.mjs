@@ -483,3 +483,15 @@ test('a missing Notion page is not assumed trashed and offers the independent lo
   await assert.rejects(h.notion.trashLinked(h.id),error=>error.status===409&&/Only this computer/.test(error.message));
   await h.library.folder(h.id);assert.equal(h.fake.state.trashCalls.length,0);assert.equal((await localState(h)).pending,undefined);
 });
+
+
+test('already-trashed proof requires the exact linked page identity, including any supplied URL',async t=>{
+  const h=await harness(t);await saveFirst(h);await h.notion.prepareLocalTrash(h.id);
+  for(const remote of [{in_trash:true},{id:'22222222222222222222222222222222',in_trash:true},{id:PAGE,url:'https://www.notion.so/22222222222222222222222222222222',in_trash:true}]) {
+    h.fake.state.contexts.set(PAGE,remote);
+    await assert.rejects(h.notion.trashLinked(h.id),error=>error.status===409&&/identity/.test(error.message));
+    await h.library.folder(h.id);assert.equal(h.fake.state.trashCalls.length,0);
+  }
+  h.fake.state.contexts.set(PAGE,{url:'https://www.notion.so/'+PAGE,in_trash:true});
+  assert.equal((await h.notion.trashLinked(h.id)).safeToTrashLocal,true);
+});

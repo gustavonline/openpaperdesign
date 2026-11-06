@@ -219,3 +219,12 @@ test('a save acknowledged by a follow-up status closes with honest success feedb
   await h.ui.save();h.press('Save changes');await settle();await settle();
   assert.equal(h.dialog().open,false);assert.match(h.messages.at(-1),/Paper saved to Notion/);
 });
+
+
+test('polling a delayed save closes with feedback when its final status is verified',async()=>{
+  const pending={...connected,saving:true,syncState:'saving'};
+  const done={...connected,link:{...link,savedAt:'2026-11-06T11:00:00Z'},changed:false,syncState:'saved'};
+  const h=harness([{...connected,changed:true,syncState:'local-changes'},pending,done],{save:async()=>{throw Object.assign(new Error('Response pending'),{status:502});}});
+  await h.ui.save();h.press('Save changes');await settle();await settle();assert.equal(h.dialog().open,true);
+  h.press('Check status');await settle();await settle();assert.equal(h.dialog().open,false);assert.match(h.messages.at(-1),/Paper saved to Notion/);
+});

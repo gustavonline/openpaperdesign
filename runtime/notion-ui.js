@@ -390,7 +390,7 @@ export function setupNotion({
   function savingView(token){
     const screenId=screen('saving'),previousSave=connectionState.link?.savedAt;body.append(live('Saving to Notion… You can close this window; the save will continue.'));cancel.textContent='Close';
     const check=button('Check status',poll,'notion-quiet');body.append(actions(check));
-    async function poll(){clearTimeout(searchTimer);if(!current(token,screenId))return;check.disabled=true;try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(!next.saving){if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview)savedView(token,true);else{resume(token);if(!next.needsReview)showError('The save was not confirmed. Your local Paper is safe.');}return;}}catch(error){if(current(token,screenId))showError(failure(error));}finally{check.disabled=false;if(current(token,screenId))searchTimer=setTimeout(poll,2000);}}
+    async function poll(){clearTimeout(searchTimer);if(!current(token,screenId))return;check.disabled=true;try{const next=await status();if(!current(token,screenId))return;connectionState=next;if(!next.saving){if(next.link?.savedAt&&next.link.savedAt!==previousSave&&!next.needsReview)finishSave(next.changed===true);else{resume(token);if(!next.needsReview)showError('The save was not confirmed. Your local Paper is safe.');}return;}}catch(error){if(current(token,screenId))showError(failure(error));}finally{check.disabled=false;if(current(token,screenId))searchTimer=setTimeout(poll,2000);}}
     searchTimer=setTimeout(poll,1500);
   }
 
