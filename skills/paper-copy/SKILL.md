@@ -2,10 +2,12 @@
 name: paper-copy
 description: Write or refine the text inside a Paper design or diagram so it fits the artifact, audience and task. Use for headings, labels, UI messages and visual explanations; preserve approved copy and distinguish proposals from facts. Not a general article-writing or text-editor workflow.
 metadata:
-  version: "0.7.0-preview.19"
+  version: "0.7.0-preview.22"
 ---
 
 # Copy for the artifact
+
+Use [Paper workspace operations](../paper/SKILL.md) for the native plugin workflow: show the Paper with `paper_home`/`paper_join` in the Codex side panel, select/read it through MCP, announce real work with `paper_activity`, and commit through `paper_save`. Do not open the returned localhost URL in Browser Use or the built-in browser, or author through direct file/HTTP/browser writes. Generated layer JSON is staging until the MCP save. Browser fallback requires an explicit choice by the person.
 
 Work on the selected Paper's content. Start with its brief, reader and existing guide; reuse what the calling Design or Diagram workflow already established. A roadmap, interface, architecture diagram and campaign poster need different text. A geometry-only change that preserves approved copy needs no separate writing pass.
 

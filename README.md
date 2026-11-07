@@ -22,7 +22,7 @@ codex plugin marketplace add gustavonline/openpaperdesign
 codex plugin add openpaperdesign@openpaperdesign
 ```
 
-After installing or updating, quit and reopen Codex to reload its sidebar Home and local tools. Then open **OpenPaperDesign** in the desktop sidebar or from **More tools** in a new browser tab. Both open the same Home. You can also ask your agent to open Home.
+Open **OpenPaperDesign** as a plugin app in the desktop sidebar or through **More tools**. Agents use `paper_home` to display that embedded app, then Paper MCP tools to read, announce work and save. Localhost URLs returned by tools are internal routing data. After updating, open a fresh app view; an older chat may require the host’s plugin reload or a fresh chat to pick up new tools.
 
 Home, Papers and the Notion picker use the same plugin window. Use the Paper menu in the upper-left corner → **All Papers** to return Home. Notion sign-in opens separately; its picker stays in Paper.
 
@@ -34,13 +34,13 @@ Home, Papers and the Notion picker use the same plugin window. Use the Paper men
 /openpaperdesign:home
 ```
 
-The Home command opens the dashboard in your browser.
+The Home command requests the plugin app. Hosts without embedded app support can use the standalone browser route when explicitly chosen.
 
 ## Use it
 
 Ask your agent to create a Paper, revise a design or draw a diagram. The plugin includes [Paper](skills/paper/SKILL.md), [Design](skills/paper-design/SKILL.md), [Diagrams](skills/paper-diagram/SKILL.md) and [Paper Copy](skills/paper-copy/SKILL.md) skills. Design and Diagrams use Paper Copy when drafting or revising text, then check it in the rendered artifact. A roadmap gets useful goals and labels; a promotional headline is used when the brief calls for one.
 
-Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Pencil stays active between strokes; Escape or V returns to Select. The participant avatars can be dragged out of the way.
+Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Pencil stays active between strokes; Escape or V returns to Select. The participant avatars can be dragged out of the way. Each person has one avatar across their windows: all local owner views share an anonymous identity per Paper, and invitation views group when they share browser storage. Different profiles or origins remain separate; no account or fingerprinting is used. Agents appear separately while working.
 
 **Share → Share this Paper** creates a named link with view or edit access. Choose **Local network** for devices on your Wi-Fi, or **Internet** for a temporary HTTPS link through Cloudflare. Each link can be removed independently. Several Papers can share one tunnel while keeping their own permissions. Keep this computer and Paper server running.
 

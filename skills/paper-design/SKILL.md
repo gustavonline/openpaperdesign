@@ -2,10 +2,12 @@
 name: paper-design
 description: Create or revise visual direction and editable designs in Paper for websites, app screens, dashboards, banners and other graphics. Use when turning a brief or references into design alternatives, documenting a design system, or reviewing visual consistency.
 metadata:
-  version: "0.7.0-preview.19"
+  version: "0.7.0-preview.22"
 ---
 
 # Design in Paper
+
+Use [Paper workspace operations](../paper/SKILL.md) for the native plugin workflow: show the Paper with `paper_home`/`paper_join` in the Codex side panel, select/read it through MCP, announce real work with `paper_activity`, and commit through `paper_save`. Do not open the returned localhost URL in Browser Use or the built-in browser, or author through direct file/HTTP/browser writes. Generated layer JSON is staging until the MCP save. Browser fallback requires an explicit choice by the person.
 
 Work from the person's brief and real sources, in the existing Paper editor. The useful chain is **evidence → direction → copy when needed → composition → rendered review**. A small correction can go straight to composition and review; an existing guide does not need rewriting on every task.
 
@@ -35,10 +37,10 @@ When the task concerns real interactive components, keep the project's component
 
 ## Review what actually renders
 
-Inspect the result in the built-in browser when available. Check that the text adds useful meaning beyond the illustration, then check hierarchy, readable text, alignment, repeated spacing, icon weight, optical centering, clipping, image integrity and the intended states. Compare hover, selected and focus states where relevant; they should communicate different meanings. Use the existing visual language rather than adopting a reference library's entire palette or component stack.
+Inspect the result in the embedded Paper app when native visual access is available. External reference websites may be inspected in a browser. Check that the text adds useful meaning beyond the illustration, then check hierarchy, readable text, alignment, repeated spacing, icon weight, optical centering, clipping, image integrity and the intended states. Compare hover, selected and focus states where relevant; they should communicate different meanings. Use the existing visual language rather than adopting a reference library's entire palette or component stack.
 
 For websites/apps, check representative compact and wide views plus relevant transitions with real content. Record content order and navigation/sidebar changes. A fixed-size banner needs its actual output dimensions and readable crop-safe composition, rather than a mobile breakpoint matrix. For motion, use the project's existing timing and reduced-motion behavior.
 
-Verify save and reopen. Inspect the intended export, including images/fonts, when export is part of the deliverable. If browser/rendering access is unavailable, finish the source work and report that visual acceptance remains unverified; do not call structural checks a visual pass.
+Verify save and reopen. Inspect the intended export, including images/fonts, when export is part of the deliverable. If native visual access is unavailable, finish the authorized MCP work and report that native visual acceptance remains unverified; do not call structural checks a visual pass.
 
 Finish with the selected direction, changed files/Paper, actual verification, and any material rendering gap. Put only useful continuation decisions in `CONTEXT.md`; do not copy the chat. Review-only requests leave artwork and guides unchanged.

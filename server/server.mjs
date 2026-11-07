@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {WORKSPACE_API,PAPER_DOCUMENT_VERSION} from '../runtime/workspace-protocol.js';
-import { createPresence } from './presence.mjs';
-import { discoverWorkspace, registerWorkspace, openWorkspaceServer, remotePresence } from './workspace.mjs';
+import { createPresence,validatePresence } from './presence.mjs';
+import { discoverWorkspace, registerWorkspace, openWorkspaceServer, remotePresence, presenceOperation } from './workspace.mjs';
 import { randomBytes } from 'node:crypto';
 import { checkRuntime, loadRuntime, EDITOR_FILES, VERSION } from './runtime.mjs';
 import { isArtboard } from '../runtime/diagram-model.js';
@@ -61,7 +61,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
   const sharing=createSharing({library,editor,presence,publicUrl:shareUrl,port:sharePort});
   const notion=createNotion({library,configDir:dataHome(),origin:()=>`http://127.0.0.1:${server.address().port}`});
   const lastChanges=new Map();
-  const emit=(event,data)=>{if(['paper-changed','feedback-changed'].includes(event)&&data?.revision){const key=event+':'+data.paperId;lastChanges.set(key,data.revision);if(lastChanges.size>1024)lastChanges.delete(lastChanges.keys().next().value);}const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
+  const emit=(event,data)=>{if(event==='paper-changed')presence.committed(data);if(['paper-changed','feedback-changed'].includes(event)&&data?.revision){const key=event+':'+data.paperId;lastChanges.set(key,{revision:data.revision});if(lastChanges.size>1024)lastChanges.delete(lastChanges.keys().next().value);}const message=`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;for(const response of streams)if(event!=='presence'||response.paperId===data.paperId)response.write(message);sharing.notify(event,data);};
   library.onChange=(event,data)=>{emit(event,data);if(data?.paperId&&['paper-changed','feedback-changed','guide-changed'].includes(event))void notion.changed(data.paperId).catch(error=>process.stderr.write(`Notion queue: ${error.message}\n`));};
   const server=http.createServer(async(req,res)=>{
     try {
@@ -73,13 +73,13 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       if(pathname==='/api/events'&&req.method==='GET'){
         res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});res.write(': connected\n\n');res.paperId=url.searchParams.getAll('paper').length===1&&ID.test(url.searchParams.get('paper'))?url.searchParams.get('paper'):null;streams.add(res);if(res.paperId)res.write(`event: presence-snapshot\ndata: ${JSON.stringify(presence.snapshot(res.paperId))}\n\n`);req.on('close',()=>streams.delete(res));return;
       }
-      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION,features:{notionAutosync:1},instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
+      if(pathname==='/api/status'&&req.method==='GET')return json(res,200,{name:'OpenPaperDesign',version:VERSION,workspaceApi:WORKSPACE_API,paperDocumentVersion:PAPER_DOCUMENT_VERSION,features:{notionAutosync:1,agentMotion:1,agentCompletion:1},instance:registration?.instance,workspace:library.workspace,storageRoot:library.root,runtime:process.version,pid:process.pid,uptimeSeconds:process.uptime(),rssBytes:process.memoryUsage.rss(),canStop:true,sharingCount:sharing.count});
       if(pathname==='/api/server/stop'&&req.method==='POST'){
         const args=JSON.parse(await readBody(req,1024));
         if(args?.instance!==registration?.instance)throw new PaperError(409,'The server changed. Refresh Home before stopping it.');
         json(res,200,{stopping:true});setImmediate(()=>app.close().catch(error=>process.stderr.write(`Paper shutdown: ${error.message}\n`)));return;
       }
-      if(pathname==='/api/access'&&req.method==='GET')return json(res,200,{role:'owner',shared:false});
+      if(pathname==='/api/access'&&req.method==='GET')return json(res,200,{role:'owner',shared:false,presenceIdentity:1});
       if(pathname==='/api/updates'&&req.method==='GET'){
         const id=paperId(url),[paper,feedback,notes]=await Promise.all([library.read(id),library.read(id,'feedback'),library.notes(id)]);
         return json(res,200,{revision:paper.revision,feedbackRevision:feedback.revision,guideRevision:notes['DESIGN.md'].revision,presence:presence.snapshot(id)});
@@ -120,13 +120,15 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         if(req.method==='GET')return json(res,200,presence.snapshot(id));
         if(req.method==='POST'){
           const body=JSON.parse(await readBody(req,2048));if(!body||typeof body!=='object'||Array.isArray(body))throw new PaperError(400,'Invalid presence');
-          const {kind='human',long=false,event,revision,leave=false,restore=false,activity=false,...patch}=body,who=client(req);
+          const {kind='human',long=false,event,revision,baseRevision,generation,leave=false,restore=false,activity=false,...patch}=body,who=client(req);
           if(!who||!['human','agent'].includes(kind)||typeof long!=='boolean'||typeof leave!=='boolean'||typeof restore!=='boolean'||typeof activity!=='boolean')throw new PaperError(400,'Invalid presence');
           if(event!==undefined&&(!['paper-changed','feedback-changed','guide-changed'].includes(event)||!/^"[a-f0-9]{64}"$/.test(revision||'')))throw new PaperError(400,'Invalid saved change');
+          if(baseRevision!==undefined&&(!event||!/^"[a-f0-9]{64}"$/.test(baseRevision)))throw new PaperError(400,'Invalid base revision');
+          if(generation!==undefined&&(kind!=='agent'||typeof generation!=='string'||!/^[a-f0-9]{32}$/.test(generation)))throw new PaperError(400,'Invalid operation generation');
           if(kind!=='agent'&&(event!==undefined||long||restore||activity))throw new PaperError(400,'Invalid participant activity');
-          if(leave){presence.leave('owner',who);return json(res,200,{left:true});}
+          if(leave){validatePresence(patch,kind);presence.leave('owner',who);return json(res,200,{left:true});}
           const peer=presence.update(id,'owner',who,patch,kind,true,long,restore,activity);
-          if(event)emit(event,{paperId:id,revision,clientId:peer.id});return json(res,200,{peer});
+          if(event&&(event!=='paper-changed'||(await library.read(id)).revision===revision&&(!baseRevision||presence.canComplete(id,generation))))emit(event,{paperId:id,baseRevision,revision,clientId:peer.id});return json(res,200,{peer,generation:presence.generation(id)});
         }
       }
       if(pathname==='/api/sharing/overview'&&req.method==='GET')return json(res,200,sharing.overview());
@@ -144,7 +146,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       }
       if(['/api/paper','/api/scene','/api/feedback'].includes(pathname)){
         const id=paperId(url),kind=pathname==='/api/feedback'?'feedback':'paper';
-        if(req.method==='GET'){const result=await library.read(id,kind);if(pathname==='/api/scene')return json(res,200,{revision:result.revision,scene:result.paper});return json(res,200,result);}
+        if(req.method==='GET'){const result=await library.read(id,kind);if(pathname==='/api/scene')return json(res,200,{revision:result.revision,scene:result.paper});return json(res,200,{...result,...(kind==='paper'?{presence:presence.snapshot(id)}:{})});}
         if(req.method==='PUT')return json(res,200,await library.save(id,await readBody(req,kind==='paper'?MAX_PAPER_BYTES:5*1024*1024),req.headers['if-match'],kind,client(req)));
       }
       if(pathname.startsWith('/api/'))throw new PaperError(404,'Unknown API action');
@@ -172,10 +174,30 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
   const timers=new Map();
   try {
     watcher=watch(library.root,{recursive:true},(_event,file)=>{
+      if(closingPromise)return;
       const parts=String(file||'').split(path.sep);if(parts.length!==2||!ID.test(parts[0])||!['paper.json','feedback.json','DESIGN.md','CONTEXT.md'].includes(parts[1]))return;
-      const key=parts.join('/');clearTimeout(timers.get(key));timers.set(key,setTimeout(async()=>{
-        timers.delete(key);try{const kind=parts[1]==='paper.json'?'paper':parts[1]==='feedback.json'?'feedback':'guide',data=kind==='guide'?(await library.notes(parts[0]))[parts[1]]:await library.read(parts[0],kind);if(lastChanges.get(`${kind}-changed:${parts[0]}`)!==data.revision)emit(`${kind}-changed`,{paperId:parts[0],revision:data.revision,clientId:''});void notion.changed(parts[0]).catch(error=>process.stderr.write(`Notion queue: ${error.message}\n`));}catch(error){process.stderr.write(`Paper file change: ${error.message}\n`);}
-      },120));
+      const key=parts.join('/');clearTimeout(timers.get(key));
+      let lockRetries=0;
+      const busy=async()=>{try{await fs.lstat(path.join(library.root,parts[0],'.write-lock'));return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}};
+      const retry=()=>{if(!closingPromise&&!timers.has(key))timers.set(key,setTimeout(notify,120));};
+      const notify=async()=>{
+        timers.delete(key);if(closingPromise)return;const kind=parts[1]==='paper.json'?'paper':parts[1]==='feedback.json'?'feedback':'guide',eventKey=`${kind}-changed:${parts[0]}`,seen=lastChanges.get(eventKey);
+        try{
+          // A rename is visible before the writer has synced and released its
+          // lock. Let that writer publish its authoritative completion first.
+          if(await busy()){if(++lockRetries<25)retry();return;}
+          const data=kind==='guide'?(await library.notes(parts[0]))[parts[1]]:await library.read(parts[0],kind);
+          if(closingPromise)return;
+          if(await busy()){if(++lockRetries<25)retry();return;}
+          if(closingPromise)return;
+          // A known save can finish during this read. Retry current bytes rather
+          // than publish the older read over its event and commit identity.
+          if(lastChanges.get(eventKey)!==seen){retry();return;}
+          if(seen?.revision!==data.revision)emit(`${kind}-changed`,{paperId:parts[0],revision:data.revision,clientId:''});
+          void notion.changed(parts[0]).catch(error=>process.stderr.write(`Notion queue: ${error.message}\n`));
+        }catch(error){process.stderr.write(`Paper file change: ${error.message}\n`);}
+      };
+      timers.set(key,setTimeout(notify,120));
     });
     watcher.on('error',error=>{process.stderr.write(`File watching stopped: ${error.message}. API updates still notify open browsers.\n`);watcher.close();});
   }catch(error){process.stderr.write(`File watching unavailable: ${error.message}. API updates still notify open browsers.\n`);}
@@ -187,18 +209,22 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
 async function connectWorkspace(root,agentClient){
   const opened=await openWorkspaceServer(root,port=>startServer(root,{port}));
   if(opened.library)return opened;
-  const proxy=agentClient?remotePresence(opened.url,agentClient):null;
-  return {...opened,library:await PaperLibrary.open(root),presence:proxy,close:async()=>proxy?.close()};
+  const proxy=agentClient?remotePresence(opened.url,agentClient,opened.features):null;
+  const save=async(id,bytes,revision,kind='paper',actor='')=>{
+    const response=await fetch(`${opened.url}/api/${kind==='feedback'?'feedback':'paper'}?paper=${encodeURIComponent(id)}`,{method:'PUT',headers:{Origin:opened.url,'Content-Type':'application/json','If-Match':revision,'X-Paper-Client':actor},body:bytes,signal:AbortSignal.timeout(30000)});
+    const result=await response.json();if(!response.ok)throw new PaperError(response.status,result.error||'Paper save did not complete');return result;
+  };
+  return {...opened,library:await PaperLibrary.open(root),presence:proxy,save,close:async()=>proxy?.close()};
 }
 
 const string={type:'string'},tool=(name,description,properties,required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:['paper_list','paper_read','paper_read_feedback'].includes(name),destructiveHint:false,openWorldHint:false}});
 export const TOOLS=[
   {...tool('paper_ui','Use the owner API for the selected Paper library from the native app.',{key:string,workspaceId:string,origin:string,instance:string,path:string,method:{type:'string',enum:['GET','POST','PUT','DELETE']},headers:{type:'object',additionalProperties:{type:'string'}},body:string},['key','workspaceId','origin','instance','path']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},_meta:{ui:{visibility:['app']}}},
-  {...tool('paper_home','Find Papers and known projects, open Home, or stop a listed server. No arguments lists them; other actions use a returned workspaceId.',{action:{type:'string',enum:['list','create','open','stop','sharing','stop-sharing','rename','reveal','trash','trash-list','restore']},workspaceId:string,paperId:string,name:string,instance:string,invitationId:string,trashId:string,copies:{type:'string',enum:['local','both'],description:'Omitted means local only. Use both only after the user confirmed the linked Notion destination.'}}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]}}},
+  {...tool('paper_home','Open the native OpenPaperDesign plugin app in the side panel and find saved Papers. No arguments lists them; action open/create displays a Paper. Use returned workspaceId; localhost URLs are internal routing data, not browser navigation.',{action:{type:'string',enum:['list','create','open','stop','sharing','stop-sharing','rename','reveal','trash','trash-list','restore']},workspaceId:string,paperId:string,name:string,instance:string,invitationId:string,trashId:string,copies:{type:'string',enum:['local','both'],description:'Omitted means local only. Use both only after the user confirmed the linked Notion destination.'}}),title:'OpenPaperDesign',icons:ICONS,_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI,'openai/ui':{entrypoints:[{type:'global'},{type:'thread'}]}}},
   {...tool('paper_join','Join a shared Paper invitation. Opens its live canvas and selects it for the artwork tools. No local workspace or extra MCP setup is needed. paper_open switches back to local Papers.',{url:string},['url']),title:'Open shared Paper',annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true},_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI}},
-  tool('paper_open','Open a Paper workspace. Omit workspace for the personal library; select an absolute project folder for project-local Papers.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
+  tool('paper_open','Select the active workspace for Paper MCP tools. Omit workspace for personal Papers. Display the native plugin app with paper_home; do not navigate the returned localhost URL in a browser.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
   tool('paper_list','List saved Papers in the opened workspace.',{}),
-  tool('paper_create','Create a blank saved Paper; return its id, files and editor URL.',{name:string,width:{type:'integer',minimum:16,maximum:10000},height:{type:'integer',minimum:16,maximum:10000}}),
+  tool('paper_create','Create a saved Paper with optional dimensions. Show it in the native plugin app using paper_home action open with its workspaceId/paperId; do not open the internal URL in a browser.',{name:string,width:{type:'integer',minimum:16,maximum:10000},height:{type:'integer',minimum:16,maximum:10000}}),
   tool('paper_read','Read revision, file paths, page summary and notes. Set includePaper only when the complete layer JSON is needed.',{paperId:string,includePaper:{type:'boolean'}},['paperId']),
   tool('paper_save','Save artwork with its read revision. Supply paper JSON or an edited sourceFile inside the workspace; stale edits are refused.',{paperId:string,revision:string,paper:{type:'object'},sourceFile:string},['paperId','revision']),
   tool('paper_read_feedback','Read this Paper’s saved comments, guides and measurements, with their independent revision.',{paperId:string},['paperId']),
@@ -235,6 +261,7 @@ export async function serveStdio() {
     }
     if(joined)return joined.tool(name,args);
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
+    const save=(...values)=>active.save?active.save(...values):active.library.save(...values);
     if(name==='paper_package'){
       if(!['export','import'].includes(args.action)||typeof args.file!=='string'||!path.isAbsolute(args.file))throw new PaperError(400,'Choose export/import and an absolute workspace file');
       if(args.action==='import'){const source=await fs.realpath(args.file);if(!inside(active.library.workspace,source)||(await fs.stat(source)).size>MAX_BUNDLE_BYTES)throw new PaperError(400,'Choose a Paper file within this workspace and 50 MB');return importBundle(active.library,await fs.readFile(source));}
@@ -256,7 +283,7 @@ export async function serveStdio() {
       return {revision:read.revision,path:path.join(folder,'paper.json'),folder,assetsDir:path.join(folder,'assets'),historyDir:path.join(folder,'.history'),feedback:{path:path.join(folder,'feedback.json'),revision:feedback.revision,exists:!!await fs.stat(path.join(folder,'feedback.json')).catch(()=>null)},summary:{name:read.paper.name,pages:read.paper.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length,artboards:p.nodes.filter(n=>p.root.includes(n.id)&&isArtboard(n)).length}))},notes:Object.fromEntries(Object.entries(notes).map(([name,note])=>[name,{...note,text:note.text.slice(0,8000),truncated:note.text.length>8000,path:path.join(folder,name)}])),...(args.includePaper?{paper:read.paper}:{})};
     }
     if(name==='paper_read_feedback')return active.library.read(args.paperId,'feedback');
-    if(name==='paper_save_feedback')return active.library.save(args.paperId,Buffer.from(JSON.stringify(args.workspace)),args.revision,'feedback',peerId);
+    if(name==='paper_save_feedback')return save(args.paperId,Buffer.from(JSON.stringify(args.workspace)),args.revision,'feedback',peerId);
     if(name==='paper_add_asset'){
       if((args.base64===undefined)===(args.sourceFile===undefined))throw new PaperError(400,'Supply exactly one of base64 or sourceFile');
       let bytes;
@@ -269,7 +296,7 @@ export async function serveStdio() {
       let bytes;
       if(args.sourceFile!==undefined){if(typeof args.sourceFile!=='string'||!path.isAbsolute(args.sourceFile))throw new PaperError(400,'Choose an absolute edited source file');const candidate=await fs.realpath(args.sourceFile);if(!inside(active.library.workspace,candidate)||(await fs.stat(candidate)).size>MAX_PAPER_BYTES)throw new PaperError(400,'Edited source file must be inside this workspace and within size limits');bytes=await fs.readFile(candidate);}
       else bytes=Buffer.from(JSON.stringify(args.paper));
-      return active.library.save(args.paperId,bytes,args.revision,'paper',peerId);
+      return save(args.paperId,bytes,args.revision,'paper',peerId);
     }
     return active.library.saveNote(args.paperId,args.file,args.text,args.revision,peerId);
   };
@@ -283,7 +310,7 @@ export async function serveStdio() {
     const peer=await soft(()=>active.presence.update(args.paperId,'owner',agentClient,{status:labels[name]||'Working on the Paper'},'agent'));
     try{
       const result=await rawCall(name,args,peer?.id||'agent-mcp'),event={paper_save:'paper-changed',paper_save_feedback:'feedback-changed',paper_write_note:'guide-changed'}[name];
-      const finished=await soft(()=>active.presence.complete?active.presence.complete(args.paperId,event,result.revision):active.presence.restore(args.paperId,'owner',agentClient));
+      const finished=await soft(()=>active.presence.complete?active.presence.complete(args.paperId,event,result.revision,args.revision,peer?.[presenceOperation]):active.presence.restore(args.paperId,'owner',agentClient));
       return {...result,agent:finished||peer};
     }catch(error){await soft(()=>active.presence.restore(args.paperId,'owner',agentClient));throw error;}
   };
