@@ -1,3 +1,4 @@
+import {validatePresence} from './presence.mjs';
 import {EDITOR_FILES,VERSION} from './runtime.mjs';
 import http from 'node:http';
 import path from 'node:path';
@@ -110,7 +111,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
       }
       if((req.method==='GET'||req.method==='HEAD')&&RUNTIME_FILES.has(pathname.slice(1)))return editor.serve(req,res,pathname.slice(1));
       const grant=authenticate(req,url,listener);
-      if(pathname==='/api/access')return json(res,200,{version:VERSION,role:grant.role,paperId:grant.paperId,shared:true,poll:listener.online,expiresAt:grant.expiresAt,clientPrefix:`g-${grant.id}-`});
+      if(pathname==='/api/access')return json(res,200,{version:VERSION,role:grant.role,paperId:grant.paperId,shared:true,presenceIdentity:1,poll:listener.online,expiresAt:grant.expiresAt,clientPrefix:`g-${grant.id}-`});
       if(pathname==='/api/updates'&&req.method==='GET'){
         scoped(grant,url);const [paper,feedback,notes]=await Promise.all([library.read(grant.paperId),library.read(grant.paperId,'feedback'),library.notes(grant.paperId)]);
         return json(res,200,{revision:paper.revision,feedbackRevision:feedback.revision,guideRevision:notes['DESIGN.md'].revision,presence:presence.snapshot(grant.paperId)});
@@ -126,7 +127,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
           if(req.headers.origin!==requestOrigin||!CLIENT(req))throw new PaperError(403,'Use the invited Paper browser');
           const body=JSON.parse(await readBody(req,2048));if(!body||typeof body!=='object'||Array.isArray(body))throw new PaperError(400,'Invalid presence');const {leave=false,...patch}=body;
           if(typeof leave!=='boolean')throw new PaperError(400,'Invalid departure');
-          if(leave){presence.leave(grant.id,CLIENT(req));return json(res,200,{left:true});}
+          if(leave){validatePresence(patch,'human',grant.role==='edit');presence.leave(grant.id,CLIENT(req));return json(res,200,{left:true});}
           return json(res,200,{peer:presence.update(grant.paperId,grant.id,CLIENT(req),patch,'human',grant.role==='edit')});
         }
       }

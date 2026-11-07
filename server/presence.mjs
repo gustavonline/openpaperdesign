@@ -7,15 +7,26 @@ const colours=['#487c70','#7964a2','#a56648','#4a78a5','#a55777','#8a783b','#507
 const bad=(condition,text)=>{if(!condition)throw new PaperError(400,text);};
 const xy=v=>v&&['x','y'].every(k=>Number.isFinite(v[k])&&Math.abs(v[k])<=1e6);
 const rectangle=v=>xy(v)&&['w','h'].every(k=>Number.isFinite(v[k])&&v[k]>=0&&v[k]<=1e6);
+export function validatePresence(input,kind='human',canEdit=true){
+  bad(input&&typeof input==='object'&&!Array.isArray(input)&&Object.keys(input).every(k=>['pageId','nodeId','cursor','drag','rect','status','participant','focused'].includes(k)),'Invalid presence fields');
+  if('participant' in input)bad(kind==='human'&&typeof input.participant==='string'&&/^[a-f0-9]{64}$/.test(input.participant),'Invalid browser participant');
+  if('focused' in input)bad(typeof input.focused==='boolean','Invalid presence focus');
+  if(input.pageId!=null)bad(typeof input.pageId==='string'&&ID.test(input.pageId),'Invalid presence Page');
+  if(input.nodeId!=null)bad(Number.isSafeInteger(input.nodeId),'Invalid presence layer');
+  if(input.cursor!=null)bad(xy(input.cursor),'Invalid cursor');
+  for(const k of ['drag','rect'])if(input[k]!=null)bad(rectangle(input[k])&&canEdit,'Invalid preview or view-only access');
+  if(input.status!=null)bad(typeof input.status==='string'&&input.status.length<=120,'Status needs up to 120 characters');
+}
 export function createPresence({publish,now=Date.now}={}){
   const peers=new Map(),commits=new Map(),generations=new Map(),salt=randomBytes(16);
+  let sequence=0;
   function generation(paperId,changed=false){
     if(changed||!generations.has(paperId)){generations.delete(paperId);generations.set(paperId,randomBytes(16).toString('hex'));if(generations.size>64)generations.delete(generations.keys().next().value);}
     return generations.get(paperId);
   }
   const revision=v=>/^"[a-f0-9]{64}"$/.test(v||'');
   const commitTTL=15000;
-  const publicPeer=p=>({id:p.id,name:p.name,avatar:p.avatar,color:p.color,kind:p.kind,pageId:p.pageId,nodeId:p.nodeId,cursor:p.cursor,drag:p.drag,rect:p.rect,status:p.status,ttl:Math.max(0,p.expiresAt-now())});
+  const publicPeer=p=>({id:p.id,participantId:p.participantId,focused:p.focused,updateSeq:p.updateSeq,name:p.name,avatar:p.avatar,color:p.color,kind:p.kind,pageId:p.pageId,nodeId:p.nodeId,cursor:p.cursor,drag:p.drag,rect:p.rect,status:p.status,ttl:Math.max(0,p.expiresAt-now())});
   const send=p=>publish?.({paperId:p.paperId,peer:publicPeer(p)});
   function remove(key){const p=peers.get(key);if(p){peers.delete(key);publish?.({paperId:p.paperId,id:p.id,peer:null});}}
   function prune(){for(const [key,p] of peers)if(p.expiresAt<=now())remove(key);for(const [id,list] of commits){const live=list.filter(c=>c.until>now());if(live.length)commits.set(id,live);else commits.delete(id);}}
@@ -46,21 +57,23 @@ export function createPresence({publish,now=Date.now}={}){
   const timer=setInterval(prune,5000);timer.unref();
   function update(paperId,scope,client,input={},kind='human',canEdit=true,long=false,restore=false,announce=false){
     bad(typeof paperId==='string'&&ID.test(paperId)&&typeof client==='string'&&/^[a-zA-Z0-9_-]{1,80}$/.test(client),'Invalid presence identity');
-    bad(input&&typeof input==='object'&&!Array.isArray(input)&&Object.keys(input).every(k=>['pageId','nodeId','cursor','drag','rect','status'].includes(k)),'Invalid presence fields');
-    if(input.pageId!=null)bad(typeof input.pageId==='string'&&ID.test(input.pageId),'Invalid presence Page');
-    if(input.nodeId!=null)bad(Number.isSafeInteger(input.nodeId),'Invalid presence layer');
-    if(input.cursor!=null)bad(xy(input.cursor),'Invalid cursor');
-    for(const k of ['drag','rect'])if(input[k]!=null)bad(rectangle(input[k])&&canEdit,'Invalid preview or view-only access');
-    if(input.status!=null)bad(typeof input.status==='string'&&input.status.length<=120,'Status needs up to 120 characters');
+    validatePresence(input,kind,canEdit);
+    const {participant,...patch}=input;input=patch;
     prune();const key=scope+':'+client;let p=peers.get(key);
     if(p&&p.paperId!==paperId){remove(key);p=null;}
     if(!p){
       const room=[...peers.values()].filter(p=>p.paperId===paperId);if(peers.size>=256||room.length>=64||room.filter(p=>p.scope===scope).length>=(scope==='owner'?16:8)||(scope!=='owner'&&room.filter(p=>p.scope!=='owner').length>=48))throw new PaperError(429,'This Paper has enough active participants');
-      const hash=createHmac('sha256',salt).update(key).digest(),[animal,avatar]=animals[hash[1]%animals.length];
-      const name=adjectives[hash[0]%adjectives.length]+' '+animal+' '+hash.subarray(13,14).toString('hex');
-      p={id:hash.subarray(3,13).toString('hex'),paperId,scope,kind,name,avatar:kind==='agent'?'✦':avatar,color:colours[hash[2]%colours.length],pageId:null,nodeId:null,cursor:null,drag:null,rect:null,status:'',bucket:now(),hits:0};peers.set(key,p);
+      const hash=createHmac('sha256',salt).update(JSON.stringify([paperId,'session',key])).digest();
+      p={id:hash.subarray(3,13).toString('hex'),paperId,scope,kind,focused:false,pageId:null,nodeId:null,cursor:null,drag:null,rect:null,status:'',bucket:now(),hits:0};peers.set(key,p);
     }
     if(now()-p.bucket>=1000){p.bucket=now();p.hits=0;}if(!restore&&++p.hits>(kind==='agent'?120:24))throw new PaperError(429,'Presence is updating too quickly');
+    // Display identity never owns permissions, expiry, rate budgets or commit actors.
+    const identity=kind==='human'?(scope==='owner'?['owner']:participant?['guest',participant]:['transport',key]):['agent',key];
+    const hash=createHmac('sha256',salt).update(JSON.stringify([paperId,...identity])).digest(),[animal,avatar]=animals[hash[1]%animals.length];
+    p.participantId=hash.subarray(0,16).toString('hex');
+    p.name=adjectives[hash[0]%adjectives.length]+' '+animal+' '+hash.subarray(13,14).toString('hex');
+    p.avatar=kind==='agent'?'✦':avatar;p.color=colours[hash[2]%colours.length];
+    p.updateSeq=sequence=Math.min(Number.MAX_SAFE_INTEGER,sequence+1);
     if(announce)p.activity=input.status?structuredClone(input):null;
     if(restore){p.activity=null;input={status:'',rect:null,pageId:null,nodeId:null,cursor:null,drag:null};}
     for(const [k,v] of Object.entries(input))p[k]=v===null?null:typeof v==='object'?structuredClone(v):v;

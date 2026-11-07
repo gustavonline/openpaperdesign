@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {WORKSPACE_API,PAPER_DOCUMENT_VERSION} from '../runtime/workspace-protocol.js';
-import { createPresence } from './presence.mjs';
+import { createPresence,validatePresence } from './presence.mjs';
 import { discoverWorkspace, registerWorkspace, openWorkspaceServer, remotePresence, presenceOperation } from './workspace.mjs';
 import { randomBytes } from 'node:crypto';
 import { checkRuntime, loadRuntime, EDITOR_FILES, VERSION } from './runtime.mjs';
@@ -79,7 +79,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         if(args?.instance!==registration?.instance)throw new PaperError(409,'The server changed. Refresh Home before stopping it.');
         json(res,200,{stopping:true});setImmediate(()=>app.close().catch(error=>process.stderr.write(`Paper shutdown: ${error.message}\n`)));return;
       }
-      if(pathname==='/api/access'&&req.method==='GET')return json(res,200,{role:'owner',shared:false});
+      if(pathname==='/api/access'&&req.method==='GET')return json(res,200,{role:'owner',shared:false,presenceIdentity:1});
       if(pathname==='/api/updates'&&req.method==='GET'){
         const id=paperId(url),[paper,feedback,notes]=await Promise.all([library.read(id),library.read(id,'feedback'),library.notes(id)]);
         return json(res,200,{revision:paper.revision,feedbackRevision:feedback.revision,guideRevision:notes['DESIGN.md'].revision,presence:presence.snapshot(id)});
@@ -126,7 +126,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
           if(baseRevision!==undefined&&(!event||!/^"[a-f0-9]{64}"$/.test(baseRevision)))throw new PaperError(400,'Invalid base revision');
           if(generation!==undefined&&(kind!=='agent'||typeof generation!=='string'||!/^[a-f0-9]{32}$/.test(generation)))throw new PaperError(400,'Invalid operation generation');
           if(kind!=='agent'&&(event!==undefined||long||restore||activity))throw new PaperError(400,'Invalid participant activity');
-          if(leave){presence.leave('owner',who);return json(res,200,{left:true});}
+          if(leave){validatePresence(patch,kind);presence.leave('owner',who);return json(res,200,{left:true});}
           const peer=presence.update(id,'owner',who,patch,kind,true,long,restore,activity);
           if(event&&(event!=='paper-changed'||(await library.read(id)).revision===revision&&(!baseRevision||presence.canComplete(id,generation))))emit(event,{paperId:id,baseRevision,revision,clientId:peer.id});return json(res,200,{peer,generation:presence.generation(id)});
         }

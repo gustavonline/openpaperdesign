@@ -73,3 +73,39 @@ test('operation generations outlive receipt expiry and safely invalidate on evic
  assert.equal(p.canComplete('paper',fresh),false);assert.notEqual(p.generation('paper'),fresh);
  const latest=p.generation('paper');p.close();assert.equal(p.canComplete('paper',latest),false);
 });
+
+test('anonymous participants group owner and browser humans without merging transports, scope, TTL or budgets',t=>{
+ const {presence:p,tick,events}=harness(t),participant='a'.repeat(64);
+ const owners=Array.from({length:12},(_,i)=>p.update('paper','owner','window'+i,{focused:i===0}));
+ assert.equal(new Set(owners.map(p=>p.id)).size,12);assert.equal(new Set(owners.map(p=>p.participantId)).size,1);
+ assert.equal(new Set(owners.map(p=>JSON.stringify([p.name,p.avatar,p.color]))).size,1);
+ for(let i=0;i<23;i++)p.update('paper','owner','window0',{});
+ assert.throws(()=>p.update('paper','owner','window0',{}),e=>e.status===429);
+ assert.equal(p.update('paper','owner','window1',{}).participantId,owners[0].participantId);
+ const a=p.update('paper','edit','guest1',{participant,focused:true}),b=p.update('paper','view','guest2',{participant},'human',false);
+ assert.equal(a.participantId,b.participantId);assert.notEqual(a.id,b.id);assert.notEqual(a.participantId,owners[0].participantId);
+ assert.ok(b.updateSeq>a.updateSeq);assert.equal(b.focused,false);
+ assert.throws(()=>p.update('paper','view','guest2',{participant,drag:{x:0,y:0,w:1,h:1}},'human',false),e=>e.status===400);
+ assert.notEqual(p.update('paper','edit','different',{participant:'b'.repeat(64)}).participantId,a.participantId);
+ assert.notEqual(p.update('other','edit','other-paper',{participant}).participantId,a.participantId);
+ assert.notEqual(p.update('other','owner','other-owner',{}).participantId,owners[0].participantId);
+ assert.notEqual(p.update('paper','edit','legacy1',{}).participantId,p.update('paper','edit','legacy2',{}).participantId);
+ p.leave('edit','guest1');assert.ok(p.snapshot('paper').peers.some(p=>p.id===b.id));
+ p.removeScope('edit');assert.ok(p.snapshot('paper').peers.some(p=>p.id===b.id));
+ tick(20000);p.update('paper','view','guest2',{participant},'human',false);tick(4001);
+ assert.deepEqual(p.snapshot('paper').peers.map(p=>p.id),[b.id]);
+ assert.ok(!JSON.stringify(events).includes(participant),'token never enters public events');
+});
+
+test('identity input is strict, owner is namespaced, and agents remain separate even while active',t=>{
+ const {presence:p}=harness(t),owner=p.update('paper','owner','owner',{});
+ for(const participant of [null,{},'owner',owner.participantId,'x'.repeat(64),'a'.repeat(65)])assert.throws(()=>p.update('paper','invite','bad',{participant}),e=>e.status===400);
+ for(const focused of [null,0,'true',{}])assert.throws(()=>p.update('paper','owner','bad',{focused}),e=>e.status===400);
+ assert.throws(()=>p.update('paper','owner','bad',{participantId:owner.participantId}),e=>e.status===400);
+ assert.throws(()=>p.update('paper','invite','agent',{participant:'a'.repeat(64)},'agent'),e=>e.status===400);
+ const spoof=p.update('paper','invite','spoof',{participant:owner.participantId.padEnd(64,'0')});assert.notEqual(spoof.participantId,owner.participantId);
+ const a=p.activity('paper','owner','agent1',{status:'Drawing'}),b=p.activity('paper','owner','agent2',{status:'Drawing'});
+ assert.notEqual(a.participantId,b.participantId);assert.notEqual(a.participantId,owner.participantId);
+ const first=p.update('first','owner','same-client',{}),second=p.update('second','owner','same-client',{});assert.notEqual(first.id,second.id);assert.notEqual(first.participantId,second.participantId);
+ assert.ok(!('scope' in spoof));assert.ok(!('role' in spoof));assert.ok(!('participant' in spoof));
+});

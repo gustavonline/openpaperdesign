@@ -40,7 +40,7 @@ The Home command opens the dashboard in your browser.
 
 Ask your agent to create a Paper, revise a design or draw a diagram. The plugin includes [Paper](skills/paper/SKILL.md), [Design](skills/paper-design/SKILL.md), [Diagrams](skills/paper-diagram/SKILL.md) and [Paper Copy](skills/paper-copy/SKILL.md) skills. Design and Diagrams use Paper Copy when drafting or revising text, then check it in the rendered artifact. A roadmap gets useful goals and labels; a promotional headline is used when the brief calls for one.
 
-Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Pencil stays active between strokes; Escape or V returns to Select. The participant avatars can be dragged out of the way.
+Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Pencil stays active between strokes; Escape or V returns to Select. The participant avatars can be dragged out of the way. Each person has one avatar across their windows: all local owner views share an anonymous identity per Paper, and invitation views group when they share browser storage. Different profiles or origins remain separate; no account or fingerprinting is used. Agents appear separately while working.
 
 **Share → Share this Paper** creates a named link with view or edit access. Choose **Local network** for devices on your Wi-Fi, or **Internet** for a temporary HTTPS link through Cloudflare. Each link can be removed independently. Several Papers can share one tunnel while keeping their own permissions. Keep this computer and Paper server running.
 

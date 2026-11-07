@@ -154,3 +154,35 @@ test('an attached stdio agent saves through the owning backend and preserves con
   assert.equal((await get('/api/paper')).revision,saved.revision);assert.equal((await get('/api/presence')).peers.filter(p=>p.kind==='agent').every(p=>!p.status),true);
  }finally{child.stdin.end();let timer;try{await Promise.race([exited,new Promise((_,reject)=>{timer=setTimeout(()=>{child.kill();reject(Error('Attached MCP did not exit'))},5000)})]);}finally{clearTimeout(timer);}}
 });
+
+test('presence identity API groups windows and grants while preserving echo, conflicts, permission and revocation',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:100000});
+ const {app,made,get}=await harness(t),participant='a'.repeat(64),edit=await app.sharing.create(made.id,'edit',false,false,{newLink:true}),view=await app.sharing.create(made.id,'view',false,false,{newLink:true});
+ const request=async(grant,route,client,body,method='POST',extra={})=>{
+  const origin=grant?new URL(grant.mcpUrl).origin:app.url;
+  return fetch(origin+route+'?paper='+made.id,{method,headers:{Origin:origin,'Content-Type':'application/json','X-Paper-Client':client,...(grant?{Authorization:'Bearer '+grant.token}:{}),...extra},...(body===undefined?{}:{body:JSON.stringify(body)})});
+ };
+ for(const grant of [null,edit,view]){const access=await request(grant,'/api/access','access',undefined,'GET');assert.equal((await access.json()).presenceIdentity,1);}
+ const owners=[];
+ for(let i=0;i<12;i++){const r=await request(null,'/api/presence','owner-'+i,{focused:i===0});assert.equal(r.status,200);owners.push((await r.json()).peer);}
+ assert.equal(new Set(owners.map(p=>p.participantId)).size,1);assert.equal(new Set(owners.map(p=>p.id)).size,12);
+ const a=await (await request(edit,'/api/presence','edit-tab',{participant,focused:true})).json(),b=await (await request(view,'/api/presence','view-tab',{participant,focused:false})).json();
+ assert.equal(a.peer.participantId,b.peer.participantId);assert.notEqual(a.peer.participantId,owners[0].participantId);assert.notEqual(a.peer.id,b.peer.id);
+ assert.equal((await request(view,'/api/presence','view-tab',{participant,rect:{x:0,y:0,w:1,h:1}})).status,400);
+ const before=await get('/api/paper');before.paper.name='First window saved';
+ const stream=await fetch(app.url+'/api/events?paper='+made.id),reader=stream.body.getReader();t.after(()=>reader.cancel());await reader.read();
+ const saved=await request(null,'/api/paper','owner-0',before.paper,'PUT',{'If-Match':before.revision});assert.equal(saved.status,200);
+ const event=new TextDecoder().decode((await reader.read()).value);assert.match(event,/event: paper-changed/);assert.match(event,/"clientId":"owner-0"/);await reader.cancel();
+ assert.equal((await request(null,'/api/paper','owner-1',before.paper,'PUT',{'If-Match':before.revision})).status,409,'same participant retains independent optimistic save conflicts');
+ assert.equal((await request(view,'/api/paper','view-tab',before.paper,'PUT',{'If-Match':(await saved.json()).revision})).status,403);
+ // Owner HTTP save receipts keep the per-view header for echo handling.
+ assert.equal((await get('/api/updates')).presence.commits.at(-1).actor,null);
+ for(const body of [{participantId:owners[0].participantId},{participant:'owner'},{participant:null},{focused:1},{kind:'agent',participant},{leave:true,focused:'yes'}])assert.equal((await request(null,'/api/presence','invalid',body)).status,400);
+ for(const body of [{participantId:owners[0].participantId},{participant:'owner'},{participant:null},{focused:1},{leave:true,participant:null}])assert.equal((await request(view,'/api/presence','invalid',body)).status,400);
+ for(let i=0;i<23;i++)assert.equal((await request(null,'/api/presence','owner-0',{})).status,200);
+ assert.equal((await request(null,'/api/presence','owner-0',{})).status,429);assert.equal((await request(null,'/api/presence','owner-1',{})).status,200);
+ await request(null,'/api/presence','owner-0',{leave:true});await app.sharing.stop(made.id,edit.id);
+ const peers=(await get('/api/presence')).peers;assert.ok(!peers.some(p=>p.id===a.peer.id));assert.ok(peers.some(p=>p.id===b.peer.id));assert.equal(peers.filter(p=>p.participantId===owners[0].participantId).length,11);
+ assert.equal((await request(edit,'/api/presence','edit-tab',{participant})).status,401);
+ assert.ok(!JSON.stringify(await get('/api/paper')).includes(participant));
+});
