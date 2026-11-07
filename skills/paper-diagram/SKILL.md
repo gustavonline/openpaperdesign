@@ -2,10 +2,12 @@
 name: paper-diagram
 description: Create, revise or review editable architecture, process, data and infrastructure diagrams in Paper. Use for C4, UML-style structure, BPMN-style workflows, ER models, Kubernetes topology, flowcharts and source-backed system explanations.
 metadata:
-  version: "0.7.0-preview.21"
+  version: "0.7.0-preview.22"
 ---
 
 # Diagram in Paper
+
+Use [Paper workspace operations](../paper/SKILL.md) for the native plugin workflow: show the Paper with `paper_home`/`paper_join` in the Codex side panel, select/read it through MCP, announce real work with `paper_activity`, and commit through `paper_save`. Do not open the returned localhost URL in Browser Use or the built-in browser, or author through direct file/HTTP/browser writes. Generated layer JSON is staging until the MCP save. Browser fallback requires an explicit choice by the person.
 
 Use the existing canvas, layers and save contract. The useful chain is **source facts → notation and scope → copy when needed → layout and bindings → semantic and rendered review**. Begin with the question the diagram should answer and its audience. Reuse the current Paper/diagram when asked to change it.
 
@@ -39,4 +41,4 @@ Trace the source facts through every node and edge: direction, type, responsibil
 
 Inspect the rendered canvas for overlap, obscured arrows, text wrapping, ambiguous line crossings and readable labels. For an attached-connector change, check move/resize, delete/undo and save/reopen. Confirm the label remains a text layer. Verify the requested PNG/HTML/Paper output; an image or structural validator alone does not prove notation correctness or visual quality.
 
-Save through the revision-checked Paper path. Record a short explanation, source basis and useful open questions with the Paper. For review-only work, return findings without editing. If browser access is unavailable, report the source/structural checks separately from visual acceptance.
+Save through the revision-checked Paper path. Record a short explanation, source basis and useful open questions with the Paper. For review-only work, return findings without editing. If native visual access is unavailable, report MCP/source checks separately from native visual acceptance; do not silently move the Paper into a browser.

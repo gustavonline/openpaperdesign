@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "openpaperdesign",
-  "version": "0.7.0-preview.21",
+  "version": "0.7.0-preview.22",
   "description": "Design, diagram and share editable Papers with your AI agent.",
   "author": {
     "name": "Gustav Online",

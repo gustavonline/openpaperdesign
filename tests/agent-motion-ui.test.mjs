@@ -132,3 +132,11 @@ test('idle agent chips disappear while immutable artwork receipts still highligh
  const h=harness(t);h.receive('r0','r1',peer,[{...peer,status:'',nodeId:null}]);assert.equal(chips(h).length,0);assert.equal(h.roster.hidden,true);
  h.ui.documentChanged(doc([1]),doc([1,2]),{beforeRevision:'r0',revision:'r1'});assert.equal(h.changes().length,1);assert.match(h.changes()[0].firstChild.textContent,/Quiet Owl/);assert.equal(chips(h).length,0);
 });
+
+test('participants visibly distinguish people and agents while keeping accessible names',t=>{
+ const h=harness(t);h.receive('r0','r1',peer,[human('person','human-group',true,1),peer]);
+ const people=chips(h).filter(c=>c.dataset.kind==='human'),agents=chips(h).filter(c=>c.dataset.kind==='agent');
+ assert.equal(people.length,1);assert.equal(agents.length,1);
+ assert.equal(people[0].children[1].textContent,'Person');assert.equal(agents[0].children[1].textContent,'Agent');
+ assert.match(people[0].title,/Sunny Otter.*Person/);assert.match(agents[0].title,/Quiet Owl.*Agent/);
+});
