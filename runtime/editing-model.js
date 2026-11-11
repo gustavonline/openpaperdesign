@@ -106,3 +106,18 @@ export function textTarget(map,ids){
   }
   return null;
 }
+
+// Where the save/recovery status sits on the top row. Only bars it actually overlaps move it, and only far enough to clear
+// them; a long conflict or access-ended message with its recovery buttons always stays inside the viewport.
+// `box` is the status rect at the top row, `bars` the floating bars (null when absent), `view` the window size.
+export function statusSpot(box, bars, view, {top: start = 8, gap = 6, edge = 8} = {}) {
+  const height = box.bottom - box.top, left = box.left, right = box.right;
+  const overlaps = (bar, top) => bar && bar.right > bar.left && bar.bottom > bar.top && !(bar.right < left || bar.left > right || bar.bottom < top || bar.top > top + height);
+  let top = start;
+  for (let pass = 0; pass < bars.length + 1; pass++) {
+    const hit = bars.filter(bar => overlaps(bar, top));
+    if (!hit.length) break;
+    top = Math.max(...hit.map(bar => bar.bottom)) + gap;
+  }
+  return Math.round(Math.max(start, Math.min(top, view.height - height - edge)));
+}

@@ -132,7 +132,7 @@ body.paper-inspection-docked #rail .ibtn:focus-visible{outline:1px solid var(--m
 /* Save status: a separate small note just left of the right corner bar, on the top row's centre line;
    app.js places it and moves it below a toolbar docked on top. Problems keep their action. */
 .save-status{position:fixed;z-index:31;top:8px;height:24px;display:flex;gap:8px;align-items:center;padding:0 10px;border-radius:8px;background:var(--popover);border:1px solid var(--edge);box-shadow:var(--shadow);font-size:11px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.save-status.problem{height:auto;min-height:24px;padding:3px 4px 3px 10px;white-space:normal;color:var(--danger);border-color:var(--danger);background:var(--surface)}
+.save-status.problem{height:auto;min-height:24px;padding:3px 4px 3px 10px;flex-wrap:wrap;row-gap:4px;overflow:visible;white-space:normal;overflow-wrap:anywhere;color:var(--danger);border-color:var(--danger);background:var(--surface)}
 .save-status button{flex:0 0 auto;height:20px;padding:0 8px;border:1px solid currentColor;border-radius:5px;background:transparent;color:inherit;font-size:11px}
 
 /* Left panel: Canvas / Design switch (28px, raised current half), then the chosen view */

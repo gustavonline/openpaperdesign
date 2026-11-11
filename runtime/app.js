@@ -5,7 +5,7 @@ import { describeExpiry } from './invitation.js';
 import { setupSharing } from './sharing.js?v=e76b2d4ca5f2';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText} from './editing-model.js?v=6f3b93cc6712';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot} from './editing-model.js?v=ad6a896d23c4';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -496,11 +496,11 @@ function placeStatus() {
   // Just left of the right corner bar (or of the open right panel), centred on the 40px top row.
   const anchor = body.classList.contains('right-open') ? stage.getBoundingClientRect().right : $('#right-bar').getBoundingClientRect().left;
   Object.assign(statusEl.style, { right: `${Math.round(innerWidth - anchor + 8)}px`, top: '8px', maxWidth: `${Math.max(160, Math.round(anchor - stage.getBoundingClientRect().left - 16))}px` });
-  // Never under a toolbar docked along the top row, or the floating Paper bar on a narrow window.
-  const s = statusEl.getBoundingClientRect(), hits = r => r && r.width && !(r.right < s.left || r.left > s.right || r.bottom < s.top || r.top > s.bottom);
+  // Never under a toolbar docked along the top row, or the floating Paper bar on a narrow window. Only a bar the status
+  // actually overlaps moves it (a toolbar docked at the bottom does not), and it always stays inside the window.
   const toolbar = document.querySelector('#paper-inspection-root .paper-inspection-toolbar-motion')?.getBoundingClientRect();
   const paperBar = body.classList.contains('left-open') ? null : $('#left-bar').getBoundingClientRect();
-  if (hits(toolbar) || hits(paperBar)) statusEl.style.top = `${Math.round(Math.max(toolbar?.bottom || 0, paperBar?.bottom || 0, 40) + 6)}px`;
+  statusEl.style.top = `${statusSpot(statusEl.getBoundingClientRect(), [toolbar, paperBar].filter(Boolean), { height: innerHeight, width: innerWidth })}px`;
 }
 function showStatus(key, parts, problem = false) {
   if (key !== statusKey) { statusEl.replaceChildren(...parts); statusKey = key; }
