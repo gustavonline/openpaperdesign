@@ -1,4 +1,4 @@
-import {invitationLinks} from './invitation.js';
+import {invitationLinks, endedCopy, knownEnd} from './invitation.js';
 import {extractInvitation,readCode} from './access-code.js';
 // Every element is looked up when it is used: the page never holds on to a node that markup changes could replace.
 const $ = id => document.getElementById(id);
@@ -75,4 +75,4 @@ $('link-form').addEventListener('submit', event => {
   if (found.code) void open(found.code); else void open();
 });
 if (token) void open();
-else { say(ended === 'expired' ? 'This invitation expired. Ask the owner for a new one.' : ended === 'revoked' ? 'The owner stopped this invitation. Ask for a new one.' : 'Use the invitation link from the owner.'); show('link'); }
+else { say(ended ? endedCopy(knownEnd(ended)) + ' Ask the owner for a new one.' : 'Use the invitation link from the owner.'); show('link'); }

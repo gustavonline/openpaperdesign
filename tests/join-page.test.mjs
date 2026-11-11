@@ -77,4 +77,6 @@ test('an ended invitation clears the key and says so; the owner’s reason is sh
   p.els['link-form'].fire('submit');await p.settle();assert.equal(p.calls.length,1,'there is no key left to retry with');
   const expired=await page({search:'?ended=expired'});assert.match(expired.els.status.textContent,/expired/);
   const stopped=await page({search:'?ended=revoked'});assert.match(stopped.els.status.textContent,/owner stopped/);
+  const neutral=await page({search:'?ended=ended'});assert.match(neutral.els.status.textContent,/This invitation ended\./);assert.doesNotMatch(neutral.els.status.textContent,/owner stopped|expired/);
+  const forged=await page({search:'?ended=%3Cb%3E'});assert.match(forged.els.status.textContent,/This invitation ended\./,'an unknown value is neutral, never echoed');
 });

@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
-import {statusSpot} from '../runtime/editing-model.js';
+import {statusSpot,statusFrame} from '../runtime/editing-model.js';
 
 const rect=(left,top,width,height)=>({left,top,right:left+width,bottom:top+height});
 const view={width:1280,height:800};
@@ -51,8 +51,36 @@ test('a status taller than the room left is clamped into the window, never below
   assert.equal(statusSpot(rect(8,8,374,10),[],tiny),8);
 });
 
+// The status end x is the left edge of the open right inspector (or right corner bar); the canvas area starts at stageLeft.
+const frameBox=(frame,view,width,height)=>rect(view.width-frame.right-Math.min(width,frame.maxWidth),8,Math.min(width,frame.maxWidth),height);
+const onScreen=(box,v)=>box.left>=0&&box.right<=v.width&&box.top>=0&&box.bottom<=v.height;
+
+test('390px with the 260px inspector open: no readable room beside it, so the message spans the window instead of starting at x<0',()=>{
+  const narrow={width:390,height:800},frame=statusFrame(130,0,narrow);
+  assert.deepEqual(frame,{right:8,maxWidth:374},'previously right edge 122 with a forced 160px minimum put the left edge at -38');
+  const box=frameBox(frame,narrow,374,92),rightBar=rect(330,0,52,40),paperBar=rect(8,8,120,32);
+  const top=statusSpot(box,[paperBar,rightBar],narrow);
+  assert.equal(top,rightBar.bottom+6,'it clears the corner bars it now covers');
+  const placed=rect(box.left,top,box.right-box.left,92);
+  assert.ok(onScreen(placed,narrow),JSON.stringify(placed));
+});
+
+test('the frame follows the existing layout when there is room, and never leaves the window',()=>{
+  const wide={width:1280,height:800};
+  assert.deepEqual(statusFrame(1000,230,wide),{right:288,maxWidth:754},'1280 with the inspector open: unchanged, beside it');
+  assert.deepEqual(statusFrame(1260,0,wide),{right:28,maxWidth:1244},'inspector closed: beside the corner bar');
+  const mid={width:700,height:800};
+  assert.deepEqual(statusFrame(440,0,mid),{right:268,maxWidth:424},'700 with the inspector open still fits beside it');
+  for(const [anchor,stageLeft,width] of [[130,0,390],[130,0,320],[100,0,360],[60,0,390],[300,230,500],[20,0,390],[-40,0,390]]){
+    const view={width,height:700},frame=statusFrame(anchor,stageLeft,view),left=view.width-frame.right-frame.maxWidth;
+    assert.ok(left>=0&&frame.right>=0&&frame.maxWidth>0&&left+frame.maxWidth<=view.width,`${anchor}/${stageLeft}/${width}: ${JSON.stringify(frame)}`);
+  }
+});
+
 test('the editor uses it: placeStatus asks statusSpot and no longer jumps below every bar when any one collides',async()=>{
   const app=await fs.readFile(new URL('../runtime/app.js',import.meta.url),'utf8');
   assert.match(app,/statusSpot\(statusEl\.getBoundingClientRect\(\)/);
+  assert.match(app,/statusFrame\(anchor,/);
+  assert.doesNotMatch(app,/Math\.max\(160,/);
   assert.doesNotMatch(app,/Math\.max\(toolbar\?\.bottom \|\| 0, paperBar\?\.bottom \|\| 0/);
 });

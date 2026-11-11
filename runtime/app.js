@@ -1,11 +1,11 @@
 import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
 import {setupPresence} from './presence.js?v=22e96dd947ab';
-import { describeExpiry } from './invitation.js';
+import { describeExpiry, endedCopy, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=e76b2d4ca5f2';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot} from './editing-model.js?v=ad6a896d23c4';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame} from './editing-model.js?v=718e4bb39407';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -495,12 +495,14 @@ function placeStatus() {
   if (statusEl.hidden) return;
   // Just left of the right corner bar (or of the open right panel), centred on the 40px top row.
   const anchor = body.classList.contains('right-open') ? stage.getBoundingClientRect().right : $('#right-bar').getBoundingClientRect().left;
-  Object.assign(statusEl.style, { right: `${Math.round(innerWidth - anchor + 8)}px`, top: '8px', maxWidth: `${Math.max(160, Math.round(anchor - stage.getBoundingClientRect().left - 16))}px` });
+  // With the inspector open on a narrow window there is no readable room beside it, so the message may cover it.
+  const frame = statusFrame(anchor, stage.getBoundingClientRect().left, { width: innerWidth, height: innerHeight });
+  Object.assign(statusEl.style, { right: `${frame.right}px`, top: '8px', maxWidth: `${frame.maxWidth}px` });
   // Never under a toolbar docked along the top row, or the floating Paper bar on a narrow window. Only a bar the status
   // actually overlaps moves it (a toolbar docked at the bottom does not), and it always stays inside the window.
   const toolbar = document.querySelector('#paper-inspection-root .paper-inspection-toolbar-motion')?.getBoundingClientRect();
   const paperBar = body.classList.contains('left-open') ? null : $('#left-bar').getBoundingClientRect();
-  statusEl.style.top = `${statusSpot(statusEl.getBoundingClientRect(), [toolbar, paperBar].filter(Boolean), { height: innerHeight, width: innerWidth })}px`;
+  statusEl.style.top = `${statusSpot(statusEl.getBoundingClientRect(), [toolbar, paperBar, $('#right-bar').getBoundingClientRect()].filter(Boolean), { height: innerHeight, width: innerWidth })}px`;
 }
 function showStatus(key, parts, problem = false) {
   if (key !== statusKey) { statusEl.replaceChildren(...parts); statusKey = key; }
@@ -509,7 +511,7 @@ function showStatus(key, parts, problem = false) {
 function updateSaveState() {
   if (accessRevoked) {
     clearTimeout(savedTimer); savedTimer = null;
-    showStatus('access-revoked', [accessEndedReason === 'expired' ? 'This invitation expired. Download your unsaved work before closing.' : 'The owner stopped this invitation. Download your unsaved work before closing.', button('Download my copy', exportScene), ...(feedback.pendingBytes !== null ? [button('Download my notes', downloadFeedback)] : []), button('Close without saving', () => { leaving = true; location.replace(`/join?ended=${accessEndedReason || 'revoked'}`); })], true);
+    showStatus('access-revoked', [endedCopy(accessEndedReason) + ' Download your unsaved work before closing.', button('Download my copy', exportScene), ...(feedback.pendingBytes !== null ? [button('Download my notes', downloadFeedback)] : []), button('Close without saving', () => { leaving = true; location.replace(`/join?ended=${accessEndedReason || 'ended'}`); })], true);
     return;
   }
   const notesBusy = !!feedback.saving || feedback.pendingBytes !== null;
@@ -1571,7 +1573,10 @@ async function remoteFeedback(silent=false) {
 function listenForChanges() {
   let events,timer,stopped=false,guideRevision,failures=0,polling=false;
   function revoked(reason){
-    if(accessRevoked||stopped&&accessEndedReason)return;accessEndedReason=reason==='expired'?'expired':'revoked';
+    // Only a reason the server gave is named; anything else (an older server, a dropped stream) is a neutral "ended".
+    const known=knownEnd(reason);
+    if(accessEndedReason){if(known&&accessEndedReason==='ended'){accessEndedReason=known;updateSaveState();}return;}
+    accessEndedReason=known||'ended';
     stopped=true;clearTimeout(timer);presenceUI?.stop();events?.close();
     if (!(pending || saving || textEdit || liveEdit || gesture || feedback.saving || feedback.pendingBytes !== null)) { leaving = true; location.replace(`/join?ended=${accessEndedReason}`); return; }
     // Access can end while a guest is drawing or typing. Keep that draft downloadable, with editing

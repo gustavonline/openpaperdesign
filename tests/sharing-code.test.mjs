@@ -11,7 +11,7 @@ import {createPresence} from '../server/presence.mjs';
 import {loadRuntime,VERSION} from '../server/runtime.mjs';
 import {joinInvitation,invitationURL} from '../server/invitation.mjs';
 import {normalizeCode,readCode,extractInvitation,formatCode} from '../runtime/access-code.js';
-import {invitationMessage,invitationLinks,describeExpiry} from '../runtime/invitation.js';
+import {invitationMessage,invitationLinks,describeExpiry,endedCopy,knownEnd} from '../runtime/invitation.js';
 import {TOOLS} from '../server/server.mjs';
 
 const RUNTIME=path.resolve(path.dirname(new URL(import.meta.url).pathname),'../runtime');
@@ -57,6 +57,8 @@ test('the access code is read one way everywhere: case, spacing, dashes, full-wi
   assert.deepEqual(extractInvitation(`https://x.test/join#${key}`),{token:key,code:''});
   assert.deepEqual(extractInvitation(key),{token:key,code:''});
   assert.equal(extractInvitation('Code: K7QM-4P2X').token,'');
+  assert.equal(endedCopy(knownEnd('expired')),'This invitation expired.');assert.equal(endedCopy(knownEnd('revoked')),'The owner stopped this invitation.');
+  for(const unknown of [undefined,null,'',{},'ended','needs-code'])assert.equal(endedCopy(knownEnd(unknown)),'This invitation ended.','an unknown reason never blames the owner');
   assert.equal(describeExpiry(null).startsWith('No end time'),true);assert.equal(JSON.stringify({expiresAt:null}),'{"expiresAt":null}');
   const links=invitationLinks(`http://127.0.0.1:1/join#${key}`,'K7QM4P2X');assert.ok(decodeURIComponent(links.codex).includes('K7QM-4P2X'));
   assert.ok(!decodeURIComponent(invitationLinks(`http://127.0.0.1:1/join#${key}`).codex).includes('access code'));
@@ -208,11 +210,11 @@ test('revoke and expiry are rechecked under the save lock and again before the f
   // Expiry arrives while the writer waits for the lock.
   const locked=r.library.locked.bind(r.library);
   r.library.locked=(folder,action)=>locked(folder,async()=>{r.clock.value+=2*3600000;return action();});
-  const lateExpiry=await save(editA,'Too late');assert.equal(lateExpiry.status,401);assert.deepEqual(await fs.readFile(path.join(r.made.path,'paper.json')),before);
+  const lateExpiry=await save(editA,'Too late');assert.equal(lateExpiry.status,401);{const body=await lateExpiry.json();assert.equal(body.reason,'expired','expiry while the save waited for the lock is reported as expired');assert.match(body.error,/expired/);assert.doesNotMatch(body.error,/stopped/i);}assert.deepEqual(await fs.readFile(path.join(r.made.path,'paper.json')),before);
   // The invitation ends after the temporary file is written but before it would replace paper.json.
   r.library.locked=locked;const atomic=r.library.atomic.bind(r.library),editC=await r.grant('edit',{protect:true,expiry:'1h'});await guest.join(editC,editC.code);
   let rechecked=0;r.library.atomic=async(folder,name,data,previous,authorize)=>atomic(folder,name,data,previous,()=>{if(++rechecked===1)r.clock.value+=2*3600000;return authorize();});
-  const mid=await save(editC,'Ended mid-save');assert.equal(mid.status,401);assert.equal(rechecked,1,'the second check ran');
+  const mid=await save(editC,'Ended mid-save');assert.equal(mid.status,401);assert.equal((await mid.json()).reason,'expired','expiry between the temp file and the rename is reported as expired');assert.equal(rechecked,1,'the second check ran');
   assert.deepEqual(await fs.readFile(path.join(r.made.path,'paper.json')),before,'paper.json was never replaced');
   assert.ok(!(await fs.readdir(r.made.path)).some(n=>n.startsWith('.save-')),'no half-written file is left behind');
   r.library.atomic=atomic;

@@ -121,3 +121,12 @@ export function statusSpot(box, bars, view, {top: start = 8, gap = 6, edge = 8} 
   }
   return Math.round(Math.max(start, Math.min(top, view.height - height - edge)));
 }
+
+// Horizontal frame of that status: beside the open inspector or right corner bar when there is room for a readable message,
+// otherwise the whole window width (over the inspector if need be) so no recovery action starts or ends off screen.
+// `anchor` is the x the status should end at; `stageLeft` the left edge of the canvas area.
+export function statusFrame(anchor, stageLeft, view, {edge = 8, readable = 320} = {}) {
+  const room = Math.round(anchor - Math.max(0, stageLeft) - 2 * edge);
+  if (room >= Math.min(readable, view.width - 2 * edge)) return {right: Math.round(view.width - anchor + edge), maxWidth: room};
+  return {right: edge, maxWidth: view.width - 2 * edge};
+}

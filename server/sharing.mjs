@@ -76,12 +76,13 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
     }
     throw gone();
   }
-  function writable(grant){if(!valid(grant))throw new PaperError(401,'This invitation was stopped');if(grant.role!=='edit')throw new PaperError(403,'This invitation is view-only');}
+  // The reason survives into the lock rechecks: a grant that expired while its save waited says expired, not stopped.
+  function writable(grant){if(!valid(grant)){const reason=grant.ended||(live(grant)?'revoked':'expired');throw new PaperError(401,END[reason],{reason});}if(grant.role!=='edit')throw new PaperError(403,'This invitation is view-only');}
   function budget(grant){writable(grant);const recent=grant.writes.filter(t=>t>now()-60000);if(recent.length>=30)throw new PaperError(429,'Too many saves. Wait a minute, then retry.');recent.push(now());grant.writes=recent;}
   const clientFor=(grant,req)=>{const prefix=`g-${grant.id}-`,id=CLIENT(req);return prefix+(id.startsWith(prefix)?id.slice(prefix.length):id).slice(0,50);};
   function scoped(grant,url){const ids=url.searchParams.getAll('paper'),invites=url.searchParams.getAll('invite');if(ids.length!==1||ids[0]!==grant.paperId||[...url.searchParams.keys()].some(k=>k!=='paper'&&k!=='invite')||invites.length>1||invites.length&&invites[0]!==grant.id)throw new PaperError(403,'This invitation opens one Paper only');}
   // Sessions of an ended invitation are remembered (hash only) so a guest is told whether it expired or was stopped.
-  function revoke(id,reason=null){const grant=grants.get(id);if(!grant)return;reason??=live(grant)?'revoked':'expired';grants.delete(id);byHash.delete(digest(grant.token));
+  function revoke(id,reason=null){const grant=grants.get(id);if(!grant)return;reason??=live(grant)?'revoked':'expired';grant.ended=reason;grants.delete(id);byHash.delete(digest(grant.token));
     presence?.removeScope(grant.id);
     for(const [hash,g] of sessions)if(g===grant){sessions.delete(hash);ended.set(hash,reason);if(ended.size>2048)ended.delete(ended.keys().next().value);}
     for(const stream of streams)if(stream.grant===grant){stream.res.write(`event: access-revoked\ndata: ${JSON.stringify({reason})}\n\n`);stream.res.end();streams.delete(stream);}}

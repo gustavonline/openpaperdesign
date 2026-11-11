@@ -28,3 +28,7 @@ export function invitationMessage({name, role, url, code, expiresAt}){
   const title=String(name||'a Paper').replace(/[\r\n"]+/g,' ').slice(0,80);
   return [`You’re invited to ${role==='edit'?'edit':'view'} “${title}” in OpenPaperDesign.`,`Link: ${url}`,...(shown?[`Code: ${shown}`]:[]),expiresAt===null?'Works while the owner’s OpenPaperDesign is running.':describeExpiry(expiresAt)].join('\n');
 }
+// Why an invitation ended, in plain words. Only a reason the server gave is named; anything else stays neutral
+// (an older server, a dropped stream) rather than blaming the owner.
+export const endedCopy = reason => reason === 'expired' ? 'This invitation expired.' : reason === 'revoked' ? 'The owner stopped this invitation.' : 'This invitation ended.';
+export const knownEnd = reason => reason === 'expired' || reason === 'revoked' ? reason : null;
