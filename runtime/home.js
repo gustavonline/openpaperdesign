@@ -213,7 +213,7 @@ async function renderSharing(){
       const target={workspaceId:ws.id,instance:ws.instance,paperId};
       rows.push(row(invites[0].paperName,`${ws.name} · ${plural(invites.length,'invitation')}`,[button('Manage',()=>{sharingDialog.close();openPaper({workspaceId:ws.id,id:paperId});}),button('Stop sharing',b=>revoke(b,target),true)]));
       for(const i of invites){
-        const r=row(i.label||'Link',[i.role==='edit'?'Can edit':'Can view',reach(i),ends(i),i.protected?'Code required':'No code',state(i),...(i.guests?[`${i.guests} connected`]:[])].filter(Boolean).join(' · '),[button('Revoke',b=>revoke(b,{...target,invitationId:i.id}),true)],'invite-row');
+        const r=row(i.label||'Link',[i.role==='edit'?'Can edit':'Can view',reach(i),ends(i),i.protected?'Code required':'No code',state(i)].filter(Boolean).join(' · '),[button('Revoke',b=>revoke(b,{...target,invitationId:i.id}),true)],'invite-row');
         if(i.expiresAt)r.title=`Expires ${new Date(i.expiresAt).toLocaleString()}`;else if(i.never)r.title='Works only while this Paper server is running';rows.push(r);
       }
     }

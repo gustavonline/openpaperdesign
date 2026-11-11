@@ -244,8 +244,8 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
     return {active:!!current,online:!!publicUrl||!!current?.online,configuredOnline:!!publicUrl,internetAvailable:!!publicUrl||await hasCloudflared(),localOnly:!publicUrl&&!current?.network&&!current?.internet,network:!!current?.network,internet:!!current?.internet,networkAvailable:!publicUrl&&!!address,sessionOnly:true,invitations,...(current||{})};
   }
   function info(g){
-    const l=listeners.get(modeOf(g)),t=now(),recent=g.wrong.filter(x=>x>t-WRONG_WINDOW),guests=[...sessions.values()].filter(x=>x===g).length;
-    return {id:g.id,paperId:g.paperId,label:g.label,role:g.role,network:g.network,online:!!publicUrl||g.internet,internet:g.internet,ready:!!l?.ready,preparing:!!l?.waiting,expiry:g.expiry,expiresAt:g.expiresAt,protected:g.protect,locked:g.locked,wrongRecent:recent.length,retryAfter:recent.length>=WRONG_LIMIT?Math.max(1,Math.ceil((recent[0]+WRONG_WINDOW-t)/1000)):0,guests};
+    const l=listeners.get(modeOf(g)),t=now(),recent=g.wrong.filter(x=>x>t-WRONG_WINDOW);
+    return {id:g.id,paperId:g.paperId,label:g.label,role:g.role,network:g.network,online:!!publicUrl||g.internet,internet:g.internet,ready:!!l?.ready,preparing:!!l?.waiting,expiry:g.expiry,expiresAt:g.expiresAt,protected:g.protect,locked:g.locked,wrongRecent:recent.length,retryAfter:recent.length>=WRONG_LIMIT?Math.max(1,Math.ceil((recent[0]+WRONG_WINDOW-t)/1000)):0};
   }
   // Owner-only. The only place the capability and the code are returned together.
   function reveal(g){return {...info(g),url:`${origin(g)}/join#${g.token}`,mcpUrl:`${origin(g)}/mcp`,token:g.token,...(g.protect?{code:formatCode(g.code)}:{}),listener:listeners.get(modeOf(g))?.localOrigin};}

@@ -79,7 +79,7 @@ async function sharingOverview(entry){
     if(!i||typeof i.paperId!=='string'||!ID.test(i.paperId)||typeof i.id!=='string'||!ID.test(i.id))continue;
     library??=await PaperLibrary.open(entry.root);
     if(!names.has(i.paperId))names.set(i.paperId,await library.read(i.paperId).then(r=>r.paper.name,()=>'Unavailable Paper'));
-    invitations.push({id:i.id,paperId:i.paperId,paperName:names.get(i.paperId),label:String(i.label||''),role:i.role==='edit'?'edit':'view',network:!!i.network,internet:!!i.internet,online:!!i.online,ready:!!i.ready,preparing:!!i.preparing,expiresAt:i.expiresAt===null?null:Number.isFinite(i.expiresAt)?i.expiresAt:undefined,never:i.expiresAt===null,protected:!!i.protected,locked:!!i.locked,wrongRecent:Math.min(99,Math.max(0,Number(i.wrongRecent)||0)),retryAfter:Math.min(3600,Math.max(0,Number(i.retryAfter)||0)),guests:Math.min(99,Math.max(0,Number(i.guests)||0))});
+    invitations.push({id:i.id,paperId:i.paperId,paperName:names.get(i.paperId),label:String(i.label||''),role:i.role==='edit'?'edit':'view',network:!!i.network,internet:!!i.internet,online:!!i.online,ready:!!i.ready,preparing:!!i.preparing,expiresAt:i.expiresAt===null?null:Number.isFinite(i.expiresAt)?i.expiresAt:undefined,never:i.expiresAt===null,protected:!!i.protected,locked:!!i.locked,wrongRecent:Math.min(99,Math.max(0,Number(i.wrongRecent)||0)),retryAfter:Math.min(3600,Math.max(0,Number(i.retryAfter)||0))});
   }
   return {...server,invitations};
 }
