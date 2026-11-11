@@ -1,7 +1,7 @@
 import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
 import {setupPresence} from './presence.js?v=22e96dd947ab';
-import { describeExpiry, endedCopy, knownEnd } from './invitation.js';
+import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=e76b2d4ca5f2';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
@@ -511,7 +511,8 @@ function showStatus(key, parts, problem = false) {
 function updateSaveState() {
   if (accessRevoked) {
     clearTimeout(savedTimer); savedTimer = null;
-    showStatus('access-revoked', [endedCopy(accessEndedReason) + ' Download your unsaved work before closing.', button('Download my copy', exportScene), ...(feedback.pendingBytes !== null ? [button('Download my notes', downloadFeedback)] : []), button('Close without saving', () => { leaving = true; location.replace(`/join?ended=${accessEndedReason || 'ended'}`); })], true);
+    const ended = endedStatus(accessEndedReason);
+    showStatus(ended.key, [ended.text, button('Download my copy', exportScene), ...(feedback.pendingBytes !== null ? [button('Download my notes', downloadFeedback)] : []), button('Close without saving', () => { leaving = true; location.replace(`/join?ended=${accessEndedReason || 'ended'}`); })], true);
     return;
   }
   const notesBusy = !!feedback.saving || feedback.pendingBytes !== null;

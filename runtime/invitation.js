@@ -32,3 +32,6 @@ export function invitationMessage({name, role, url, code, expiresAt}){
 // (an older server, a dropped stream) rather than blaming the owner.
 export const endedCopy = reason => reason === 'expired' ? 'This invitation expired.' : reason === 'revoked' ? 'The owner stopped this invitation.' : 'This invitation ended.';
 export const knownEnd = reason => reason === 'expired' || reason === 'revoked' ? reason : null;
+// The banner shown when access ends: its text, and a key that changes with the reason so a later, more specific reason
+// (neutral "ended" -> expired or stopped) replaces the text rather than being skipped as the same status.
+export const endedStatus = reason => ({ key: 'access-revoked:' + (knownEnd(reason) || 'ended'), text: endedCopy(reason) + ' Download your unsaved work before closing.' });

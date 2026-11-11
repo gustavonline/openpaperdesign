@@ -11,7 +11,7 @@ import {createPresence} from '../server/presence.mjs';
 import {loadRuntime,VERSION} from '../server/runtime.mjs';
 import {joinInvitation,invitationURL} from '../server/invitation.mjs';
 import {normalizeCode,readCode,extractInvitation,formatCode} from '../runtime/access-code.js';
-import {invitationMessage,invitationLinks,describeExpiry,endedCopy,knownEnd} from '../runtime/invitation.js';
+import {invitationMessage,invitationLinks,describeExpiry,endedCopy,endedStatus,knownEnd} from '../runtime/invitation.js';
 import {TOOLS} from '../server/server.mjs';
 
 const RUNTIME=path.resolve(path.dirname(new URL(import.meta.url).pathname),'../runtime');
@@ -260,4 +260,19 @@ test('Home Shared lists protected and Never invitations without secrets, and the
   await home({action:'stop-sharing',workspaceId:'personal',paperId:made.id,invitationId:item.id,instance:workspace.instance});
   assert.equal((await home({action:'sharing'})).workspaces.find(w=>w.id==='personal').invitations.length,0);
   const status=await fetch(app.url+'/api/status').then(r=>r.json());assert.equal(status.version,VERSION);
+});
+
+test('an ended-access banner is replaced when a neutral end later learns its real reason',async()=>{
+  // showStatus() only rewrites the banner when the key changes, so each reason must have its own key.
+  const neutral=endedStatus(undefined),expired=endedStatus('expired'),revoked=endedStatus('revoked');
+  assert.equal(new Set([neutral.key,expired.key,revoked.key]).size,3);
+  for(const [from,to,text] of [[neutral,expired,/expired/],[neutral,revoked,/owner stopped/]]){assert.notEqual(from.key,to.key);assert.notEqual(from.text,to.text);assert.match(to.text,text);}
+  assert.match(neutral.text,/^This invitation ended\. Download your unsaved work before closing\.$/);
+  for(const unknown of [null,'',{},'ended','needs-code','EXPIRED'])assert.deepEqual(endedStatus(unknown),neutral,'every unknown reason shares the neutral banner');
+  assert.equal(endedStatus('expired').key,endedStatus('expired').key,'the same reason repeated does not rewrite the banner');
+  // The editor keeps the banner buttons and passes this key (not a constant) to showStatus, which compares keys.
+  const app=await fs.readFile(new URL('../runtime/app.js',import.meta.url),'utf8');
+  assert.match(app,/const ended = endedStatus\(accessEndedReason\);\s+showStatus\(ended\.key, \[ended\.text, button\('Download my copy'/);
+  assert.match(app,/function showStatus\(key, parts, problem = false\) \{\s+if \(key !== statusKey\)/);
+  assert.doesNotMatch(app,/showStatus\('access-revoked'/);
 });
