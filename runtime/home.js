@@ -1,6 +1,9 @@
 import {compatibleWorkspace} from './workspace-protocol.js?v=78da2eb567e7';
 import {surfaceReady,surfaceStopped,onSurfaceDispose,inPaperSurface} from './surface.js?v=da065f7b280e';
-const VERSION='0.7.0-preview.22';
+import {describeExpiry} from './invitation.js';
+import {extractInvitation,readCode} from './access-code.js';
+const sharedButton=document.getElementById('home-sharing');
+const VERSION='0.7.0-preview.23';
 const list=document.getElementById('projects'),q=document.getElementById('q'),problem=document.getElementById('problem'),activity=document.getElementById('activity'),create=document.getElementById('new-paper'),cardMenu=document.getElementById('card-menu');
 let menuCard=null,selected=new URLSearchParams(location.search).get('collection')||'personal',projects=[],cards=[],busy=false,disconnected=false,loading=null,optionsKey='';
 
@@ -87,6 +90,7 @@ function filter(){
 function choose(id){selected=id;const url=new URL(location.href);if(id==='personal')url.searchParams.delete('collection');else url.searchParams.set('collection',id);history.replaceState(null,'',url.pathname+url.search+url.hash);filter();}
 function render(data){
   projects=data.projects||[];if(selected!=='all'&&!projects.some(p=>p.id===selected))selected='personal';
+  {const shared=projects.reduce((n,p)=>n+(p.server?.sharingCount||0),0);sharedButton.textContent=shared?`Shared · ${shared}`:'Shared';sharedButton.setAttribute('aria-label',shared?`Shared, ${shared} Paper${shared===1?'':'s'}`:'Shared');}
   const nextOptions=JSON.stringify(projects.map(p=>[p.id,p.name])),known=new Map(cards.map(c=>[c.key,c]));
   cards=(data.papers||[]).map(p=>{const old=known.get(cardKey(p));if(old){old.update(p);return old;}return card(p);});
   if(menuCard&&!cards.includes(menuCard)&&cardMenu.matches(':popover-open'))cardMenu.hidePopover();
@@ -188,9 +192,11 @@ function row(title,detail,buttons=[],className='server-row'){
 // Sharing lists invitations from servers that are already running; it never starts one.
 const sharingMessage=document.getElementById('sharing-message');
 const reach=i=>i.internet?'Internet':i.network?'Local network':i.online?'Online address':'This device only';
+const ends=i=>i.never?'No end time':i.expiresAt?describeExpiry(i.expiresAt):'';
+const state=i=>!i.ready?(i.preparing?'Connecting…':'Not ready'):i.locked?'Locked · too many wrong codes':i.retryAfter?'Paused · wrong codes':'Active';
 async function revoke(b,args){
   if(busy)return;busy=true;const text=b.textContent;b.disabled=true;b.textContent='Stopping…';sharingMessage.hidden=true;
-  try{await request({action:'stop-sharing',...args});sharingMessage.textContent=args.invitationId?'Access removed.':'Sharing stopped for this Paper.';busy=false;await renderSharing();}
+  try{await request({action:'stop-sharing',...args});sharingMessage.textContent=args.invitationId?'Invitation revoked.':'Sharing stopped for this Paper.';busy=false;await renderSharing();}
   catch(error){sharingMessage.textContent=error.message;b.disabled=false;b.textContent=text;}
   finally{busy=false;sharingMessage.hidden=false;}
 }
@@ -205,14 +211,14 @@ async function renderSharing(){
     const papers=new Map();for(const i of ws.invitations||[])papers.set(i.paperId,[...papers.get(i.paperId)||[],i]);
     for(const [paperId,invites] of papers){
       const target={workspaceId:ws.id,instance:ws.instance,paperId};
-      rows.push(row(invites[0].paperName,`${ws.name} · ${plural(invites.length,'link')}`,[button('Open',()=>{sharingDialog.close();openPaper({workspaceId:ws.id,id:paperId});}),button('Stop sharing',b=>revoke(b,target),true)]));
+      rows.push(row(invites[0].paperName,`${ws.name} · ${plural(invites.length,'invitation')}`,[button('Manage',()=>{sharingDialog.close();openPaper({workspaceId:ws.id,id:paperId});}),button('Stop sharing',b=>revoke(b,target),true)]));
       for(const i of invites){
-        const r=row(i.label||'Link',`${i.role==='edit'?'Can edit':'Can view'} · ${reach(i)}${i.ready?'':' · Connecting…'}`,[button('Remove access',b=>revoke(b,{...target,invitationId:i.id}),true)],'invite-row');
-        if(i.expiresAt)r.title=`Expires ${new Date(i.expiresAt).toLocaleString()}`;rows.push(r);
+        const r=row(i.label||'Link',[i.role==='edit'?'Can edit':'Can view',reach(i),ends(i),i.protected?'Code required':'No code',state(i),...(i.guests?[`${i.guests} connected`]:[])].filter(Boolean).join(' · '),[button('Revoke',b=>revoke(b,{...target,invitationId:i.id}),true)],'invite-row');
+        if(i.expiresAt)r.title=`Expires ${new Date(i.expiresAt).toLocaleString()}`;else if(i.never)r.title='Works only while this Paper server is running';rows.push(r);
       }
     }
   }
-  area.replaceChildren(...(rows.length?rows:[help('No Papers are shared right now. Share a Paper from its editor.')]));
+  area.replaceChildren(...(rows.length?rows:[help('Nothing is shared right now. Share a Paper from its editor.')]));
 }
 const sharingDialog=document.getElementById('home-sharing-dialog');
 document.getElementById('home-sharing').addEventListener('click',async()=>{if(!disconnected)await load();serverMessage.hidden=sharingMessage.hidden=true;renderServers();sharingDialog.showModal();void renderSharing();});
@@ -333,6 +339,6 @@ const openShared=document.getElementById('open-shared'),invitationDialog=documen
 openShared.hidden=!inPaperSurface;
 openShared.addEventListener('click',()=>{openMenu.hidePopover();invitationError.hidden=true;invitationDialog.showModal();document.getElementById('invitation-url').focus();});
 document.getElementById('invitation-cancel').addEventListener('click',()=>invitationDialog.close());
-invitationDialog.addEventListener('close',()=>invitationAbort?.abort());
-invitationDialog.querySelector('form').addEventListener('submit',async event=>{event.preventDefault();const b=document.getElementById('invitation-open');if(b.disabled)return;b.disabled=true;b.textContent='Opening…';invitationError.hidden=true;invitationAbort=new AbortController();try{await window.__paperNative.joinInvitation(document.getElementById('invitation-url').value.trim(),{signal:invitationAbort.signal});}catch(error){if(invitationDialog.open){invitationError.textContent=error.message;invitationError.hidden=false;}}finally{b.disabled=false;b.textContent='Open Paper';}});
+invitationDialog.addEventListener('close',()=>{invitationAbort?.abort();document.getElementById('invitation-url').value=document.getElementById('invitation-code').value='';});
+invitationDialog.querySelector('form').addEventListener('submit',async event=>{event.preventDefault();const b=document.getElementById('invitation-open');if(b.disabled)return;b.disabled=true;b.textContent='Opening…';invitationError.hidden=true;invitationAbort=new AbortController();try{const pasted=document.getElementById('invitation-url').value.trim(),typed=document.getElementById('invitation-code').value.trim(),found=extractInvitation(pasted);if(!found.token)throw new Error('Paste the complete invitation link from the owner.');if(typed&&!readCode(typed))throw new Error('An access code has 8 letters and numbers, like K7QM-4P2X.');await window.__paperNative.joinInvitation(pasted,{signal:invitationAbort.signal,code:readCode(typed)||found.code||undefined});}catch(error){if(invitationDialog.open){invitationError.textContent=error.message;invitationError.hidden=false;}}finally{b.disabled=false;b.textContent='Open Paper';}});
 onSurfaceDispose(()=>invitationAbort?.abort());

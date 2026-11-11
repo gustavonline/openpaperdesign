@@ -12,7 +12,8 @@ export function imageBytes(base64){
   const bytes=Buffer.from(base64,'base64');fail(bytes.toString('base64').replace(/=+$/,'')===base64.replace(/=+$/,''),'Invalid image base64');return bytes;
 }
 export class PaperError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  // `details` are small, non-secret fields a client may read next to the message (reason, retryAfter).
+  constructor(status, message, details) { super(message); this.status = status; if (details) this.details = details; }
 }
 const fail = (condition, message) => { if (!condition) throw new PaperError(400, message); };
 const finite = value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1e6;

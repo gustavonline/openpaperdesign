@@ -42,7 +42,7 @@ Ask your agent to create a Paper, revise a design or draw a diagram. The plugin 
 
 Draw and edit on the canvas, use the Library for diagram symbols, and switch to Inspect for measurements and feedback. Pencil stays active between strokes; Escape or V returns to Select. The participant avatars can be dragged out of the way. Each person has one avatar across their windows: all local owner views share an anonymous identity per Paper, and invitation views group when they share browser storage. Different profiles or origins remain separate; no account or fingerprinting is used. Agents appear separately while working.
 
-**Share → Share this Paper** creates a named link with view or edit access. Choose **Local network** for devices on your Wi-Fi, or **Internet** for a temporary HTTPS link through Cloudflare. Each link can be removed independently. Several Papers can share one tunnel while keeping their own permissions. Keep this computer and Paper server running.
+**Share → Share this Paper** creates an invitation with view or edit access, an expiry (1 hour, 1 day, 7 days or **Never**) and **Code protection**, on by default. **Copy invitation** gives a short message with the link and an access code such as `K7QM-4P2X`; send the code separately for extra safety. Guests open the link, enter the code and land in the live editor. **Never** has no timer while this server runs and makes no promise after you quit, stop or sleep. Choose **Local network** for devices on your Wi-Fi, or **Internet** for a temporary HTTPS link through Cloudflare. Each invitation can be revoked independently. Several Papers can share one tunnel while keeping their own permissions. Keep this computer and Paper server running.
 
 Recipients can open an invitation in their browser, Codex or Claude Code. The app buttons prepare a request to join with the installed plugin; the recipient reviews and sends it. In Codex, **Home → Open → Open shared Paper** opens the live canvas directly. Agents can call `paper_join` with the invitation link without adding another MCP server.
 
@@ -54,7 +54,7 @@ Shift-click selects several layers. Copy, paste, duplicate, group and arrange th
 
 Use **Share → Paper with assets** to download a complete `.paper.zip`, and **Home → Open → Import Paper file** to open it elsewhere. A JSON export contains the artwork records; the ZIP also carries images, guides and feedback. Imports go into the library selected in Home, including Personal.
 
-Home → **Sharing** lists shared Papers, individual links and running servers. Remove one link, stop sharing a Paper, or stop a server. Saved Papers remain on disk.
+Home → **Shared** lists shared Papers, individual invitations (access, end time, code required, state) and running servers. Revoke one invitation, stop sharing a Paper, or stop a server. Saved Papers remain on disk.
 
 ## Where Papers are saved
 
