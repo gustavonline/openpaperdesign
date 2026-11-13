@@ -1298,6 +1298,9 @@ function closePlay() {
 }
 // The same authorized revision arrives while Play is open: Play rebuilds from it, keeping Page, scroll place, still-valid states and time.
 function refreshPlay() { if (!player) return; const { preview, problem } = playablePreview(); player.update(scene, preview); if (problem) message(`${problem} Playing without motion.`); }
+// While Play is open no other part of the page sees a key: not the editor, and not the native toolbar's own shortcuts either (this runs before they are
+// installed). Escape closes Play; every other key keeps its ordinary effect inside Play, because only propagation is stopped, never the default action.
+window.addEventListener('keydown', e => { if (!playOpen) return; if (e.key === 'Escape') { e.preventDefault(); closePlay(); } e.stopImmediatePropagation(); }, true);
 playButton.addEventListener('click', () => { if (playOpen) closePlay(); else openPlay(); });
 onSurfaceDispose(() => { player?.destroy(); player = null; playOpen = false; });
 
