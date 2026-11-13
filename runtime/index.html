@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=1c8112e33a2b"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=cb522c2f46d6"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -20,6 +20,8 @@
   <symbol id="i-redo" viewBox="0 0 16 16"><path d="M3 13V9.5a5 5 0 0 1 10 0M15 7l-2 2.8-2.6-2.4"/></symbol>
   <symbol id="i-export" viewBox="0 0 16 16"><path d="M8 10V1.8M4.8 5 8 1.8 11.2 5M5 7H3v7h10V7h-2"/></symbol>
   <symbol id="i-minus" viewBox="0 0 16 16"><path d="M3 8h10"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></symbol>
+  <symbol id="i-home" viewBox="0 0 16 16"><path d="M2.5 7.6 8 3l5.5 4.6M4 6.6V13h3V9.5h2V13h3V6.6"/></symbol>
   <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
   <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
   <symbol id="i-caret" viewBox="0 0 16 16"><path d="M4 6.5 8 10.5 12 6.5"/></symbol>
@@ -83,6 +85,7 @@
 
 
 <div id="left-bar" data-canvas-chrome class="topbar">
+  <button id="go-home" class="ibtn" type="button" title="Home: all your Papers" aria-label="Home: all your Papers"><svg class="icon"><use href="#i-home"/></svg></button>
   <button id="home" class="ibtn" type="button" title="Paper menu" aria-label="Paper menu" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu"><svg class="icon"><use href="#i-grid"/></svg></button>
   <span class="title"><button id="title-text" class="title-text" type="button"></button><input id="title-input" class="field title-input" type="text" maxlength="80" aria-label="Paper name" spellcheck="false" hidden></span>
   <button id="left-toggle" class="ibtn toggle" type="button" aria-pressed="false" aria-controls="left-panel" title="Pages, layers and design" aria-label="Pages, layers and design"><svg class="icon"><use href="#i-sidebar"/></svg></button>
@@ -166,7 +169,7 @@
 </aside>
 <div id="right-bar" data-canvas-chrome class="topbar">
   <button id="export" class="share-button" type="button" title="Share or export" aria-label="Share" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu"><svg class="icon"><use href="#i-export"/></svg><span>Share</span></button>
-  <span class="zoom"><button id="zoom-out" class="ibtn" type="button" title="Zoom out (−)" aria-label="Zoom out"><svg class="icon"><use href="#i-minus"/></svg></button><button id="zoom" class="level" type="button" title="Zoom options" aria-haspopup="menu" aria-expanded="false">100%</button><button id="zoom-in" class="ibtn" type="button" title="Zoom in (+)" aria-label="Zoom in"><svg class="icon"><use href="#i-plus"/></svg></button></span>
+  <span class="zoom"><button id="zoom-out" class="ibtn" type="button" title="Zoom out (−)" aria-label="Zoom out"><svg class="icon"><use href="#i-minus"/></svg></button><button id="zoom" class="level" type="button" title="Zoom options" aria-haspopup="menu" aria-expanded="false">100%</button><button id="zoom-in" class="ibtn" type="button" title="Zoom in (+)" aria-label="Zoom in"><svg class="icon"><use href="#i-plus"/></svg></button><button id="zoom-fit" class="ibtn" type="button" data-zoom="fit" title="Zoom to fit (⇧1)" aria-label="Zoom to fit"><svg class="icon"><use href="#i-fit"/></svg></button></span>
   <button id="right-toggle" class="ibtn toggle" type="button" aria-pressed="true" aria-controls="right-panel" title="Properties" aria-label="Properties"><svg class="icon"><use href="#i-sidebar-right"/></svg></button>
 </div>
 <!-- Exports of the artwork as it is rendered (no editor chrome), and the whole Paper as its file. -->
@@ -225,5 +228,5 @@
 <div id="toast" data-canvas-chrome role="status" hidden></div>
 <dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is saved with this Paper.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="paper-inspection-root"></div>
-<script type="module" src="app.js?v=10c22d034028"></script>
+<script type="module" src="app.js?v=b33f33920c93"></script>
 </body></html>

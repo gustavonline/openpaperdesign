@@ -209,3 +209,21 @@ export const editMenuState = (items, {canEdit, original, only}) => items.map(({e
   hidden: edit === 'download-original' ? !original : !!only,
   disabled: !!edit && !canEdit && !VIEW_ALLOWED.includes(edit),
 }));
+
+// Canvas recovery. `area` is the usable canvas ({left, top, w, h}) after the open panels and the floating bars; the camera maps world
+// to screen as x*z + camera.x. Fitting depends only on the artwork and the area, never on where the camera was, so it recovers from any
+// pan and gives the same result when repeated; it never goes past 100% (100% is its own command).
+const CAMERA_ZOOM = [.04, 4];
+export function fitCamera(rects, area, {maxZoom = 1, limit = 1e6} = {}) {
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+  const minX = Math.min(...rects.map(r => r.x)), minY = Math.min(...rects.map(r => r.y));
+  const maxX = Math.max(...rects.map(r => r.x + r.w)), maxY = Math.max(...rects.map(r => r.y + r.h));
+  const z = clamp(Math.min(area.w / Math.max(1, maxX - minX), area.h / Math.max(1, maxY - minY), maxZoom), ...CAMERA_ZOOM);
+  return {x: clamp(area.left + (area.w - (maxX - minX) * z) / 2 - minX * z, -limit, limit), y: clamp(area.top + (area.h - (maxY - minY) * z) / 2 - minY * z, -limit, limit), z};
+}
+// A Page with nothing to show: 100%, with the origin at the top-left of the usable canvas, the same every time.
+export const emptyCamera = area => ({x: area.left + 24, y: area.top + 24, z: 1});
+// Whether the Home control has a real destination: the viewer's OWN Home. The owner (browser or app) has theirs; a recipient inside the local plugin
+// app reaches that app's own Home, never the sender's. A recipient in a plain browser has no Home of their own: the sender's server is not
+// theirs, so there is none to offer (no guess about whether a plugin exists).
+export const homeRoute = ({shared, inPaperSurface}) => (!shared || inPaperSurface) ? 'own' : 'none';

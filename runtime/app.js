@@ -5,7 +5,7 @@ import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=37f4c823cf59';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf} from './editing-model.js?v=002feaf51ac7';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute} from './editing-model.js?v=d094fece4e24';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -34,6 +34,8 @@ body.classList.toggle('shared-paper', !!access.shared); body.classList.toggle('r
 if (access.shared) { const badge = document.createElement('span'); badge.className = 'access-badge'; badge.textContent = canEdit ? 'Can edit' : 'View only'; if (access.expiresAt !== undefined) badge.title = describeExpiry(access.expiresAt); $('#left-toggle').before(badge); }
 if (access.shared) { for (const item of document.querySelectorAll(inPaperSurface?'[data-action="new"],.owner-only':'[data-action="home"],[data-action="new"],.owner-only')) item.hidden = true; }
 if(access.shared&&!inPaperSurface)$('#home').hidden=true;
+// Home is the viewer's OWN Home: the owner's, or a recipient's own local plugin Home. A recipient in a plain browser has none, and the sender's server is never theirs.
+$('#go-home').hidden=homeRoute({shared:!!access.shared,inPaperSurface})==='none';
 if(!canEdit)for(const item of document.querySelectorAll('[data-action="rename"],#undo,#redo'))item.hidden=true;
 if (!canEdit) { for (const field of form.querySelectorAll('input,textarea,select')) field.disabled = true; $('[data-action="rename"]').disabled = true; $('#title-text').disabled = true; }
 const sharingUI=setupSharing({paperId,access,closeMenu,getPaperName:()=>scene?.name||'Untitled Paper',notify:message,onCancel:()=>{if(inspectionHost.stableMode==='edit')setTool('select');else inspectionHost.api?.resetInspect();}});
@@ -117,14 +119,12 @@ function viewport() {
   return { left, top, w: Math.max(120, w - left - 24), h: Math.max(120, h - top - 40) };
 }
 function fit(rects, maxZoom = 1) {
-  if (!rects.length) return;
-  const minX = Math.min(...rects.map(r => r.x)), minY = Math.min(...rects.map(r => r.y));
-  const maxX = Math.max(...rects.map(r => r.x + r.w)), maxY = Math.max(...rects.map(r => r.y + r.h));
-  const area = viewport(), z = bound(Math.min(area.w / Math.max(1, maxX - minX), area.h / Math.max(1, maxY - minY), maxZoom), .04, 4);
-  camera = { x: area.left + (area.w - (maxX - minX) * z) / 2 - minX * z, y: area.top + (area.h - (maxY - minY) * z) / 2 - minY * z, z };
+  camera = rects.length ? fitCamera(rects, viewport(), { maxZoom, limit: LIMIT }) : emptyCamera(viewport());
   paintCamera(); saveView();
 }
-function fitAll() { fit([...boards.values()].filter(b => !b.wrapper.hidden).map(b => b.viewRect)); }
+// The artwork of the shown Page(s): what is actually drawn (a hidden layer is not), within the canvas left by the open panels. With nothing to
+// show the camera goes to a fixed sensible place, so the command always does something and repeats stably. No artwork and no Page is touched.
+function fitAll() { fit([...boards.values()].filter(b => !b.wrapper.hidden && b.node.visible !== false).map(b => b.viewRect)); }
 function screenRect(key) {
   const r = dom.get(key)?.getBoundingClientRect(), s = stage.getBoundingClientRect();
   return r && r.width + r.height > 0 ? { r, s } : null;
@@ -1277,6 +1277,7 @@ flyout.addEventListener('click', e => { const b = e.target.closest('[data-pick]'
 paintRail();
 
 // Paper menu (grid icon): real actions only. All Papers saves pending edits first.
+$('#go-home').addEventListener('click', () => { void goHome(); });
 $('#home').addEventListener('click', e => { const r = e.currentTarget.getBoundingClientRect(); toggleMenu($('#project-menu'), e.currentTarget, e.detail === 0, () => ({ x: r.left, y: r.bottom + 6 })); });
 $('#project-menu').addEventListener('click', e => {
   const item = e.target.closest('[data-action]'); if (!item || item.disabled) return;

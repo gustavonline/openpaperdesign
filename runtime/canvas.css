@@ -1,7 +1,7 @@
-/* Editor layout after OpenPaperDesign desktop 3286238: full-viewport canvas, full-height 240/260 panels,
+/* Editor layout after OpenPaperDesign desktop 3286238: full-viewport canvas, full-height panels of one shared width (--panel-w),
    38px top rows whose bars float in the canvas corners when a panel is closed, vertical tool rail. */
-body{overflow:hidden;background:var(--canvas);--lw:0px;--rw:0px}
-body.left-open{--lw:240px}body.right-open{--rw:260px}
+body{overflow:hidden;background:var(--canvas);--lw:0px;--rw:0px;--panel-w:240px}
+body.left-open{--lw:var(--panel-w)}body.right-open{--rw:var(--panel-w)}
 
 #stage{position:fixed;top:0;bottom:0;left:var(--lw);right:var(--rw);overflow:hidden;overscroll-behavior:none;background:var(--canvas);cursor:default;touch-action:none}
 #stage:focus-visible{outline:none}
@@ -9,18 +9,18 @@ body.left-open{--lw:240px}body.right-open{--rw:260px}
 
 /* Panels */
 #left-panel,#right-panel{position:fixed;top:0;bottom:0;z-index:20;background:var(--surface);padding-top:40px;display:none}
-#left-panel{left:0;width:240px;border-right:1px solid var(--line);flex-direction:column}
-#right-panel{right:0;width:260px;border-left:1px solid var(--line);overflow:auto}
+#left-panel{left:0;width:var(--panel-w);border-right:1px solid var(--line);flex-direction:column}
+#right-panel{right:0;width:var(--panel-w);border-left:1px solid var(--line);overflow:auto}
 body.left-open #left-panel{display:flex}body.right-open #right-panel{display:block}
 
 /* Top rows: in the open panel (40px), or floating in the canvas corner. The floating bar keeps every control
    exactly where it is in the open row: content 10px from the edge (5 + 1px edge + 4 padding), the same
    220px content width, the same 20px centre line (top 2 + 36 / 2). Opening a panel moves nothing. */
 .topbar{position:fixed;top:0;z-index:30;height:40px;display:flex;align-items:center;gap:2px}
-#left-bar{left:0;width:240px;padding:0 10px}
-#right-bar{right:0;width:260px;padding:0 10px;justify-content:flex-end}
+#left-bar{left:0;width:var(--panel-w);padding:0 10px}
+#right-bar{right:0;width:var(--panel-w);padding:0 8px 0 6px;justify-content:flex-end}
 body:not(.left-open) #left-bar,body:not(.right-open) #right-bar{top:2px;height:36px;padding:4px;background:var(--popover);border:1px solid var(--edge);border-radius:10px;box-shadow:var(--shadow)}
-body:not(.left-open) #left-bar{left:5px;width:230px}
+body:not(.left-open) #left-bar{left:5px;width:calc(var(--panel-w) - 10px)}
 body:not(.right-open) #right-bar{right:5px;width:auto;padding-right:4px}
 /* The Paper title renames in place: one fixed slot, truncated, with the full name as its tooltip. */
 .title{flex:1;min-width:0;display:flex;align-items:center;padding:0 0 0 4px;height:26px}
