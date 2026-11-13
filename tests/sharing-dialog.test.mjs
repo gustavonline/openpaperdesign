@@ -20,7 +20,7 @@ class El {
   showModal(){this.open=true;}
   close(){this.open=false;this.fire('close');}
 }
-const ids=['share-state','share-links','share-create','share-role','share-expiry','share-protect','share-expiry-note','share-primary','share-new','share-stop','share-create-cancel','share-agent-panel','share-codex','share-claude','share-agent'];
+const ids=['share-state','share-links','share-create','share-role','share-expiry','share-protect','share-expiry-note','share-primary','share-new','share-stop','share-create-cancel','share-agent-panel','share-codex','share-claude','share-join','share-agent'];
 const els=Object.fromEntries(ids.map(id=>[id,new El(id.includes('create')&&!id.includes('cancel')?'form':'div')]));
 const [internet,network,local]=['online','network','local'].map(value=>Object.assign(new El('input'),{value,checked:value==='online'}));
 els['share-role'].value='view';els['share-expiry'].value='1d';
@@ -125,5 +125,26 @@ test('the invitation clipboard text follows the real invitation, while Copy link
       else assert.equal(r.buttons().some(b=>b.textContent==='Copy code'),false);
       r.ui.destroy();
     }
+  }finally{Object.assign(invitation,original);}
+});
+
+test('the owner agent panel gives secret-free app links and copies the join request only on request, with the selected fallback',async()=>{
+  const original={...invitation};
+  try{
+    Object.assign(invitation,original,{protected:true,expiresAt:null});
+    const r=rig();r.script.push('ok','ok','ok','ok');await r.open();
+    const before=r.clip.length;
+    r.press('Open with agent');await settle();
+    assert.equal(els['share-agent-panel'].hidden,false);assert.equal(r.clip.length,before,'opening the panel copies nothing');
+    for(const link of ['share-codex','share-claude']){
+      const href=decodeURIComponent(els[link].href);
+      for(const hidden of [secret.token,secret.code,secret.code.replace('-',''),secret.url,'/join','127.0.0.1','Brand board','Invitation 1',invitation.id])assert.ok(!href.includes(hidden),`${link} must not carry ${hidden}`);
+    }
+    assert.ok(els['share-codex'].href.startsWith('codex://threads/new?prompt=')&&els['share-claude'].href.startsWith('claude://code/new?q='));
+    const expected=['Open this shared Paper with the OpenPaperDesign plugin: call paper_join with the invitation below, then open its live canvas. Use only this shared Paper.','','Link: '+secret.url,'Code: K7QM-4P2X'].join('\n');
+    els['share-join'].fire('click');await settle();assert.equal(r.clip.at(-1),expected);assert.match(els['share-state'].textContent,/Join request copied/);
+    r.rejectClipboard();els['share-join'].fire('click');await settle();
+    assert.equal(fallback.hidden,false);assert.equal(fallback.value,expected);assert.match(els['share-state'].textContent,/Clipboard access was blocked/);assert.doesNotMatch(els['share-state'].textContent,/copied\./i);
+    r.ui.destroy();
   }finally{Object.assign(invitation,original);}
 });

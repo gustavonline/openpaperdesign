@@ -1,4 +1,4 @@
-import {invitationLinks,invitationMessage,describeExpiry} from './invitation.js';
+import {invitationLinks,invitationMessage,joinRequest,describeExpiry} from './invitation.js';
 // Invites live in the owner's process. Labels are not verified identities.
 export function setupSharing({paperId,access,closeMenu,getPaperName=()=>'Untitled Paper',notify=()=>{},onCancel}){
   const dialog=document.getElementById('sharing-dialog'),open=document.getElementById('open-sharing');
@@ -80,11 +80,12 @@ export function setupSharing({paperId,access,closeMenu,getPaperName=()=>'Untitle
   }
   async function readLink(grant,onError){try{const response=await fetch(linkEndpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invitationId:grant.id}),signal:AbortSignal.timeout(8000)}),data=await response.json();if(!response.ok)throw new Error(data.error||'This invitation is unavailable.');return data;}catch(error){const message=error.name==='TimeoutError'?'The connection is taking longer than expected. Try again.':error.message;if(onError)onError(message);else status.textContent=message;return null;}}
   async function showAgent(grant){
-    const link=await readLink(grant);if(!link||closed||!dialog.open)return;agent=link;panel.hidden=false;const links=invitationLinks(link.url,link.code);
+    const link=await readLink(grant);if(!link||closed||!dialog.open)return;agent=link;panel.hidden=false;const links=invitationLinks();
     for(const [id,url]of[['share-codex',links.codex],['share-claude',links.claude]])$(id).href=url;
     panel.scrollIntoView({block:'nearest'});
   }
-  for(const id of ['share-codex','share-claude'])$(id).addEventListener('click',event=>{if(window.__paperNative?.openAgent){event.preventDefault();void window.__paperNative.openAgent($(id).href).catch(()=>{status.textContent='Use Copy invitation and open it in your browser to choose an app.';});}});
+  for(const id of ['share-codex','share-claude'])$(id).addEventListener('click',event=>{if(window.__paperNative?.openAgent){event.preventDefault();void window.__paperNative.openAgent($(id).href).catch(()=>{status.textContent='Open your agent yourself and paste the join request.';});}});
+  $('share-join').addEventListener('click',()=>{if(agent)void copyText(joinRequest({url:agent.url,code:agent.code}),'Join request copied.');});
   $('share-agent').addEventListener('click',()=>{if(agent)void copyText(JSON.stringify({mcpServers:{paper:{type:'http',url:agent.mcpUrl,headers:{Authorization:`Bearer ${agent.token}`,...(agent.code?{'X-Paper-Code':agent.code}:{}),'X-Paper-Client':crypto.randomUUID()}}}},null,2),'MCP connection copied.');});
   open.addEventListener('click',async()=>{closeMenu();opened++;failed.clear();panel.hidden=fallback.hidden=true;dialog.showModal();await request('GET');});
   add.addEventListener('click',()=>{form.dataset.creating='1';render();role.focus();});

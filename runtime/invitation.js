@@ -1,12 +1,18 @@
 import {readCode} from './access-code.js';
-// A normal web invitation stays the fallback when a desktop app is not installed. The code, when the
-// owner protected the invitation, travels in the prompt so the recipient's agent can call paper_join.
-export function invitationLinks(value, code = ''){
-  const url=new URL(value);
-  if(!['https:','http:'].includes(url.protocol)||url.username||url.password||url.pathname!=='/join'||url.search||!/^#[A-Za-z0-9_-]{43}$/.test(url.hash))throw new Error('Choose a Paper invitation link.');
-  const shown=code&&readCode(code);
-  const prompt=`Open this shared Paper with the OpenPaperDesign plugin. Call paper_join with this invitation${shown?` and the access code ${shown}`:''}, then open its live canvas: ${url.href}`;
-  return {codex:'codex://threads/new?'+new URLSearchParams({prompt}),claude:'claude://code/new?'+new URLSearchParams({q:prompt})};
+// The browser always works without a plugin. Optional agent apps open with a GENERIC, secret-free message: these links
+// take no invitation, code, title or path, so nothing sensitive reaches the operating system, an app or a log. The
+// recipient pastes the join request below into the agent of their choice and sends it themselves. Opening either link
+// only fills an empty message; nothing here can tell whether the plugin is installed or the app opened.
+export function invitationLinks(){
+  const codex='[@OpenPaperDesign](plugin://openpaperdesign@openpaperdesign) I have a shared Paper invitation. I will paste the join request in my next message; please open it with paper_join when I do.';
+  const claude='I have the OpenPaperDesign plugin and a shared Paper invitation. I will paste the join request in my next message; please open it with paper_join when I do.';
+  return {codex:'codex://threads/new?'+new URLSearchParams({prompt:codex}),claude:'claude://code/new?'+new URLSearchParams({q:claude})};
+}
+// What the recipient copies and pastes into their own agent. It holds this one invitation (and its code, when it has one)
+// and nothing else, so it is written to the clipboard only on request. The word "code" appears only in its own label.
+export function joinRequest({url, code}){
+  const shown=code?readCode(code):'';
+  return ['Open this shared Paper with the OpenPaperDesign plugin: call paper_join with the invitation below, then open its live canvas. Use only this shared Paper.','',`Link: ${url}`,...(shown?[`Code: ${shown}`]:[])].join('\n');
 }
 const clock=ms=>new Date(ms).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
 // Plain wording for when an invitation stops. null never has an application timer, and promises nothing

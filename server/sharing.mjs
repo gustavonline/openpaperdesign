@@ -153,7 +153,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
         // Never has no application timer, so its cookie is a browser-session cookie rather than a long fixed date.
         const age=grant.expiresAt===null?'':`; Max-Age=${Math.max(0,Math.floor((grant.expiresAt-now())/1000))}`;
         res.setHeader('Set-Cookie',`${cookieName}=${session}; HttpOnly; SameSite=Strict; Path=/${age}${listener.online?'; Secure':''}`);
-        return json(res,200,{href:`/?paper=${grant.paperId}&invite=${grant.id}`,role:grant.role,name:(await library.read(grant.paperId)).paper.name,expiresAt:grant.expiresAt});
+        return json(res,200,{href:`/?paper=${grant.paperId}&invite=${grant.id}`,role:grant.role,name:(await library.read(grant.paperId)).paper.name,expiresAt:grant.expiresAt,version:VERSION});
       }
       if((req.method==='GET'||req.method==='HEAD')&&RUNTIME_FILES.has(pathname.slice(1)))return editor.serve(req,res,pathname.slice(1));
       const grant=authenticate(req,url,listener);

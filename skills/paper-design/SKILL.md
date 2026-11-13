@@ -2,7 +2,7 @@
 name: paper-design
 description: Create or revise visual direction and editable designs in Paper for websites, app screens, dashboards, banners and other graphics. Use when turning a brief or references into design alternatives, documenting a design system, or reviewing visual consistency.
 metadata:
-  version: "0.7.0-preview.24"
+  version: "0.7.0-preview.25"
 ---
 
 # Design in Paper
@@ -41,6 +41,6 @@ Inspect the result in the embedded Paper app when native visual access is availa
 
 For websites/apps, check representative compact and wide views plus relevant transitions with real content. Record content order and navigation/sidebar changes. A fixed-size banner needs its actual output dimensions and readable crop-safe composition, rather than a mobile breakpoint matrix. For motion, use the project's existing timing and reduced-motion behavior.
 
-Verify save and reopen. Inspect the intended export, including images/fonts, when export is part of the deliverable. If native visual access is unavailable, finish the authorized MCP work and report that native visual acceptance remains unverified; do not call structural checks a visual pass.
+Verify the save by reading it back and inspecting the view that is already open (reopen only when asked, or for one deliberate reload test). Inspect the intended export, including images/fonts, when export is part of the deliverable. If native visual access is unavailable, finish the authorized MCP work and report that native visual acceptance remains unverified; do not call structural checks a visual pass.
 
 Finish with the selected direction, changed files/Paper, actual verification, and any material rendering gap. Put only useful continuation decisions in `CONTEXT.md`; do not copy the chat. Review-only requests leave artwork and guides unchanged.

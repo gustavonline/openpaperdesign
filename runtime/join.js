@@ -1,14 +1,17 @@
-import {invitationLinks, endedCopy, knownEnd} from './invitation.js';
+import {invitationLinks, joinRequest, endedCopy, knownEnd} from './invitation.js';
 import {extractInvitation,readCode} from './access-code.js';
 // Every element is looked up when it is used: the page never holds on to a node that markup changes could replace.
 const $ = id => document.getElementById(id);
 // The key stays in memory (never in the address bar or storage) so a wrong code can be corrected without asking for the link again.
 let token = location.hash.slice(1), busy = false, composing = false, lockTimer, lockUntil = 0;
+// What the join request needs, kept in memory only: the entered code and the owner's plugin version. The page stays open while
+// the guide is shown, so a visit to the install guide (a new tab) never loses the invitation.
+let accepted = { code: '', version: '', role: '' };
 const ended = new URLSearchParams(location.search).get('ended');
 history.replaceState(null, '', '/join');
 function say(text, problem = false) { const node = $('status'); node.textContent = text; node.dataset.state = problem ? 'problem' : ''; }
 function show(step) {
-  $('code-form').hidden = step !== 'code'; $('link-form').hidden = step !== 'link'; $('choices').hidden = step !== 'done';
+  $('code-form').hidden = step !== 'code'; $('link-form').hidden = step !== 'link'; $('choices').hidden = step !== 'done'; $('agent-guide').hidden = step !== 'guide';
   const target = step === 'code' ? $('code') : step === 'link' ? $('invite') : null; if (target && !target.disabled) target.focus();
 }
 function locked(seconds) {
@@ -47,11 +50,26 @@ function done(data, code) {
   try {
     const browser = new URL(data.href, location.origin);
     if (browser.origin !== location.origin || browser.pathname !== '/' || !browser.searchParams.get('paper')) throw new Error('The invited Paper address is invalid.');
-    const invitation = new URL('/join', location.origin); invitation.hash = token; const apps = invitationLinks(invitation.href, code);
-    $('name').textContent = data.name || 'Shared Paper'; say(data.role === 'edit' ? 'You can edit this Paper.' : 'You can view this Paper.');
+    const apps = invitationLinks();
+    accepted = { code, version: typeof data.version === 'string' ? data.version.slice(0, 40) : '', role: data.role };
+    $('name').textContent = data.name || 'Shared Paper'; say(roleLine());
     $('browser').href = browser.href; $('codex').href = apps.codex; $('claude').href = apps.claude; show('done');
   } catch (error) { say(error.message, true); show('link'); }
 }
+const roleLine = () => accepted.role === 'edit' ? 'You can edit this Paper.' : 'You can view this Paper.';
+// The join request is built from memory on demand and only ever goes to the clipboard (or the selected read-only fallback).
+function requestText() { const url = new URL('/join', location.origin); url.hash = token; return joinRequest({ url: url.href, code: accepted.code }); }
+$('agent-open').addEventListener('click', () => {
+  $('agent-secret').textContent = accepted.code ? 'this invitation link and its access code' : 'this invitation link';
+  $('agent-version').textContent = accepted.version ? `Its version must match the owner's (${accepted.version}); a different version is refused, and the browser still works.` : '';
+  $('join-fallback').hidden = true; $('join-fallback').value = ''; say('Optional: connect your own agent. The browser needs none of this.'); show('guide');
+});
+$('copy-join').addEventListener('click', async () => {
+  const text = requestText(), fallback = $('join-fallback'); fallback.hidden = true; fallback.value = '';
+  try { await navigator.clipboard.writeText(text); say('Join request copied. Paste it into your own agent.'); }
+  catch { fallback.value = text; fallback.hidden = false; fallback.focus(); fallback.select(); say('Clipboard access was blocked. Copy the selected text. This field is read-only.', true); }
+});
+$('agent-back').addEventListener('click', () => { $('join-fallback').hidden = true; $('join-fallback').value = ''; say(roleLine()); show('done'); });
 $('code-form').addEventListener('submit', event => {
   event.preventDefault(); if (composing || busy) return;
   const code = readCode($('code').value);

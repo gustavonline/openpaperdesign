@@ -124,7 +124,7 @@ SSE reconnect sends a fresh room snapshot. Only the selected Paper’s peers rea
 
 ## Home resource
 
-Owner stdio exposes `resources/list` and `resources/read` for `ui://openpaperdesign/home/<version>/<session>` (`text/html;profile=mcp-app`). The exact URI is in the resource list and `paper_home` metadata. The session suffix refreshes the temporary app connection after an MCP restart. Retained older URIs resolve to the current resource. The running process snapshots the shipped UI, so pruning a plugin cache cannot remove it.
+Owner stdio exposes `resources/list` and `resources/read` for `ui://openpaperdesign/home/<version>/<session>` (`text/html;profile=mcp-app`). The exact URI is in the resource list and `paper_home` metadata. Only `paper_home` and `paper_join` results carry it (`_meta.ui.resourceUri` plus `structuredContent`) and so ask the host to display a view; every read, save, feedback, asset, note and activity result is data only (no `_meta`, no `structuredContent`) and an open view follows through live events. Open once and work through reads and saves; see the skill's "Open once, then work". The session suffix refreshes the temporary app connection after an MCP restart. Retained older URIs resolve to the current resource. The running process snapshots the shipped UI, so pruning a plugin cache cannot remove it.
 
 Codex displays Home, Papers and the Notion picker in one MCP App document. It uses the same browser renderer, included as `runtime/native.js`; no local web page is framed or opened for navigation. Home reads the library through MCP without starting an HTTP server. Opening a Paper or Notion, creating a Paper or importing a file starts the selected workspace when needed. Stopping a server leaves Home usable and its background refresh never restarts that server.
 
@@ -136,7 +136,7 @@ This integration is desktop-local. A cloud stdio host cannot expose files on ano
 
 ## Finding an existing Paper
 
-Call `paper_home {}` before assuming a Paper is absent. Match its name/id and collection. `paper_home {action:"open",workspaceId,paperId}` returns the real workspace path; select it with `paper_open {workspace}` before `paper_read` or edits. Both personal Papers and remembered project Papers are discoverable this way; no directory scan is required.
+Call `paper_home {}` before assuming a Paper is absent. Match its name/id and collection. `paper_home {action:"open",workspaceId,paperId}` returns the real workspace path; select it with `paper_open {workspace}` before `paper_read` or edits. Both personal Papers and remembered project Papers are discoverable this way; no directory scan is required. Once a Paper is open, keep its workspace, Paper ID and revision and use `paper_read`/`paper_save`; reopen only on request, on a switch or to recover.
 
 For a host that cannot expose the complete MCP toolset, `node <plugin-root>/server/server.mjs --list` returns Home metadata without starting a listener. Each Paper includes its absolute workspace and folder; thumbnails are omitted from CLI output. Use the selected folder for ordinary file reads.
 

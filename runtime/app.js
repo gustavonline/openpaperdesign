@@ -2,7 +2,7 @@ import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
 import {setupPresence} from './presence.js?v=22e96dd947ab';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
-import { setupSharing } from './sharing.js?v=e76b2d4ca5f2';
+import { setupSharing } from './sharing.js?v=37f4c823cf59';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame} from './editing-model.js?v=718e4bb39407';

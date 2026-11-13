@@ -2,7 +2,7 @@
 name: paper
 description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the project and cloud snapshots in Notion. Use for Home, Paper files, Notion save/open, workspace setup and server controls.
 metadata:
-  version: "0.7.0-preview.24"
+  version: "0.7.0-preview.25"
 ---
 
 # Paper
@@ -29,6 +29,15 @@ After an update, the desktop host may retain the previous Home view. `paper_home
 - For an invitation link, call `paper_join {url}`; pass the whole invitation message as `url` if you have it, or the owner's access code as `code` when the invitation has one and it is not in the message (ask the user; never guess codes). A protected invitation without its code, or with a wrong one, is refused and wrong codes are rate-limited. It opens the shared canvas and selects it for artwork tools. Do not create a local duplicate or add another MCP server. Call `paper_read` with the returned `paperId`. Joined saves use full `paper` JSON and assets use `base64`; filesystem `sourceFile`, private notes, packaging and Notion are unavailable through invitations. Use `paper_open` to return to local work. Never log or save invitation keys or codes in the Paper or repository.
 - Project files are `<workspace>/Paper/<id>/`. Personal files use the native application data folder: `~/Library/Application Support/OpenPaperDesign/Paper/` on macOS, `%LOCALAPPDATA%/OpenPaperDesign/Paper/` on Windows, and `$XDG_DATA_HOME/openpaperdesign/Paper/` or `~/.local/share/openpaperdesign/Paper/` on Linux. `PAPER_HOME` overrides the personal root. Home's project pointers stay in that root's `projects/` folder. Do not search unrelated directories or put Papers in the plugin cache.
 - The standalone CLI/browser instructions in the repository are an explicitly chosen fallback, not the normal Codex plugin workflow.
+
+## Open once, then work
+
+Displaying the Paper and changing it are separate. Only `paper_home` (and `paper_join`) results ask the host to display an app view. `paper_read`, `paper_save`, `paper_save_feedback`, `paper_add_asset`, `paper_write_note` and `paper_activity` return data only, and an already open view updates itself from live events: it keeps its Page, camera and selection, and a person's unsaved edit is kept as a conflict instead of being overwritten.
+
+- Open the Paper once with `paper_home` `action:"open"`. For every later turn about the same Paper, work through `paper_read` and revision-checked `paper_save`, and keep the `workspaceId`, `workspace`, `paperId` and latest `revision` you already know. Do not list Home again to rediscover a known workspace.
+- Verify a save by reading it back (the returned revision, then `paper_read`) and by inspecting the view that is already open. Do not call `paper_home` after a save to refresh or check it.
+- Reopen only when the person asks to see it again, when you switch to a different Paper or library, or to recover after the view reports that its server stopped. A deliberate reload test (for example "save and reopen" when persistence itself is the question) is one reopen, not one per save.
+- An explicit open may create another view; Paper does not close, focus or reuse host windows, and the host decides what a repeated open does. Intentional extra views are supported and are not deduplicated. If extra views appear, report which call opened them rather than assuming the server created them.
 
 ## Work on the Paper
 

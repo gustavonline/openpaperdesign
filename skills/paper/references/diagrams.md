@@ -52,4 +52,4 @@ function addRelationship(page, parentId, fromId, toId, text) {
 
 Allocate new symbols with `instantiate` before connecting them. For a correction, edit the existing edge/text and preserve its IDs instead of calling this creation recipe again. Keep a distinct gutter for overlapping or returning relationships; the endpoint validator does not prove that a line avoids unrelated boxes.
 
-Verify at least one labelled attached edge through move/resize, delete/undo, save/reopen and export. Check that text is a real text layer and used assets travel with the document.
+Verify at least one labelled attached edge through move/resize, delete/undo, save/read back (one deliberate reload when persistence itself is under test) and export. Check that text is a real text layer and used assets travel with the document.

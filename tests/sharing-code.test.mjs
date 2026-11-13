@@ -11,7 +11,7 @@ import {createPresence} from '../server/presence.mjs';
 import {loadRuntime,VERSION} from '../server/runtime.mjs';
 import {joinInvitation,invitationURL} from '../server/invitation.mjs';
 import {normalizeCode,readCode,extractInvitation,formatCode} from '../runtime/access-code.js';
-import {invitationMessage,invitationLinks,describeExpiry,endedCopy,endedStatus,knownEnd} from '../runtime/invitation.js';
+import {invitationMessage,invitationLinks,joinRequest,describeExpiry,endedCopy,endedStatus,knownEnd} from '../runtime/invitation.js';
 import {TOOLS} from '../server/server.mjs';
 
 const RUNTIME=path.resolve(path.dirname(new URL(import.meta.url).pathname),'../runtime');
@@ -63,8 +63,6 @@ test('the access code is read one way everywhere: case, spacing, dashes, full-wi
   assert.equal(endedCopy(knownEnd('expired')),'This invitation expired.');assert.equal(endedCopy(knownEnd('revoked')),'The owner stopped this invitation.');
   for(const unknown of [undefined,null,'',{},'ended','needs-code'])assert.equal(endedCopy(knownEnd(unknown)),'This invitation ended.','an unknown reason never blames the owner');
   assert.equal(describeExpiry(null).startsWith('No end time'),true);assert.equal(JSON.stringify({expiresAt:null}),'{"expiresAt":null}');
-  const links=invitationLinks(`http://127.0.0.1:1/join#${key}`,'K7QM4P2X');assert.ok(decodeURIComponent(links.codex).includes('K7QM-4P2X'));
-  assert.ok(!decodeURIComponent(invitationLinks(`http://127.0.0.1:1/join#${key}`).codex).includes('access code'));
 });
 
 test('a protected invitation gives nothing without the right code, and only the server decides',async t=>{
@@ -82,7 +80,7 @@ test('a protected invitation gives nothing without the right code, and only the 
   assert.equal((await guest.join(g,{})).status,400,'a non-text code is refused');
   const variants=['k7qm-4p2x'];
   const raw=g.code.replace('-','');variants.push(raw.toLowerCase(),` ${g.code.slice(0,4)}  ${g.code.slice(5)} `,[...raw].map(c=>String.fromCharCode(c.charCodeAt(0)>64?c.charCodeAt(0)+0xfee0:c.charCodeAt(0)+0xfee0)).join(''),g.code.replace('-','‑'));
-  for(const typed of variants.slice(1)){const fresh=r.browser(),answer=await fresh.join(g,typed);assert.equal(answer.status,200,typed);const info=await answer.json();assert.equal(info.name,'Protected Paper');assert.equal(info.href,`/?paper=${r.made.id}&invite=${g.id}`);}
+  for(const typed of variants.slice(1)){const fresh=r.browser(),answer=await fresh.join(g,typed);assert.equal(answer.status,200,typed);const info=await answer.json();assert.equal(info.name,'Protected Paper');assert.equal(info.version,VERSION,'the join answer names the plugin version the guest agent must match');assert.equal(info.href,`/?paper=${r.made.id}&invite=${g.id}`);}
   const ok=await guest.join(g,g.code);assert.equal(ok.status,200);assert.equal(guest.jar.size,1);assert.ok([...guest.jar.keys()][0].endsWith(g.id));
   const access=await (await guest.request(g.base,`/api/access?paper=${r.made.id}&invite=${g.id}`)).json();assert.equal(access.role,'edit');assert.equal(access.invitationId,g.id);
   // Reusing the session on a second unlock does not open a second cookie.
@@ -243,7 +241,7 @@ test('owner secrets: status and overview never carry the code or key; only the r
   const reuse=await r.sharing.create(r.made.id,'edit',false,false,{protect:true,expiry:'never'});assert.equal(reuse.createdId,g.id);
   const changed=await r.sharing.create(r.made.id,'edit',false,false,{protect:false,expiry:'never'});assert.notEqual(changed.createdId,g.id);
   assert.equal((await r.sharing.status(r.made.id)).invitations.some(i=>i.id===g.id),false,'the replaced invitation ended');
-  assert.equal(VERSION.includes('preview.24'),true);
+  assert.equal(VERSION.includes('preview.25'),true);
 });
 
 test('Home Shared lists protected and Never invitations without secrets, and the owner API validates the new options',async t=>{
@@ -327,4 +325,42 @@ test('the Danish message round-trips for the plugin and the browser, with other 
   assert.equal(extractInvitation(`${URL_}\nAdgangskode:\nＡＢＣＤ－ＥＦＧＨ`).code,'ABCD-EFGH');
   // The link may sit alone on its line with the owner's other lines around it.
   assert.equal(extractInvitation(`Hej!\n\n${URL_}\n\nAdgangskode:\nK7QM-4P2X`).token,key);
+});
+
+test('app links are generic and secret-free, whatever invitation exists; only the explicit join request carries the invitation',async t=>{
+  const r=await rig(t),g=await r.grant('edit',{protect:true,expiry:'never'}),links=invitationLinks(g.url,g.code,'Protected Paper');
+  assert.deepEqual(links,invitationLinks(),'the links cannot depend on any invitation, code or title');
+  const codex=new URL(links.codex),claude=new URL(links.claude);
+  assert.equal(codex.protocol,'codex:');assert.equal(codex.hostname,'threads');assert.equal(codex.pathname,'/new');assert.deepEqual([...codex.searchParams.keys()],['prompt']);assert.equal(codex.hash,'');
+  assert.equal(claude.protocol,'claude:');assert.equal(claude.hostname,'code');assert.equal(claude.pathname,'/new');assert.deepEqual([...claude.searchParams.keys()],['q']);assert.equal(claude.hash,'');
+  assert.ok(codex.searchParams.get('prompt').startsWith('[@OpenPaperDesign](plugin://openpaperdesign@openpaperdesign) '));
+  const everything=links.codex+links.claude+decodeURIComponent(links.codex)+decodeURIComponent(links.claude);
+  for(const secret of [g.token,g.code,g.code.replace('-',''),g.url,new URL(g.url).host,'/join','#','Protected Paper',r.dir,r.made.id,g.id])assert.ok(!everything.includes(secret),`app links must not contain ${String(secret).slice(0,12)}`);
+  // The join request holds the invitation and its code and reads back through the same parser as every other path.
+  const request=joinRequest({url:g.url,code:g.code});
+  assert.match(request,new RegExp(`\\nLink: ${g.url}\\nCode: ${g.code}$`));assert.deepEqual(extractInvitation(request),{token:g.token,code:g.code});
+  assert.doesNotMatch(request.split('\n')[0],/code/i,'the word code appears only in its label');
+  const joined=await joinInvitation(request);assert.equal(joined.descriptor.role,'edit');assert.equal(joined.descriptor.expiresAt,null);
+  assert.equal((await joined.tool('paper_read',{paperId:r.made.id})).shared,true);
+  // An unprotected invitation's request has no code line, a code with no digit still round-trips, and a wrong code is still refused.
+  const open=await r.grant('view');const plain=joinRequest({url:open.url,code:''});assert.ok(!plain.includes('Code:'));assert.equal((await joinInvitation(plain)).descriptor.role,'view');
+  assert.deepEqual(extractInvitation(joinRequest({url:g.url,code:'ABCD-EFGH'})),{token:g.token,code:'ABCD-EFGH'});
+  await assert.rejects(joinInvitation(joinRequest({url:g.url,code:'ZZZZ-ZZZZ'})),/did not work/);
+  // The remote allowlist is untouched: view guests get 2 tools, edit guests 6, the same grant as before.
+  const view=await r.grant('view',{protect:true});
+  const list=async grant=>{const response=await fetch(grant.mcpUrl,{method:'POST',headers:{Authorization:'Bearer '+grant.token,'X-Paper-Code':grant.code||'','Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})});return (await response.json()).result.tools.map(tool=>tool.name);};
+  assert.equal((await list(view)).length,2);assert.equal((await list(g)).length,6);
+});
+
+test('the native open-link allowlist stays the same two generic app schemes, and the new links satisfy it',async()=>{
+  const host=await fs.readFile(new URL('../runtime/native-host.js',import.meta.url),'utf8');
+  const open=host.slice(host.indexOf('async function openAgent('),host.indexOf('async function openGuest('));
+  assert.ok(open.includes("url.protocol==='codex:'&&url.hostname==='threads'&&url.pathname==='/new'&&[...url.searchParams.keys()].every(k=>k==='prompt')"));
+  assert.ok(open.includes("url.protocol==='claude:'&&url.hostname==='code'&&url.pathname==='/new'&&[...url.searchParams.keys()].every(k=>k==='q')"));
+  assert.ok(open.includes('url.username||url.password||url.hash||url.href.length>16000'));
+  assert.doesNotMatch(open,/claude-cli|http/,'no other scheme was added to the allowlist');
+  const links=invitationLinks();
+  for(const [value,scheme,host_,key] of [[links.codex,'codex:','threads','prompt'],[links.claude,'claude:','code','q']]){
+    const url=new URL(value);assert.equal(url.protocol,scheme);assert.equal(url.hostname,host_);assert.equal(url.pathname,'/new');assert.deepEqual([...url.searchParams.keys()],[key]);assert.ok(!url.username&&!url.password&&!url.hash&&url.href.length<=16000);
+  }
 });
