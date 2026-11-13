@@ -8,7 +8,7 @@ This page is public product information. It is the same for everyone and every r
 
 ## What you were given
 
-An invitation is a message from a person: a link `https://<host>/join#<key>` and, when protected, an access code labelled `Adgangskode:` or `Code:` (8 characters such as `K7QM-4P2X`; case, spaces and dashes do not matter). The key is in the URL fragment, which browsers and HTTP clients do not send in a request, so fetching `/join` shows you this product page, never the Paper. A person opens the same link in any browser, enters the code and lands in the same live Paper; no plugin is needed for that.
+An invitation is a message from a person: a link `https://<host>/join#<key>` and, when protected, an access code labelled `Access code:` or `Code:` (invitations written in Danish by earlier versions use `Adgangskode:`), 8 characters such as `K7QM-4P2X`; case, spaces and dashes do not matter. The key is in the URL fragment, which browsers and HTTP clients do not send in a request, so fetching `/join` shows you this product page, never the Paper. A person opens the same link in any browser, enters the code and lands in the same live Paper; no plugin is needed for that.
 
 ## Connect through the plugin
 
@@ -36,6 +36,13 @@ Pass the `paperId` that `paper_join` returned to each tool. Work like this:
 3. Change the Paper, then `paper_save { paperId, revision, paper }` with the whole Paper JSON (edit invitations only).
 4. A "changed elsewhere" refusal is a conflict and nothing was overwritten: read again, merge, save with the new revision.
 5. Read it back with `paper_read` and inspect the current canvas if your host can show it. Do not rejoin or reopen after every save.
+
+## Working with others, and motion
+
+- **Method.** `/collaboration.md` is one practical method (version 1) for consultation, pair design, bounded fan-out, sequential takeover and implementation handoff: read the Paper, `DESIGN.md` and feedback first, agree layer ids and roles, make small revision-checked changes, ask for an independent visual review, and after a 409 re-read and re-apply **your own** change (no blind retry, no automatic merge). It uses your host, your models and your user's approvals; it adds no service. The plugin's Paper, Design, Diagram and Copy skills carry the identical text.
+- **`DESIGN.md` is the owner's.** An invitation cannot write it or private notes. Propose a change as feedback (`paper_save_feedback`); the owner accepts it. If a read of the notes or `DESIGN.md` was truncated or refused, say so and ask for the missing part. Never claim you read all of it.
+- **Source of truth.** The editable Paper is authoritative. Play (the ▶ in the editor) is a runnable preview of it, not code. Generated implementation code is a separate handoff.
+- **Motion.** A Paper can carry authored motion and interactions as plain data (`preview` in `paper.json`, version 1: timed and scroll-driven animation, hover and focus, click state and Page navigation, a pinned navigation bar, authored desktop and mobile variants). Read and write it with `paper_read` and `paper_save` like the rest of the Paper. `/motion.md` describes it and `/preview-model.schema.json` is its JSON Schema. It cannot contain code, markup, selectors or URLs, and a newer version than 1 cannot be saved by this version.
 
 ## Other MCP clients
 

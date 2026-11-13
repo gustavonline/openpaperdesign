@@ -64,7 +64,7 @@ export async function joinInvitation(value,suppliedCode){
       if(args.paperId!==paperId)throw new PaperError(403,'This invitation opens one Paper only.');
       if(!['paper_read','paper_read_feedback','paper_save','paper_save_feedback','paper_add_asset','paper_activity'].includes(name)||args.sourceFile!==undefined)throw new PaperError(403,'Use the invited artwork tools. Local files, owner notes and cloud accounts are not available through an invitation.');
       const {paperId:_ignored,...remoteArgs}=args,result=await call(name,remoteArgs);
-      if(name==='paper_read'){if(result.paper)validatePaper(result.paper);return {...result,shared:true,summary:{name:result.name,pages:result.pages||result.paper?.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length}))}};}
+      if(name==='paper_read'){if(result.paper)validatePaper(result.paper,{read:true});return {...result,shared:true,summary:{name:result.name,pages:result.pages||result.paper?.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length}))}};}
       return result;
     },
     async api(path,options){
@@ -73,7 +73,7 @@ export async function joinInvitation(value,suppliedCode){
       if(target.pathname.startsWith('/api/'))allowed=api[resource]?.includes(method)&&target.searchParams.getAll('paper').length===1&&target.searchParams.get('paper')===paperId&&[...target.searchParams.keys()].every(k=>k==='paper');
       else if(method==='GET'&&target.pathname.startsWith('/Paper/'+paperId+'/')){const relative=decodeURIComponent(target.pathname.slice(('/Paper/'+paperId+'/').length));allowed=['paper.json','DESIGN.md','feedback.json'].includes(relative)||relative.startsWith('assets/');}
       if(target.origin!==origin||!allowed||/[\\#]/.test(path)||/(?:^|\/)(?:\.\.|%2e)/i.test(path))throw new PaperError(403,'Only this invited Paper is available.');
-      const {response,bytes}=await send(path,options);if(response.ok&&method==='GET'&&['/api/paper','/Paper/'+paperId+'/paper.json'].includes(target.pathname)){const data=JSON.parse(bytes);validatePaper(data.paper||data);}return {status:response.status,headers:Object.fromEntries(['content-type','content-disposition','etag'].flatMap(key=>response.headers.has(key)?[[key,response.headers.get(key)]]:[])),body:bytes.toString('base64')};
+      const {response,bytes}=await send(path,options);if(response.ok&&method==='GET'&&['/api/paper','/Paper/'+paperId+'/paper.json'].includes(target.pathname)){const data=JSON.parse(bytes);validatePaper(data.paper||data,{read:true});}return {status:response.status,headers:Object.fromEntries(['content-type','content-disposition','etag'].flatMap(key=>response.headers.has(key)?[[key,response.headers.get(key)]]:[])),body:bytes.toString('base64')};
     }
   };
 }

@@ -431,7 +431,7 @@ export function addPageTo(scene, page, index = scene.pages.length) { scene.pages
 export function renamePageIn(scene, id, name) { const page = scene.pages.find(p => p.id === id), before = page.name; page.name = name; return {kind: 'pages', op: 'rename', id, before, after: name}; }
 export function deletePageFrom(scene, id, pruneFor = () => null) {
   const index = scene.pages.findIndex(p => p.id === id), [page] = scene.pages.splice(index, 1), preview = scene.preview === undefined ? undefined : JSON.parse(JSON.stringify(scene.preview));
-  const after = pruneFor(scene, id); if (after !== null && after !== undefined) scene.preview = after;
+  const after = pruneFor(scene, id); if (after === undefined) delete scene.preview; else if (after !== null) scene.preview = after;
   return {kind: 'pages', op: 'delete', page: JSON.parse(JSON.stringify(page)), index, previewBefore: preview, previewAfter: scene.preview === undefined ? undefined : JSON.parse(JSON.stringify(scene.preview))};
 }
 // Undo or redo of one of those records.

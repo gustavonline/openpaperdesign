@@ -3,9 +3,11 @@ import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLea
 import {setupPresence} from './presence.js?v=ad47b40267f6';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
+import { createPlayer } from './play.js?v=e2d5b20465b4';
+import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=ecb4c5047e93';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=5280214db005';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -332,6 +334,7 @@ function populateDoc() {
   $('#doc-page').textContent = pageId === 'all' ? `${scene.pages.length} ${scene.pages.length === 1 ? 'page' : 'pages'} in this Paper` : pages[0]?.name || '';
 }
 function populateInspector() {
+  renderMotion();
   $('#multi-selection').hidden=selection.size<2;
   if(selection.size>1){form.hidden=true;$('#doc-view').hidden=true;$('#selection-count').textContent=`${selection.size} layers`;for(const button of $('#multi-selection').querySelectorAll('button'))button.disabled=!canEdit||(selection.size<3&&button.dataset.arrange?.startsWith('distribute'));return;}
   if (!selected) { form.hidden = true; $('#doc-view').hidden = false; populateDoc(); return; }
@@ -398,11 +401,13 @@ function applyHistory(action, reverse) {
     const page=scene.pages.find(p=>p.id===action.pageId),map=new Map(page.nodes.map(n=>[n.id,n]));
     for(const change of action.changes){const node=reverse?change.before:change.after;if(node)map.set(change.id,copy(node));else map.delete(change.id);}
     page.nodes=(reverse?action.orderBefore:action.orderAfter).map(id=>map.get(id));page.root=copy(reverse?action.rootBefore:action.rootAfter);page.next_id=reverse?action.nextBefore:action.nextAfter;
+    if(action.hasPreview){const value=reverse?action.previewBefore:action.previewAfter;if(value===undefined)delete scene.preview;else scene.preview=copy(value);}
     buildScene();selectMany((reverse?action.selectionBefore:action.selectionAfter).filter(key=>nodes.has(key)));return;
   }
   if (!action.kind) { applyNode(action.key, reverse ? action.before : action.after); populateInspector(); renderTree(); return; }
   if(action.kind==='nodes'){for(const change of action.changes)applyNode(change.key,reverse?change.before:change.after);populateInspector();renderTree();return;}
   if (action.kind === 'name') { scene.name = reverse ? action.before : action.after; showTitle(); return; }
+  if (action.kind === 'preview') { const value = reverse ? action.before : action.after; if (value === undefined) delete scene.preview; else scene.preview = copy(value); renderMotion(); return; }
   if (action.kind === 'pages') {
     const was = pageId, result = applyPageAction(scene, action, reverse); buildScene();
     // Undo and redo bring the page in question back into view (a rename keeps whatever is shown); a vanished page falls to its neighbour.
@@ -427,15 +432,18 @@ function selectedRoots(){const page=nodes.get(selected)?.page;return page?select
 // Structural edits keep only changed nodes and ordering in history, rather than a full Paper snapshot.
 function pageChange(page,change){
   if(!canEdit)return;
-  commitFields();stopTextEdit();const before=copy(page),selectionBefore=[...selection];
+  commitFields();stopTextEdit();const before=copy(page),selectionBefore=[...selection],previewBefore=scene.preview===undefined?undefined:copy(scene.preview);
   try{
-    const result=change();resolveConnections(page);const old=new Map(before.nodes.map(n=>[n.id,n])),now=new Map(page.nodes.map(n=>[n.id,n])),changes=[];
+    const result=change();resolveConnections(page);
+    // Motion that pointed at a layer that is gone goes with it, and comes back with it on undo.
+    if(scene.preview!==undefined){const pruned=prunePreview(scene.preview,scene);if(pruned!==scene.preview){if(pruned===undefined)delete scene.preview;else scene.preview=pruned;}}const old=new Map(before.nodes.map(n=>[n.id,n])),now=new Map(page.nodes.map(n=>[n.id,n])),changes=[];
     for(const id of new Set([...old.keys(),...now.keys()]))if(JSON.stringify(old.get(id))!==JSON.stringify(now.get(id)))changes.push({id,before:old.get(id)||null,after:copy(now.get(id)||null)});
     if(!changes.length&&JSON.stringify(before.root)===JSON.stringify(page.root))return;
     const selectionAfter=(result||[]).map(id=>keyOf(page,id));
     const action={kind:'page-edit',pageId:page.id,changes,orderBefore:before.nodes.map(n=>n.id),orderAfter:page.nodes.map(n=>n.id),rootBefore:before.root,rootAfter:copy(page.root),nextBefore:before.next_id,nextAfter:page.next_id,selectionBefore,selectionAfter};
+    if(JSON.stringify(previewBefore)!==JSON.stringify(scene.preview)){action.hasPreview=true;action.previewBefore=previewBefore;action.previewAfter=scene.preview===undefined?undefined:copy(scene.preview);}
     buildScene();selectMany(selectionAfter);pushHistory(action);return result;
-  }catch(error){Object.keys(page).forEach(key=>delete page[key]);Object.assign(page,before);buildScene();selectMany(selectionBefore);message(error.message);}
+  }catch(error){Object.keys(page).forEach(key=>delete page[key]);Object.assign(page,before);if(previewBefore===undefined)delete scene.preview;else scene.preview=previewBefore;buildScene();selectMany(selectionBefore);message(error.message);}
 }
 function duplicateSelection(offset=16){const entry=nodes.get(selected);if(!entry)return;return pageChange(entry.page,()=>pasteLayers(entry.page,captureLayers(entry.page,selectedRoots()),{samePage:true,offset}));}
 let layerClipboard=null,styleClipboard=null;
@@ -1078,6 +1086,7 @@ function nudge(key, [x, y], step) {
   const before = copy(node); moveLayer(node,x*step,y*step); paint(key); record(key, before, copy(node)); populateInspector();
 }
 function onKey(e) {
+  if (playOpen) return;
   if(e.target.closest?.('[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset'))return;
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (mod && ['=', '+', '-', '0'].includes(e.key)) { e.preventDefault(); if (!inspection) e.key === '0' ? zoomCommand('100') : zoomCenter(e.key === '-' ? 1 / 1.2 : 1.2); return; }
@@ -1119,7 +1128,7 @@ document.addEventListener('keydown', onKey);
 window.addEventListener('keydown', e => {
   if(e.key==='Escape'&&e.target.matches?.('#page-search,#layer-search')){e.preventDefault();e.stopImmediatePropagation();e.target.value='';e.target.id==='page-search'?renderPages():renderTree();return;}
   if (e.key === 'Escape') return; // One capture handler below owns cancellation in both modes.
-  if (!inspector || inspection || editable(e.target) || e.target.closest?.('dialog,#layer-tree,[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset')) return;
+  if (playOpen || !inspector || inspection || editable(e.target) || e.target.closest?.('dialog,#layer-tree,[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset')) return;
   if (e.target.closest?.('.paper-inspection-root') && !e.target.closest('#rail,.menu')) return;
   const mod = e.metaKey || e.ctrlKey;
   const design = (!mod && !e.altKey && e.key.length === 1) || (mod && /^[zyacdvxgbi]$/i.test(e.key)) || ['Escape', 'Delete', 'Backspace'].includes(e.key);
@@ -1218,7 +1227,7 @@ function deletePage(id) {
   if (wasShown) { if (validCamera(views[pageId])) { camera = { ...views[pageId] }; paintCamera(); saveView(); } else fitAll(); }
   message(`Deleted “${name}”. Undo brings it back.`);
 }
-const pruneForPage = () => null;
+const pruneForPage = pruneMotionForPage;
 function paintPageMenu(id) {
   const menu = $('#page-menu'), note = $('#page-menu-note'), rename = menu.querySelector('[data-page-action="rename"]'), del = menu.querySelector('[data-page-action="delete"]');
   const renameProblem = pageProblem(scene, 'rename', { canEdit, id }), deleteProblem = pageProblem(scene, 'delete', { canEdit, id });
@@ -1256,6 +1265,151 @@ $('#page-menu').addEventListener('click', e => {
     closeMenu(); deletePage(id);
   }
 });
+
+
+// ---- Play and Motion. Play is a separate, full-window preview with its own scroll container (play.js): opening and closing it never touches the camera,
+// the selection, the shown Page or an open draft, and nothing done while playing is written to the Paper. Motion is the inspector's small section for what the
+// selected layer does when played: it edits the Paper's preview model (preview-model.js) as ordinary, undoable changes.
+let player = null, playOpen = false, playReturn = null;
+const playButton = $('#play-toggle');
+function playablePreview() { const problem = previewProblem(scene.preview, scene); return { preview: problem ? null : scene.preview || null, problem }; }
+function playPage() { if (pageId !== 'all' && scene.pages.some(p => p.id === pageId)) return pageId; return nodes.get(selected)?.page.id || scene.pages[0].id; }
+// A DOM copy of one root as drawn now, with the editor's own state removed. Only each layer's id marker is kept, and Play replaces even that.
+function playClone(pid, rootId) {
+  const page = scene.pages.find(p => p.id === pid), board = page && boards.get(keyOf(page, rootId)); if (!board) return null;
+  const clone = board.content.cloneNode(true);
+  for (const element of [clone, ...clone.querySelectorAll('*')]) { element.classList?.remove('selected'); element.removeAttribute('title'); element.removeAttribute('contenteditable'); for (const attr of [...element.attributes]) if (attr.name.startsWith('data-') && attr.name !== 'data-node-key') element.removeAttribute(attr.name); }
+  return clone;
+}
+function openPlay() {
+  if (playOpen) return;
+  if (accessRevoked) { message('This invitation has ended, so Play is unavailable.'); return; }
+  commitFields(); stopTextEdit(); finishGesture(); closeMenu();
+  const { preview, problem } = playablePreview(); playReturn = document.activeElement;
+  playOpen = true; body.classList.add('paper-play'); playButton.setAttribute('aria-pressed', 'true');
+  player = createPlayer({ container: $('#play'), scene, preview, pageId: playPage(), cloneRoot: playClone, onClose: closePlay });
+  if (problem) message(`${problem} Playing without motion.`);
+  player.focus();
+}
+function closePlay() {
+  if (!playOpen) return;
+  player?.destroy(); player = null; playOpen = false; body.classList.remove('paper-play'); playButton.setAttribute('aria-pressed', 'false');
+  const back = playReturn && document.contains(playReturn) ? playReturn : playButton; playReturn = null; back.focus?.({ preventScroll: true });
+}
+// The same authorized revision arrives while Play is open: Play rebuilds from it, keeping Page, scroll place, still-valid states and time.
+function refreshPlay() { if (!player) return; const { preview, problem } = playablePreview(); player.update(scene, preview); if (problem) message(`${problem} Playing without motion.`); }
+playButton.addEventListener('click', () => { if (playOpen) closePlay(); else openPlay(); });
+onSurfaceDispose(() => { player?.destroy(); player = null; playOpen = false; });
+
+// One change to the preview model: checked against the Paper before it is kept, one undo step, saved like any other edit.
+function motionEdit(change) {
+  if (!canEdit) { message('This Paper is view-only, so motion can’t be changed.'); return false; }
+  commitFields();
+  const before = scene.preview === undefined ? undefined : copy(scene.preview), next = change(before === undefined ? null : copy(before)), problem = previewProblem(next, scene);
+  if (problem) { message(problem); renderMotion(); return false; }
+  if (JSON.stringify(next) === JSON.stringify(before)) return true;
+  if (next === undefined) delete scene.preview; else scene.preview = next;
+  pushHistory({ kind: 'preview', before, after: next === undefined ? undefined : copy(next) }); renderMotion(); return true;
+}
+const mk = (tag, props = {}, ...kids) => { const node = document.createElement(tag); for (const [key, value] of Object.entries(props)) { if (key === 'text') node.textContent = value; else if (key === 'class') node.className = value; else if (key.startsWith('aria-') || key === 'title' || key === 'type') node.setAttribute(key, value); else node[key] = value; } node.append(...kids); return node; };
+const MOTION_LABELS = { opacity: 'Opacity', x: 'Move X', y: 'Move Y', scale: 'Scale', rotate: 'Rotate °', blur: 'Blur', backdropBlur: 'Glass blur', color: 'Text colour', background: 'Background' };
+const TRIGGER_LABELS = { load: 'When played', 'scroll-in': 'On scroll into view', scroll: 'With scroll position', hover: 'On hover', focus: 'On focus', state: 'When a state is set' };
+function renderMotion() {
+  const box = $('#motion-section'), body_ = $('#motion-body'), entry = selection.size === 1 ? nodes.get(selected) : null;
+  box.hidden = !entry; if (!entry) return;
+  const pid = entry.page.id, nid = entry.node.id, preview = scene.preview, problem = previewProblem(preview, scene), mine = list => (list || []).filter(r => r.page === pid && r.node === nid);
+  if (problem) { body_.replaceChildren(mk('p', { class: 'note', text: `The preview model can’t be used: ${problem}. Fix it in paper.json (an agent can) to author motion here again.` })); return; }
+  const parts = [];
+  const animations = mine(preview?.animations), interactions = mine(preview?.interactions);
+  if (!canEdit) {
+    parts.push(mk('p', { class: 'note', text: animations.length || interactions.length ? `${animations.length} motion ${animations.length === 1 ? 'effect' : 'effects'} and ${interactions.length} click ${interactions.length === 1 ? 'action' : 'actions'} on this layer. Press Play to see them. This Paper is view-only.` : 'No motion on this layer.' }));
+    body_.replaceChildren(...parts); return;
+  }
+  const edit = (id, mutate) => motionEdit(prev => { const record = prev.animations.find(a => a.id === id); mutate(record); return prev; });
+  // Presets: ordinary records the person then tunes below.
+  const add = mk('select', { class: 'field', 'aria-label': 'Add motion to this layer' }, mk('option', { value: '', text: 'Add motion…' }), ...Object.entries(PRESETS).map(([key, p]) => mk('option', { value: key, text: p.label })));
+  add.addEventListener('change', () => { const key = add.value; add.value = ''; if (key) motionEdit(prev => withRecord(prev, 'animations', presetRecord(prev, pid, nid, key))); });
+  parts.push(add);
+  for (const record of animations) {
+    const card = mk('div', { class: 'motion-card', role: 'group', 'aria-label': `Motion ${record.id}` }), type = record.trigger.type;
+    const trigger = mk('select', { class: 'field', 'aria-label': 'When it moves' }, ...Object.entries(TRIGGER_LABELS).filter(([key]) => key !== 'state' || type === 'state').map(([key, label]) => mk('option', { value: key, text: label, selected: key === type })));
+    trigger.addEventListener('change', () => edit(record.id, r => { const next = trigger.value; r.trigger = next === 'scroll-in' ? { type: next, threshold: .25 } : next === 'scroll' ? { type: next, from: 0, to: 80 } : { type: next }; if (next !== 'load') delete r.iterations; if (next === 'scroll') { delete r.delayMs; delete r.direction; } }));
+    const num = (label, value, min, max, apply, disabled = false) => { const input = mk('input', { class: 'field', type: 'number', min: String(min), max: String(max), step: 'any', value: String(value), disabled }); input.setAttribute('aria-label', label); input.addEventListener('change', () => { const n = Number(input.value); if (input.value === '' || !Number.isFinite(n)) { renderMotion(); return; } edit(record.id, r => apply(r, n)); }); return mk('label', { text: label }, input); };
+    const easing = mk('select', { class: 'field', 'aria-label': 'Easing' }, ...EASINGS.map(e => mk('option', { value: e, text: e, selected: (record.easing || 'linear') === e })));
+    easing.addEventListener('change', () => edit(record.id, r => { r.easing = easing.value; }));
+    const remove = mk('button', { type: 'button', class: 'danger', text: 'Remove', 'aria-label': `Remove motion ${record.id}` }); remove.addEventListener('click', () => motionEdit(prev => withoutRecord(prev, 'animations', record.id)));
+    card.append(mk('div', { class: 'row' }, trigger, remove));
+    card.append(mk('div', { class: 'row' }, num('Duration ms', record.durationMs, 1, 60000, (r, n) => { r.durationMs = Math.round(n); }), num('Delay ms', record.delayMs || 0, 0, 60000, (r, n) => { if (n) r.delayMs = Math.round(n); else delete r.delayMs; }, type === 'scroll'), mk('label', { text: 'Easing' }, easing)));
+    if (type === 'scroll-in') card.append(mk('div', { class: 'row' }, num('Visible %', Math.round((record.trigger.threshold ?? .25) * 100), 0, 100, (r, n) => { r.trigger.threshold = n / 100; })));
+    if (type === 'scroll') card.append(mk('div', { class: 'row' }, num('From px', record.trigger.from, 0, 100000, (r, n) => { r.trigger.from = n; }), num('To px', record.trigger.to, 0, 100000, (r, n) => { r.trigger.to = n; })));
+    if (type === 'load') { const loop = mk('input', { type: 'checkbox', checked: record.iterations === 'infinite' }); loop.addEventListener('change', () => edit(record.id, r => { if (loop.checked) r.iterations = 'infinite'; else delete r.iterations; })); card.append(mk('label', { class: 'check' }, loop, document.createTextNode('Repeat forever'))); }
+    if (record.keyframes.length === 2) {
+      const row = mk('div', { class: 'row' });
+      for (const name of Object.keys(record.keyframes[0]).filter(key => key !== 'offset')) {
+        if (typeof record.keyframes[0][name] === 'string') { row.append(mk('label', { text: MOTION_LABELS[name] }, mk('span', { text: `${record.keyframes[0][name]} → ${record.keyframes[1][name]}` }))); continue; }
+        const [lo, hi] = PROPERTIES[name], from = num(`${MOTION_LABELS[name]} from`, record.keyframes[0][name], lo, hi, (r, n) => { r.keyframes[0][name] = n; }), to = num(`${MOTION_LABELS[name]} to`, record.keyframes[1][name], lo, hi, (r, n) => { r.keyframes[1][name] = n; });
+        row.append(from, to);
+      }
+      card.append(row);
+    } else card.append(mk('p', { class: 'note', text: `${record.keyframes.length} keyframes. Edit them in paper.json (an agent can).` }));
+    parts.push(card);
+  }
+  // Click: what pressing this layer does. State changes create their state the first time they are used.
+  const click = mk('select', { class: 'field', 'aria-label': 'Add a click action' }, mk('option', { value: '', text: 'Add click action…' }), mk('option', { value: 'navigate', text: 'Go to a Page', disabled: scene.pages.length < 2 }), mk('option', { value: 'set-state', text: 'Set a state' }), mk('option', { value: 'back', text: 'Go back' }));
+  click.addEventListener('change', () => {
+    const kind = click.value; click.value = ''; if (!kind) return;
+    motionEdit(prev => {
+      let next = prev; const action = kind === 'navigate' ? { type: 'navigate', page: scene.pages.find(p => p.id !== pid)?.id } : kind === 'back' ? { type: 'back' } : { type: 'set-state', state: 'state', value: 'on' };
+      if (kind === 'set-state') next = ensureState(next, 'state', 'on');
+      return withRecord(next, 'interactions', { id: uniqueId(next?.interactions, 'click'), page: pid, node: nid, on: 'click', actions: [action] });
+    });
+  });
+  parts.push(click);
+  for (const record of interactions) {
+    const card = mk('div', { class: 'motion-card', role: 'group', 'aria-label': `Click action ${record.id}` }), action = record.actions[0];
+    const edit2 = mutate => motionEdit(prev => { const r = prev.interactions.find(i => i.id === record.id); mutate(r, prev); return prev; });
+    const pageSel = mk('select', { class: 'field', 'aria-label': 'Go to Page' }, ...scene.pages.map(p => mk('option', { value: p.id, text: p.name, selected: p.id === action.page })));
+    pageSel.addEventListener('change', () => edit2(r => { r.actions[0] = { type: 'navigate', page: pageSel.value }; }));
+    const remove = mk('button', { type: 'button', class: 'danger', text: 'Remove', 'aria-label': `Remove click action ${record.id}` }); remove.addEventListener('click', () => motionEdit(prev => withoutRecord(prev, 'interactions', record.id)));
+    if (record.actions.length !== 1 || !['navigate', 'set-state', 'back'].includes(action.type)) { card.append(mk('div', { class: 'row' }, mk('span', { class: 'title', text: `On click: ${record.actions.map(a => a.type).join(', ')}` }), remove), mk('p', { class: 'note', text: 'Edit this in paper.json (an agent can).' })); parts.push(card); continue; }
+    card.append(mk('div', { class: 'row' }, mk('span', { class: 'title', text: 'On click' }), remove));
+    if (action.type === 'navigate') card.append(mk('div', { class: 'row' }, mk('label', { text: 'Go to Page' }, pageSel)));
+    else if (action.type === 'back') card.append(mk('p', { class: 'note', text: 'Goes back to the Page it came from.' }));
+    else {
+      const stateInput = mk('input', { class: 'field', type: 'text', maxLength: 40, value: action.state }), valueInput = mk('input', { class: 'field', type: 'text', maxLength: 40, value: action.value });
+      stateInput.setAttribute('aria-label', 'State'); valueInput.setAttribute('aria-label', 'Set to');
+      const apply = () => { const name = stateInput.value.trim(), value = valueInput.value.trim(); if (!/^[a-zA-Z0-9_-]{1,40}$/.test(name) || !value) { message('A state needs a name of letters, digits, - or _, and a value.'); renderMotion(); return; } motionEdit(prev => { const next = ensureState(prev, name, value), r = next.interactions.find(i => i.id === record.id); r.actions[0] = { type: 'set-state', state: name, value }; return next; }); };
+      stateInput.addEventListener('change', apply); valueInput.addEventListener('change', apply);
+      card.append(mk('div', { class: 'row' }, mk('label', { text: 'State' }, stateInput), mk('label', { text: 'Set to' }, valueInput)));
+    }
+    parts.push(card);
+  }
+  // Pinned while scrolling: only a layer directly inside a top-level artboard.
+  const parent = entry.node.parent == null ? null : entries.get(pid).get(entry.node.parent);
+  if (parent && entry.page.root.includes(parent.id) && isArtboard(parent)) {
+    const pinned = mine(preview?.sticky)[0], pin = mk('input', { type: 'checkbox', checked: !!pinned });
+    pin.addEventListener('change', () => motionEdit(prev => pin.checked ? withRecord(prev, 'sticky', { id: uniqueId(prev?.sticky, 'pin'), page: pid, node: nid }) : withoutRecord(prev, 'sticky', pinned.id)));
+    parts.push(mk('label', { class: 'check' }, pin, document.createTextNode('Pin to the top while the page scrolls')));
+  }
+  // A top-level artboard can be the authored version of its Page for a range of window widths.
+  if (entry.page.root.includes(nid) && isArtboard(entry.node)) {
+    const variant = (preview?.variants || []).find(v => v.page === pid && v.root === nid), use = mk('input', { type: 'checkbox', checked: !!variant });
+    use.addEventListener('change', () => motionEdit(prev => use.checked ? withRecord(prev, 'variants', { id: uniqueId(prev?.variants, 'variant'), page: pid, root: nid, label: (entry.node.name || 'Artboard').slice(0, 40) }) : withoutRecord(prev, 'variants', variant.id)));
+    parts.push(mk('label', { class: 'check' }, use, document.createTextNode('Use as a preview variant of this Page')));
+    if (variant) {
+      const range = (label, key) => { const input = mk('input', { class: 'field', type: 'number', min: '0', max: '10000', step: '1', placeholder: key === 'minWidth' ? '0' : 'any', value: variant[key] ?? '' }); input.setAttribute('aria-label', label); input.addEventListener('change', () => motionEdit(prev => { const r = prev.variants.find(v => v.id === variant.id); if (input.value === '') delete r[key]; else r[key] = Math.round(Number(input.value)); return prev; })); return mk('label', { text: label }, input); };
+      parts.push(mk('div', { class: 'motion-card' }, mk('div', { class: 'row' }, range('Shown from px wide', 'minWidth'), range('up to px wide', 'maxWidth')), mk('p', { class: 'note', text: 'Play picks the variant for the window width. A width outside every range shows the nearest one, scaled to fit.' })));
+    }
+  }
+  body_.replaceChildren(...parts);
+}
+// A state used by a click action: defined the first time, with a resting value so Play has something to start from.
+function ensureState(preview, name, value) {
+  const states = preview?.states || [], found = states.find(s => s.id === name);
+  if (found) return found.values.includes(value) || found.values.length >= 8 ? preview : withRecord(preview, 'states', { ...found, values: [...found.values, value] });
+  const rest = value === 'default' ? 'other' : 'default';
+  return withRecord(preview, 'states', { id: name, values: [rest, value], initial: rest });
+}
 
 // Panels: wide surfaces dock both; below 1024 px one panel at a time. The artwork keeps its place on screen
 // and its zoom when a panel opens or closes: screenX = stage.left + camera.x + worldX * z, so a moved stage
@@ -1789,7 +1943,7 @@ const inspectionHost = {
 // keys that would start an Annotate drawing tool (removed from the toolbar) are not passed to Inspection.
 const ANNOTATE_KEYS = new Set(['2', 's', 'd', 'n', 't']);
 window.addEventListener('keydown', e => {
-  if (!inspector || e.defaultPrevented || e.target.closest?.('[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset,#library-panel,#page-search,#layer-search')) return;
+  if (playOpen || !inspector || e.defaultPrevented || e.target.closest?.('[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset,#library-panel,#page-search,#layer-search')) return;
   if (e.key === 'Escape' && $('#sharing-dialog').open) {
     e.preventDefault(); e.stopImmediatePropagation(); $('#sharing-dialog').close();
     if (inspectionHost.stableMode === 'edit') setTool('select'); else inspectionHost.api?.resetInspect();
@@ -1859,7 +2013,7 @@ async function remotePaper(force = false,silent=false) {
     const keep = [...selection];
     const previous=scene,beforeRevision=revision;scene = next; revision = loaded.revision; lastSaved = JSON.stringify(scene); history.length = 0; future.length = 0;
     if (pageId !== 'all' && !scene.pages.some(p => p.id === pageId)) pageId = scene.pages[0].id;
-    selected = null; selection.clear();buildScene(); renderPages(); showTitle(); updateHistory();
+    selected = null; selection.clear();buildScene(); renderPages(); showTitle(); updateHistory(); refreshPlay();
     selectMany(keep.filter(key=>nodes.has(key)));
     designText = null; renderDesign(); paintCamera();if(loaded.presence)presenceUI?.receive(loaded.presence,presenceToken);else presenceUI?.receive({paperId,peers:[]},presenceToken);presenceUI?.documentChanged(previous,next,{beforeRevision,revision,animate:!force});return true;
   } catch (error) { if(!silent)message(`This Paper changed elsewhere, but couldn’t be reloaded (${error.message}).`);return false; }
@@ -1886,6 +2040,7 @@ async function remoteFeedback(silent=false) {
 function listenForChanges() {
   let events,timer,stopped=false,guideRevision,failures=0,polling=false;
   function revoked(reason){
+    closePlay(); playButton.disabled = true; playButton.title = 'This invitation has ended, so Play is unavailable.';
     // Only a reason the server gave is named; anything else (an older server, a dropped stream) is a neutral "ended".
     const known=knownEnd(reason);
     if(accessEndedReason){if(known&&accessEndedReason==='ended'){accessEndedReason=known;updateSaveState();}return;}

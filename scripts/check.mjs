@@ -114,6 +114,12 @@ async function checkManifests() {
   for (const file of ['.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json']) await readJson(file);
 }
 
+// 6. The collaboration method, the motion reference and the preview-model JSON Schema are identical wherever they ship (four skills and the public runtime).
+async function checkDocCopies() {
+  const {syncDocs} = await import(pathToFileURL(at('scripts/sync-docs.mjs')).href);
+  for (const name of await syncDocs()) fail(`${name} differs from its source; run: node scripts/sync-docs.mjs --write`);
+}
+
 const args = process.argv.slice(2), tagAt = args.indexOf('--tag');
 if (args.some((arg, i) => arg !== '--tag' && i !== tagAt + 1)) { console.error('Usage: node scripts/check.mjs [--tag v1.2.3]'); process.exit(2); }
 const tag = tagAt === -1 ? undefined : args[tagAt + 1];
@@ -125,6 +131,7 @@ await checkVersions(VERSION, tag);
 await checkEditorFiles(EDITOR_FILES);
 await checkNotices();
 await checkManifests();
+await checkDocCopies();
 
 if (problems.length) {
   console.error(`Check failed (${problems.length}):\n${problems.map(p => `  - ${p}`).join('\n')}`);

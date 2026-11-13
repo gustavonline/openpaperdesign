@@ -74,7 +74,7 @@ export async function exportBundle(library,id) {
   const folder=await library.folder(id);
   return library.locked(folder,async()=>{
     const raw=await readFile(folder,'paper.json'); let paper;
-    try { paper=portable(validatePaper(JSON.parse(raw))); } catch { reject('saved Paper is invalid'); }
+    try { paper=portable(validatePaper(JSON.parse(raw), { read: true })); } catch { reject('saved Paper is invalid'); }
     const assets=usedAssets(paper), entries=new Map([['paper.json',Buffer.from(JSON.stringify(paper))]]);
     const assetDir=await fs.lstat(path.join(folder,'assets')).catch(e=>{if(e.code==='ENOENT'&&!assets.size)return null;throw e;});
     check(!assetDir || assetDir.isDirectory()&&!assetDir.isSymbolicLink(),'linked asset folder');

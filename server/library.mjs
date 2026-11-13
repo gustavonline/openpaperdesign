@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import os from 'node:os';
 import { connectionErrors, resolveConnections, isArtboard, PAPER_FORMAT, isPaperFormat } from '../runtime/diagram-model.js';
+import { previewProblem } from '../runtime/preview-model.js';
 
 export const MAX_PAPER_BYTES = 20 * 1024 * 1024;
 export const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -17,7 +18,9 @@ export class PaperError extends Error {
 }
 const fail = (condition, message) => { if (!condition) throw new PaperError(400, message); };
 const finite = value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1e6;
-export function validatePaper(paper) {
+// `read` is for Papers already on disk or arriving from a peer: a preview model in a NEWER version is accepted as opaque there, so such a Paper still
+// opens and lists. Saving, importing and creating never accept it (nothing newer is silently dropped or rewritten).
+export function validatePaper(paper, { read = false } = {}) {
   fail(paper && isPaperFormat(paper.format) && paper.version === 1, 'Unsupported Paper format');
   fail(typeof paper.name === 'string' && paper.name.trim().length > 0 && paper.name.length <= 80, 'Paper name needs 1–80 characters');
   fail(Array.isArray(paper.pages) && paper.pages.length >= 1 && paper.pages.length <= 100, 'Invalid Pages');
@@ -61,6 +64,7 @@ export function validatePaper(paper) {
     }
     fail(new Set(paper.symbols.map(s=>s.id)).size === paper.symbols.length, 'Duplicate Scratchpad identity');
   }
+  const preview = previewProblem(paper.preview, paper, { tolerateNewer: read }); fail(!preview, preview);
   return paper;
 }
 export function blankPaper(name = 'Untitled Paper', width = 1440, height = 900) {
@@ -115,7 +119,7 @@ export class PaperLibrary {
         await this.folder(item.name); const st = await fs.stat(file, {bigint:true}), key = `${st.mtimeNs}:${st.size}:${st.ino}`;
         let entry = this.cache.get(item.name);
         if (!entry || entry.key !== key) {
-          const paper = (await this.read(item.name)).paper; validatePaper(paper);
+          const paper = (await this.read(item.name)).paper; validatePaper(paper, { read: true });
           const frames = paper.pages.flatMap(p => p.nodes.filter(n => p.root.includes(n.id) && isArtboard(n))), first = frames[0]?.rect;
           entry = {key, value:{id:item.name,name:paper.name,pages:paper.pages.length,artboards:frames.length,modified:Number(st.mtimeMs),href:`./?paper=${encodeURIComponent(item.name)}`,size:first ? [first.w,first.h] : null,legacy:false,hasArtwork:paper.pages.some(p=>p.nodes.some(n=>n.type!=='frame'))}};
           const thumb = path.join(folder,'assets','thumbnail.png'); if (await noLink(thumb,true)) entry.value.thumbnail = `Paper/${item.name}/assets/thumbnail.png`;

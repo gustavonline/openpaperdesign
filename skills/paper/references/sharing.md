@@ -4,23 +4,25 @@ Sharing is optional. Owner files, the browser and agents use the same revision-c
 
 ## Owner flow
 
-Share → Share this Paper → **Access** (Can view / Can edit) → **Expires** (In 1 hour, In 1 day, In 7 days, Never) → **Code protection** (on by default) → Internet / Local network / This computer only → Create invitation. The dialog stays open and shows the invitation with **Copy invitation** (a short plain message containing the link and the code), **Copy link**, **Copy code**, Open with agent and **Revoke**. Local network opens on computers and phones connected to your Wi-Fi or local network. Internet creates a temporary Cloudflare HTTPS address. This computer only opens the scoped listener on loopback, for another browser profile on this machine. Create another invitation for independent access or a different permission. Revoking one invitation ends only that invitation; Stop sharing this Paper ends all its invitations. Copying or retrying preserves the invitation. Clean views leave on revocation or expiry; dirty views freeze with a downloadable draft and say whether the invitation expired or was stopped (a save refused under the writer lock reports the same `reason`; an unknown reason reads "This invitation ended.").
+Share → Share this Paper → **Access** (Can view / Can edit) → **Expires** (In 1 hour, In 1 day, In 7 days, Never) → **Code protection** (on by default) → Internet / Local network / This computer only → Create invitation. The dialog stays open and shows the invitation: the link in its own block and the code in a block below it, each with a Copy icon at its top right, one blue **Copy invitation** (a short plain message containing the link and the code) and one red **Stop sharing**. Local network opens on computers and phones connected to your Wi-Fi or local network. Internet creates a temporary Cloudflare HTTPS address. This computer only opens the scoped listener on loopback, for another browser profile on this machine. Create another invitation for independent access or a different permission. **Stop sharing** on an invitation ends only that invitation; the other invitations, the listener and the tunnel they use stay. (`paper_home` `action:"stop"` and the HTTP DELETE without an `invitationId` still end every invitation of a Paper.) Copying or retrying preserves the invitation. Clean views leave on revocation or expiry; dirty views freeze with a downloadable draft and say whether the invitation expired or was stopped (a save refused under the writer lock reports the same `reason`; an unknown reason reads "This invitation ended.").
 
-**Copy invitation** puts this plain text (no Markdown, no HTML) on the clipboard. It is Danish, and the recipient needs only a browser: the link and the code each sit alone on a line, so both can be clicked or copied from an email or chat. `paper_join` and the join page both accept the whole message.
+**Copy invitation** puts this plain text (no Markdown, no HTML) on the clipboard. It is English, and the recipient needs only a browser: the link and the code each sit alone on a line, so both can be clicked or copied from an email or chat. `paper_join` and the browser read exactly this message.
 
 ```
-Se mit Paper:
+See my Paper:
 
 https://…/join#<key>
 
-Adgangskode:
+Access code:
 K7QM-4P2X
 
-Åbn linket i din browser, og indtast koden. Du kan redigere. Du behøver intet plugin.
-Linket udløber lørdag den 14. november 2026 kl. 14.30 CET.
+Open the link in your browser and enter the code. You can edit the Paper. You do not need a plugin.
+This link expires Saturday, 14 November 2026 at 14:30 CET.
 ```
 
-An invitation without a code omits the whole `Adgangskode:` block and the "indtast koden" clause. A view invitation reads "Du kan se Paper, men ikke redigere." A finite end gives the weekday, date, time and the owner's time zone. **Never** reads "Linket har ingen udløbstid, men virker kun, mens min computer er tændt og online og kører Paper. Det er ikke permanent." Copy link and Copy code still copy only the link and only the code. Reading a message: the code is taken from the `Adgangskode:` (or the older English `Code:`) label, on the same or the next line; only without a label is a lone code-shaped word with a digit accepted, so words such as "december" or "Derefter" are never read as a code.
+An invitation without a code omits the whole `Access code:` block and the "and enter the code" clause. A view invitation reads "You can view the Paper but not edit it." A finite end gives the weekday, date, time and the owner's time zone. **Never** reads "This link has no end time, but it only works while my computer is on, online and running Paper. It is not permanent." Invitations written in Danish by earlier versions (`Se mit Paper:`, `Adgangskode:`) are still read by the browser and `paper_join`.
+
+In the owner's Share dialog the link and the code each sit in their own block with a Copy icon at its top right; one blue **Copy invitation** (helper text “Link + code”) copies the whole message; one red **Stop sharing** ends only that invitation. An invitation to share over the Internet shows **Starting sharing link…** at once and becomes copyable only when it really works; Cancel while it starts, a timeout or a failed start leaves no invitation, listener or tunnel behind, and a failed start offers Retry or Dismiss. Nothing is ever copied automatically; if the clipboard is blocked, a read-only selected field holds the text. The owner dialog has no “Open with agent” action: an agent given an invitation finds the public `/agent.md` on its own, or the person pastes the invitation.
 
 Send the code separately from the link for extra safety.
 

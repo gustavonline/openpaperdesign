@@ -45,3 +45,7 @@ Verify that each retained claim comes from the brief or is marked as a proposal/
 ## Method sources
 
 Adapted for Paper from Impeccable's interface-copy guidance, with artifact selection, owner wording and native-layer review specific to this plugin. See [source notes](references/sources.md) for the pinned candidate, comparison and attribution; they are maintenance context, not extra skills to load on every design.
+
+## Working with others
+
+When more than one person or agent works on a Paper, or you are asked for advice rather than edits, follow the one shared method in [collaboration.md](references/collaboration.md) (method 1; the identical text ships with the Paper, Design, Diagram and Copy skills and is served publicly at `/collaboration.md`). It covers consultation, pair design, bounded fan-out, sequential takeover and implementation handoff; reading the Paper, `DESIGN.md` and feedback first; agreeing layer ids and roles; small revision-checked saves; independent visual review; and, after a 409, re-reading and re-applying your own change. `DESIGN.md` is the owner's: propose changes as feedback. The editable Paper, the Play preview and generated implementation code are three different things. Use the host, models and approvals your user already has.
