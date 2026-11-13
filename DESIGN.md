@@ -100,7 +100,7 @@ The file is the stored image named by this Paper's own asset map, fetched again 
 
 **Live and shared.** Roles can play; only editors author, in the inspector's small **Motion** section (presets, trigger, duration, delay, easing, from/to values, click actions, pin, variants) or through `paper_save`. A new revision rebuilds Play from it, keeping the Page, scroll place, still-valid state and time, and says so. When an invitation ends or expires Play closes at once and cannot be reopened, and its image references are released.
 
-**Static exports** (PNG, JPEG, SVG, HTML) show the editable layers as they are in Edit: motion is never applied or captured and nothing Play does reaches the Paper. A paused frame cannot be saved from Play in this version, and there is no standalone live-HTML export; the preview model rides inside `.paper.zip`.
+**Static exports** (PNG and JPEG images, the HTML file and the Paper preview page) show the editable layers as they are in Edit: motion is never applied or captured and nothing Play does reaches the Paper. A paused frame cannot be saved from Play in this version, and there is no standalone live-HTML export; the preview model rides inside `.paper.zip`.
 
 ## Working together (preview 28)
 

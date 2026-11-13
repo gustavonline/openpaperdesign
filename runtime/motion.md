@@ -65,7 +65,7 @@ A new revision of the Paper (a collaborator's save) rebuilds Play from it, keepi
 
 ## Exports and handoff
 
-PNG, JPEG, SVG and HTML exports draw the **editable layers as they are in Edit**; motion is never applied or captured, and nothing Play does leaks into the Paper. The `.paper.zip` keeps the preview model with the Paper. The player is not exported: this version has no standalone live-HTML export, so generated implementation code remains a separate handoff from the authoritative Paper (see `collaboration.md`).
+The PNG and JPEG image exports, the HTML file export and the Paper preview (`.html`, a static page viewer) draw the **editable layers as they are in Edit**; motion is never applied or captured, and nothing Play does leaks into the Paper. The `.paper.zip` keeps the preview model with the Paper. The player is not exported: this version has no standalone live-HTML export, so generated implementation code remains a separate handoff from the authoritative Paper (see `collaboration.md`).
 
 ## Older Papers and newer versions
 

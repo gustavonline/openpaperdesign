@@ -29,7 +29,7 @@
   },
   "plugin": {
     "requiredVersion": "0.7.0-preview.28",
-    "versionRule": "paper_join refuses a plugin whose version differs from the owner's; this server runs the version above.",
+    "versionRule": "paper_join refuses a plugin whose version differs from the owner's; this server runs the version above. A published release can be older than that: tell your user instead of working around the refusal.",
     "detection": "Only your own host's tool and skill inventory can show whether paper_join is available (deferred tools may need normal discovery first). A web page cannot tell, and this page does not claim to.",
     "install": {
       "source": "https://github.com/gustavonline/openpaperdesign#install",
