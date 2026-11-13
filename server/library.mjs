@@ -51,6 +51,8 @@ export function validatePaper(paper) {
     const errors = connectionErrors(page); fail(!errors.length, errors[0]);
   }
   fail(paper.assets && typeof paper.assets === 'object' && !Array.isArray(paper.assets) && Object.values(paper.assets).every(asset => typeof asset === 'string' && /^assets\/[a-zA-Z0-9_.-]+$/.test(asset)), 'Invalid asset references');
+  // Optional: the name each imported image had, by asset key, so Save and Download can offer it. Old Papers have none and fall back to the stored name.
+  fail(paper.assetNames === undefined || (paper.assetNames && typeof paper.assetNames === 'object' && !Array.isArray(paper.assetNames) && Object.keys(paper.assetNames).length <= 2000 && Object.values(paper.assetNames).every(name => typeof name === 'string' && name.length > 0 && name.length <= 120 && !/[\u0000-\u001f\u007f\\/]/.test(name))), 'Invalid asset names');
   if (paper.symbols !== undefined) {
     fail(Array.isArray(paper.symbols) && paper.symbols.length <= 100, 'Scratchpad holds at most 100 symbols');
     for (const symbol of paper.symbols) {

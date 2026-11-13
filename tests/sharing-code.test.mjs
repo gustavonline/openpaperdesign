@@ -481,3 +481,27 @@ test('the public agent bootstrap is discoverable from /join, versioned, matches 
   // Revoking the invitation does not change what is public, and the grant behind it stays gone.
   await r.sharing.stop(r.made.id,edit.id);assert.deepEqual((await get('/agent.json')).bytes,json.bytes);assert.equal((await fetch(edit.mcpUrl,{method:'POST',headers:{Authorization:'Bearer '+edit.token,'X-Paper-Code':edit.code,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})})).status,401);
 });
+
+test('dropped images are stored as their original bytes by edit guests only, with a validated remembered name that Save and Download offer', async t => {
+  const r = await rig(t), edit = await r.grant('edit', {protect: true}), view = await r.grant('view', {protect: true});
+  const editor = r.browser(), viewer = r.browser(); await editor.join(edit, edit.code); await viewer.join(view, view.code);
+  const upload = (who, g, bytes, type) => who.request(g.base, `/api/assets?paper=${r.made.id}&invite=${g.id}`, {method: 'POST', headers: {'Content-Type': type}, body: bytes});
+  const answer = await upload(editor, edit, PNG_BYTES, 'image/png'); assert.equal(answer.status, 201); const stored = await answer.json();
+  assert.match(stored.path, /^assets\/[a-f0-9]{64}\.png$/); assert.deepEqual(await fs.readFile(path.join(r.made.path, stored.path)), PNG_BYTES, 'the original bytes, not a re-encoding');
+  for (const [bytes, type, ext] of [[JPEG_BYTES, 'image/jpeg', 'jpg'], [WEBP_BYTES, 'image/webp', 'webp']]) { const made = await (await upload(editor, edit, bytes, type)).json(); assert.ok(made.path.endsWith('.' + ext)); assert.deepEqual(await fs.readFile(path.join(r.made.path, made.path)), bytes); }
+  assert.equal((await upload(editor, edit, Buffer.from('GIF89a......'), 'image/gif')).status, 400, 'an unsupported file is refused by the server too');
+  assert.equal((await upload(viewer, view, PNG_BYTES, 'image/png')).status, 403, 'a view-only guest cannot import');
+  // The Paper remembers the name; the server accepts the field only in its valid shape.
+  const current = await r.library.read(r.made.id), paper = current.paper, page = paper.pages[0];
+  paper.assets.img = stored.path; paper.assetNames = {img: 'Hero shot.png'}; page.nodes.push({id: 2, parent: 1, type: 'rect', name: 'Hero shot', rect: {x: 10, y: 10, w: 100, h: 80}, style: {fills: [{type: 'image', asset: 'img', mode: 'fit'}], opacity: 1}, visible: true, locked: false}); page.nodes[0].children.push(2); page.next_id = 3;
+  const saved = await r.library.save(r.made.id, Buffer.from(JSON.stringify(paper)), current.revision); assert.ok(saved.saved);
+  for (const bad of [[], 'x', {img: 42}, {img: ''}, {img: 'a/b.png'}, {img: 'a\\b.png'}, {img: 'x'.repeat(121)}, {img: 'bad\u0000.png'}]) { const next = await r.library.read(r.made.id); next.paper.assetNames = bad; await assert.rejects(r.library.save(r.made.id, Buffer.from(JSON.stringify(next.paper)), next.revision), e => e.status === 400 && /asset names/i.test(e.message), JSON.stringify(bad)); }
+  const reread = await r.library.read(r.made.id); assert.deepEqual(reread.paper.assetNames, {img: 'Hero shot.png'}, 'a refused save changed nothing');
+  const node = reread.paper.pages[0].nodes.find(n => n.id === 2), fetchFor = (who, g) => (url, options) => who.request(g.base, url, {headers: options?.cache === 'no-store' ? {'Cache-Control': 'no-store'} : {}});
+  for (const [who, g] of [[editor, edit], [viewer, view]]) { const got = await fetchOriginal({paperId: r.made.id, scene: reread.paper, node, fetchImpl: fetchFor(who, g)}); assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()), PNG_BYTES); assert.equal(got.saveAs, 'Hero shot.png'); assert.equal(got.name, stored.path.slice(7)); }
+  // After revocation neither the import nor a fresh original is available.
+  await r.sharing.stop(r.made.id, edit.id); assert.equal((await upload(editor, edit, PNG_BYTES, 'image/png')).status, 401);
+  await assert.rejects(fetchOriginal({paperId: r.made.id, scene: reread.paper, node, fetchImpl: fetchFor(editor, edit)}), e => e.reason === 'access-ended');
+  // An older Paper without names is untouched: the stored name is offered.
+  const oldScene = {assets: reread.paper.assets}; assert.equal((await fetchOriginal({paperId: r.made.id, scene: oldScene, node, fetchImpl: fetchFor(viewer, view)})).saveAs, stored.path.slice(7));
+});

@@ -185,7 +185,7 @@ export async function fetchOriginal({paperId, scene, node, fetchImpl, signal}) {
   if (type !== found.mime) throw new OriginalError('wrong-file', WORDS['wrong-file']);
   const bytes = new Uint8Array(await (await response.blob()).arrayBuffer());
   if (!bytes.length || imageKind(bytes) !== found.mime) throw new OriginalError('wrong-file', WORDS['wrong-file']);
-  return {blob: new Blob([bytes], {type: found.mime}), name: found.name, mime: found.mime};
+  return {blob: new Blob([bytes], {type: found.mime}), name: found.name, mime: found.mime, saveAs: saveNameFor(scene, node, found.name, found.mime)};
 }
 
 // What the menu was opened on. Choosing the command checks that this layer still shows the same stored original: a live refresh can
@@ -204,9 +204,10 @@ export function layerUnderPointer(stack, {inOverlay, inStage}) {
 }
 // Which edit-menu items show and which are disabled. The full menu hides Download original unless an image is chosen; the image-only
 // menu (Inspect's overlay and the Layers tree, where the editing commands do not apply) shows that one item alone.
-const VIEW_ALLOWED = ['copy', 'copy-style', 'link', 'download-original'];
-export const editMenuState = (items, {canEdit, original, only}) => items.map(({edit}) => ({
-  hidden: edit === 'download-original' ? !original : !!only,
+const VIEW_ALLOWED = ['copy', 'copy-style', 'link', 'download-original', 'copy-image', 'save-image'];
+// Copy image and Save image… are offered only where the browser can really do them (a clipboard that takes images; a save-location chooser).
+export const editMenuState = (items, {canEdit, original, only, copyOk = true, saveOk = true}) => items.map(({edit}) => ({
+  hidden: edit === 'download-original' ? !original : edit === 'copy-image' ? !(original && copyOk) : edit === 'save-image' ? !(original && saveOk) : !!only,
   disabled: !!edit && !canEdit && !VIEW_ALLOWED.includes(edit),
 }));
 
@@ -227,3 +228,93 @@ export const emptyCamera = area => ({x: area.left + 24, y: area.top + 24, z: 1})
 // app reaches that app's own Home, never the sender's. A recipient in a plain browser has no Home of their own: the sender's server is not
 // theirs, so there is none to offer (no guess about whether a plugin exists).
 export const homeRoute = ({shared, inPaperSurface}) => (!shared || inPaperSurface) ? 'own' : 'none';
+
+// ---- Images (#18): import by drop, copy image, save image. Every action starts from the stored original and reauthorizes through the
+// caller's own scoped fetch; the picture on screen (or its cached copy) is never the source.
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024, MAX_IMAGE_PIXELS = 16e6, MAX_DROPPED_FILES = 12;
+const EXTENSIONS = {'image/png': ['png'], 'image/jpeg': ['jpg', 'jpeg'], 'image/webp': ['webp']};
+// A file name that is safe to show and to save under: no path, control characters or leading dot, at most 120 characters, and an extension
+// that matches the real image type (the type comes from the bytes, so a mislabelled file keeps an honest name). '' when nothing usable.
+export function safeAssetName(name, mime) {
+  if (typeof name !== 'string' || !EXTENSIONS[mime]) return '';
+  const leaf = name.normalize('NFC').split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '').trim().replace(/^\.+/, '');
+  const dot = leaf.lastIndexOf('.'), base = (dot > 0 ? leaf.slice(0, dot) : leaf).trim().slice(0, 100), ext = dot > 0 ? leaf.slice(dot + 1).toLowerCase() : '';
+  if (!base || !/[^\s.]/.test(base)) return '';
+  return `${base}.${EXTENSIONS[mime].includes(ext) ? ext : EXTENSIONS[mime][0]}`;
+}
+// The name offered when saving: the validated name the Paper remembers for this asset, else the stored file's own name (older Papers).
+export function saveNameFor(scene, node, stored, mime) {
+  const fill = imageFillOf(node), remembered = fill && Object.hasOwn(scene?.assetNames || {}, fill.asset) ? scene.assetNames[fill.asset] : null;
+  return typeof remembered === 'string' && remembered && safeAssetName(remembered, mime) === remembered ? remembered : stored;
+}
+// The size of a dropped image in world units: its own size, brought down so that on screen it never fills more than ~60% of the canvas,
+// whatever the camera zoom. The same image therefore lands at a sensible size when zoomed far in or out.
+export function imageSize(natural, view) {
+  const ratio = Math.min(1, (0.6 * view.w / view.z) / natural.w, (0.6 * view.h / view.z) / natural.h);
+  return {w: Math.max(16, Math.round(natural.w * ratio)), h: Math.max(16, Math.round(natural.h * ratio))};
+}
+const WHY = {
+  unsupported: name => `${name} is not a PNG, JPEG or WebP image`, large: name => `${name} is larger than 5 MB`, pixels: name => `${name} is larger than 16 megapixels`,
+  corrupt: name => `${name} could not be opened as an image`, upload: (name, detail) => `${name} could not be saved${detail ? ` (${detail})` : ''}`, changed: name => `${name} was not added because the Paper changed`,
+  empty: name => `${name} is empty`,
+};
+// Several dropped files, one at a time and independently: a bad file never stops the good ones or alters what is already there. Order follows
+// the drop; each good file is uploaded as its ORIGINAL bytes through the managed asset route and placed as one editable image layer.
+//   deps: read(file) -> ArrayBuffer, measure(blob) -> {w, h} (rejects when undecodable), upload(bytes, mime) -> {asset, path},
+//         place(item, index) -> void (adds the layer), alive() -> boolean (the Paper is still the one being edited)
+export async function importImageFiles(files, deps) {
+  const added = [], failed = [], list = [...files];
+  for (const file of list.slice(MAX_DROPPED_FILES)) failed.push({name: file.name || 'A file', reason: 'More than 12 files were dropped; the rest were not added'});
+  for (const file of list.slice(0, MAX_DROPPED_FILES)) {
+    const name = String(file.name || 'Image').slice(0, 80), fail = (reason, detail) => failed.push({name, reason: WHY[reason](name, detail)});
+    if (!deps.alive()) { fail('changed'); continue; }
+    if (!(file.size > 0)) { fail('empty'); continue; }
+    if (file.size > MAX_IMAGE_BYTES) { fail('large'); continue; }
+    let bytes, mime;
+    try { bytes = new Uint8Array(await deps.read(file)); } catch { fail('corrupt'); continue; }
+    if (bytes.length > MAX_IMAGE_BYTES) { fail('large'); continue; }
+    mime = imageKind(bytes); if (!mime) { fail('unsupported'); continue; }
+    let size; try { size = await deps.measure(new Blob([bytes], {type: mime})); } catch { fail('corrupt'); continue; }
+    if (!(size?.w > 0 && size?.h > 0)) { fail('corrupt'); continue; }
+    if (size.w * size.h > MAX_IMAGE_PIXELS) { fail('pixels'); continue; }
+    let stored; try { stored = await deps.upload(bytes, mime); } catch (error) { fail('upload', error?.message); continue; }
+    if (!deps.alive()) { fail('changed'); continue; }
+    deps.place({name, mime, size, asset: stored.asset, path: stored.path, saveAs: safeAssetName(file.name, mime)}, added.length); added.push(name);
+  }
+  return {added, failed};
+}
+// One toast for a whole drop: what was added, and what was not and why (at most three reasons shown).
+export function importSummary({added, failed}) {
+  const parts = [];
+  if (added.length) parts.push(added.length === 1 ? `Added “${added[0]}”.` : `Added ${added.length} images.`);
+  if (failed.length) parts.push(`Not added: ${failed.slice(0, 3).map(f => f.reason).join('; ')}${failed.length > 3 ? `; and ${failed.length - 3} more` : ''}.`);
+  return parts.join(' ') || 'No image was added.';
+}
+// Copy image: the clipboard gets bitmap image data (not a file; pasting into Finder or a file manager is a different clipboard type that a
+// web page cannot supply). PNG goes through as the stored bytes; JPEG and WebP are decoded to PNG because that is the type clipboards accept.
+// Called inside the click so the browser's user activation still applies: the clipboard item is created at once from a promise.
+export function copyImageSupport(env) { return typeof env.ClipboardItem === 'function' && typeof env.clipboard?.write === 'function' && (env.ClipboardItem.supports?.('image/png') ?? true); }
+export async function copyOriginalImage({getOriginal, toPng, clipboard, ClipboardItem}) {
+  let converted = false;
+  const made = (async () => { const original = await getOriginal(); if (original.mime === 'image/png') return original.blob; converted = true; return toPng(original.blob); })();
+  made.catch(() => {});
+  try { await clipboard.write([new ClipboardItem({'image/png': made})]); }
+  catch { await made; throw new OriginalError('clipboard', 'The clipboard refused the image, so nothing was copied.'); }
+  return {copied: true, converted};
+}
+// Save image…: a real save-location chooser where the browser has one. The original is fetched first (fresh, checked), then the chooser opens
+// (the click's activation is still valid for a moment), then exactly those bytes are written. Cancelling the chooser ends it: no download is
+// started elsewhere. Where there is no chooser the caller offers Download original instead, labelled as the browser's own download.
+export const savePickerSupport = env => typeof env.showSaveFilePicker === 'function';
+export async function saveOriginalImage({original, picker}) {
+  let handle;
+  try { handle = await picker({suggestedName: original.saveAs || original.name, types: [{description: 'Image', accept: {[original.mime]: ['.' + (original.saveAs || original.name).split('.').pop().toLowerCase()]}}]}); }
+  catch (error) {
+    if (error?.name === 'AbortError') return {saved: false, cancelled: true};
+    throw new OriginalError('picker', error?.name === 'SecurityError' || error?.name === 'NotAllowedError' ? 'The browser did not allow a save location here, so nothing was saved. Use Download original instead.' : 'The save location could not be opened, so nothing was saved.');
+  }
+  let writable;
+  try { writable = await handle.createWritable(); await writable.write(original.blob); await writable.close(); }
+  catch { try { await writable?.abort?.(); } catch { /* Nothing more to clean up. */ } throw new OriginalError('write', 'The file could not be written to the chosen place.'); }
+  return {saved: true, name: handle.name || original.saveAs || original.name};
+}

@@ -165,17 +165,21 @@ test('the edit menu shows Download original alone in the image-only menu, never 
   assert.match(menu, /data-edit="download-original" hidden>Download original</, 'hidden unless an image is chosen');
   const shown = state => items.filter((item, i) => !state[i].hidden).map(item => item.edit ?? '-');
   // Image-only menu (overlay or Layers tree): the one command, no ordinary editing commands, no stray separators.
-  assert.deepEqual(shown(editMenuState(items, {canEdit: true, original: true, only: true})), ['download-original']);
-  assert.deepEqual(shown(editMenuState(items, {canEdit: false, original: true, only: true})), ['download-original']);
+  assert.deepEqual(shown(editMenuState(items, {canEdit: true, original: true, only: true})), ['copy-image', 'save-image', 'download-original']);
+  assert.deepEqual(shown(editMenuState(items, {canEdit: false, original: true, only: true})), ['copy-image', 'save-image', 'download-original']);
+  // Only what the browser can really do is offered: no image clipboard hides Copy image, no save chooser hides Save image…; Download original always remains for an image.
+  assert.deepEqual(shown(editMenuState(items, {canEdit: true, original: true, only: true, saveOk: false})), ['copy-image', 'download-original']);
+  assert.deepEqual(shown(editMenuState(items, {canEdit: true, original: true, only: true, copyOk: false, saveOk: false})), ['download-original']);
+  for (const command of ['copy-image', 'save-image']) assert.equal(editMenuState(items, {canEdit: false, original: true, only: true}).find((state, i) => items[i].edit === command).disabled, false, `view-only guests can use ${command}`);
   assert.equal(editMenuState(items, {canEdit: false, original: true, only: true}).find((state, i) => items[i].edit === 'download-original').disabled, false, 'view-only guests can use it');
   // Primitive, in either menu: no Download original at all (and nothing at all in the image-only menu).
-  assert.ok(!shown(editMenuState(items, {canEdit: true, original: false, only: false})).includes('download-original'));
+  for (const command of ['download-original', 'copy-image', 'save-image']) assert.ok(!shown(editMenuState(items, {canEdit: true, original: false, only: false})).includes(command), `${command} is never offered for a primitive`);
   assert.ok(shown(editMenuState(items, {canEdit: true, original: false, only: false})).includes('copy'));
   assert.deepEqual(shown(editMenuState(items, {canEdit: true, original: false, only: true})), []);
   // The full menu with an image: everything, and a view-only guest's editing commands stay disabled while the three read-only ones and the download are enabled.
   assert.equal(shown(editMenuState(items, {canEdit: true, original: true, only: false})).length, items.length);
   const view = editMenuState(items, {canEdit: false, original: true, only: false});
-  assert.deepEqual(items.filter((item, i) => item.edit && !view[i].disabled).map(item => item.edit).sort(), ['copy', 'copy-style', 'download-original', 'link']);
+  assert.deepEqual(items.filter((item, i) => item.edit && !view[i].disabled).map(item => item.edit).sort(), ['copy', 'copy-image', 'copy-style', 'download-original', 'link', 'save-image']);
 });
 
 test('the editor wires the command: stage menu, Inspect overlay, Layers tree, and nothing that forces the overlay or grants Edit', async () => {

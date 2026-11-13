@@ -5,7 +5,7 @@ import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=37f4c823cf59';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute} from './editing-model.js?v=d094fece4e24';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,saveOriginalImage,copyImageSupport,savePickerSupport} from './editing-model.js?v=1cc12cb33966';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -469,7 +469,7 @@ async function downloadOriginal(){
     const entry=nodes.get(target?.key);
     if(!entry)throw new Error('Choose an image to download its original.');
     const original=await fetchCapturedOriginal({captured:target,paperId,scene,node:entry.node,fetchImpl:(url,options)=>fetch(url,options)});
-    download(original.blob,original.name);message(`Downloading the original: ${original.name}`);
+    download(original.blob,original.saveAs);message(`Downloading the original: ${original.saveAs}`);
   }catch(error){if(error?.name!=='AbortError')message(error?.message||'The original could not be downloaded. Nothing was saved.');}
   back?.focus?.();
 }
@@ -478,11 +478,79 @@ function paintEditMenu(key,only=false){
   const entry=key&&nodes.get(key),image=entry&&imageFillOf(entry.node)?{key,...captureOriginal(scene,entry.node)}:null;
   originalTarget=image;originalFocus=null;
   const items=[...$('#edit-menu').children];
-  editMenuState(items.map(item=>({edit:item.dataset.edit})),{canEdit,original:!!image,only}).forEach((state,i)=>{items[i].hidden=state.hidden;if(items[i].dataset.edit)items[i].disabled=state.disabled;});
+  editMenuState(items.map(item=>({edit:item.dataset.edit})),{canEdit,original:!!image,only,copyOk:copyImageSupport({ClipboardItem:window.ClipboardItem,clipboard:navigator.clipboard}),saveOk:savePickerSupport(window)}).forEach((state,i)=>{items[i].hidden=state.hidden;if(items[i].dataset.edit)items[i].disabled=state.disabled;});
   return !!image;
 }
+// ---- Images: Copy image, Save image…, and dropped files. Each starts from the stored original, fetched fresh through this view's own scoped fetch
+// and checked, for the layer the menu was opened on; the picture on screen is never the source.
+const originalRequest=(target,entry)=>({captured:target,paperId,scene,node:entry.node,fetchImpl:(url,options)=>fetch(url,options)});
+async function blobToPng(blob){
+  const url=URL.createObjectURL(blob),img=new Image();
+  try{
+    await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('The image could not be converted for the clipboard.'));img.src=url;});
+    const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;c.getContext('2d').drawImage(img,0,0);
+    const png=await new Promise(resolve=>c.toBlob(resolve,'image/png'));if(!png)throw new Error('The image could not be converted for the clipboard.');return png;
+  }finally{URL.revokeObjectURL(url);}
+}
+// The clipboard write starts inside the click (the item is made from a promise), so the browser's user activation still applies.
+async function copyImage(){
+  const target=originalTarget,back=originalFocus;originalTarget=originalFocus=null;
+  try{
+    const entry=nodes.get(target?.key);if(!entry)throw new Error('Choose an image to copy.');
+    const result=await copyOriginalImage({getOriginal:()=>fetchCapturedOriginal(originalRequest(target,entry)),toPng:blobToPng,clipboard:navigator.clipboard,ClipboardItem:window.ClipboardItem});
+    message(result.converted?'Image copied as a PNG picture, not as a file.':'Image copied as a picture, not as a file.');
+  }catch(error){if(error?.name!=='AbortError')message(error?.message||'The image could not be copied.');}
+  back?.focus?.();
+}
+async function saveImage(){
+  const target=originalTarget,back=originalFocus;originalTarget=originalFocus=null;
+  try{
+    const entry=nodes.get(target?.key);if(!entry)throw new Error('Choose an image to save.');
+    const original=await fetchCapturedOriginal(originalRequest(target,entry)),result=await saveOriginalImage({original,picker:options=>window.showSaveFilePicker(options)});
+    message(result.saved?`Saved ${result.name}.`:'Save cancelled. Nothing was saved.');
+  }catch(error){if(error?.name!=='AbortError')message(error?.message||'The image could not be saved.');}
+  back?.focus?.();
+}
+const hasFiles=e=>[...(e.dataTransfer?.types||[])].includes('Files');
+function measureImage(blob){
+  return new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(blob),img=new Image(),done=fn=>{clearTimeout(timer);URL.revokeObjectURL(url);fn();},timer=setTimeout(()=>done(()=>reject(new Error('timeout'))),15000);
+    img.onload=()=>done(()=>resolve({w:img.naturalWidth,h:img.naturalHeight}));img.onerror=()=>done(()=>reject(new Error('undecodable')));img.src=url;
+  });
+}
+let importing=false;
+async function dropImages(e){
+  if(!canEdit){message('This Paper is view-only, so images can’t be added.');return;}
+  if(inspection){message('Switch to Edit to add images to the canvas.');return;}
+  if(importing){message('Images are still being added. Drop again in a moment.');return;}
+  const files=[...e.dataTransfer.files],candidate=boards.get(e.target.closest?.('[data-board]')?.dataset.board),board=candidate?.artboard?keyOf(candidate.page,candidate.node.id):null,before=scene;
+  importing=true;
+  try{
+    const result=await importImageFiles(files,{
+      read:file=>file.arrayBuffer(),measure:measureImage,
+      upload:async(bytes,mime)=>{const response=await fetch(`/api/assets${paperQuery}`,{method:'POST',headers:{...clientHeaders,'Content-Type':mime},body:bytes}),data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);return data;},
+      alive:()=>scene===before&&canEdit,
+      place:(item,index)=>{
+        scene.assets[item.asset]=item.path;if(item.saveAs){scene.assetNames??={};scene.assetNames[item.asset]??=item.saveAs;}
+        const size=imageSize(item.size,{z:camera.z,w:stage.clientWidth,h:stage.clientHeight}),name=(item.saveAs||'Image').replace(/\.[^.]+$/,'').slice(0,80)||'Image';
+        // Centred on the drop point (then stepped for further files), whatever the camera: insertTemplate maps screen to world.
+        insertTemplate({name,root:1,nodes:[{id:1,type:'rect',name,rect:{x:0,y:0,w:size.w,h:size.h},style:{fills:[{type:'image',asset:item.asset,mode:'fit'}],opacity:1},visible:true,locked:false}]},{board,x:e.clientX-size.w*camera.z/2+index*28,y:e.clientY-size.h*camera.z/2+index*28});
+      },
+    });
+    message(importSummary(result));
+  }catch(error){message(error?.message||'The images could not be added.');}
+  finally{importing=false;}
+}
+// A dropped file must never navigate this tab away from the editor, whoever may drop and wherever it lands; only the canvas imports it.
+window.addEventListener('dragover',e=>{if(!hasFiles(e))return;e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect=canEdit&&!inspection&&stage.contains(e.target)?'copy':'none';},true);
+window.addEventListener('drop',e=>{
+  if(!hasFiles(e))return;e.preventDefault();
+  if(!stage.contains(e.target)&&!overlayRoot.contains(e.target))return;   // the Scratchpad and other targets keep their own handlers
+  e.stopPropagation();void dropImages(e);
+},true);
 function editCommand(action){
   const entry=nodes.get(selected),page=entry?.page;
+  if(action==='copy-image')return copyImage();if(action==='save-image')return saveImage();
   if(action==='download-original')return downloadOriginal();
   if(action==='copy')return copySelection();if(action==='link')return copyLink();if(action==='paste')return pasteSelection();
   if(!canEdit||!page)return;
