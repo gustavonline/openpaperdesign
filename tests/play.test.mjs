@@ -29,16 +29,17 @@ class El {
     get playState() { return a.running ? 'running' : (a.playbackRate > 0 && a.currentTime >= a.end ? 'finished' : 'paused'); },
     pause() { a.running = false; }, play() { a.plays++; if (a.playbackRate > 0 && a.currentTime >= a.end) a.currentTime = 0; /* the browser's own auto-rewind of a finished animation */ a.running = true; }, cancel() { a.cancelled = true; a.running = false; }}; this.env.animations.push(a); return a; }
 }
-const ORIGINAL = {document: globalThis.document, window: globalThis.window, IntersectionObserver: globalThis.IntersectionObserver, requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame};
-function environment(t, {width = 1440, reduced = false} = {}) {
-  const env = {elements: [], animations: [], added: 0, removed: 0, width, frames: new Map(), frameId: 0, observers: [], visibility: [], media: {matches: reduced, listeners: new Set()}, focused: null};
+const ORIGINAL = {ResizeObserver: globalThis.ResizeObserver, document: globalThis.document, window: globalThis.window, IntersectionObserver: globalThis.IntersectionObserver, requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame};
+function environment(t, {width = 1440, reduced = false, noResizeObserver = false} = {}) {
+  const env = {elements: [], animations: [], added: 0, removed: 0, width, frames: new Map(), frameId: 0, observers: [], resizers: [], windowListeners: new Map(), visibility: [], media: {matches: reduced, listeners: new Set()}, focused: null};
   const fakes = {};
   fakes.document = {hidden: false, get activeElement() { return env.focused; }, createElement: tag => new El(tag, env), addEventListener: (type, fn) => { if (type === 'visibilitychange') { env.visibility.push(fn); env.added++; } }, removeEventListener: (type, fn) => { const i = env.visibility.indexOf(fn); if (i >= 0) { env.visibility.splice(i, 1); env.removed++; } }};
-  fakes.window = {matchMedia: () => ({get matches() { return env.media.matches; }, addEventListener: (_, fn) => { env.media.listeners.add(fn); env.added++; }, removeEventListener: (_, fn) => { if (env.media.listeners.delete(fn)) env.removed++; }})};
+  fakes.window = {addEventListener: (type, fn) => { env.windowListeners.set(type, [...(env.windowListeners.get(type) || []), fn]); env.added++; }, removeEventListener: (type, fn) => { const list = env.windowListeners.get(type) || [], i = list.indexOf(fn); if (i >= 0) { list.splice(i, 1); env.removed++; } }, matchMedia: () => ({get matches() { return env.media.matches; }, addEventListener: (_, fn) => { env.media.listeners.add(fn); env.added++; }, removeEventListener: (_, fn) => { if (env.media.listeners.delete(fn)) env.removed++; }})};
   fakes.IntersectionObserver = class { constructor(callback, options) { this.callback = callback; this.options = options; this.targets = new Set(); this.disconnected = false; env.observers.push(this); } observe(target) { this.targets.add(target); } disconnect() { this.disconnected = true; this.targets.clear(); } };
+  if (!noResizeObserver) fakes.ResizeObserver = class { constructor(callback) { this.callback = callback; this.targets = new Set(); this.disconnected = false; env.resizers.push(this); } observe(target) { this.targets.add(target); env.added++; } disconnect() { this.disconnected = true; env.removed++; } };
   fakes.requestAnimationFrame = fn => { const id = ++env.frameId; env.frames.set(id, fn); return id; }; fakes.cancelAnimationFrame = id => { env.frames.delete(id); };
   // Several Players can live in one test, each in its own world: whatever is touched first switches the globals to its own.
-  env.use = () => { Object.assign(globalThis, fakes); };
+  env.use = () => { Object.assign(globalThis, fakes); if (noResizeObserver) delete globalThis.ResizeObserver; };
   env.restore = () => { for (const [k, v] of Object.entries(ORIGINAL)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } };
   env.use();
   // Time passes only when the test says so, and only for animations that are running.
@@ -49,11 +50,11 @@ function environment(t, {width = 1440, reduced = false} = {}) {
   t.after(() => env.restore());
   return env;
 }
-function mount(t, {scene = addMotion(syntheticLanding()), width = 1440, reduced = false, pageId} = {}) {
-  const env = environment(t, {width, reduced}), container = new El('div', env), closed = [];
+function mount(t, {scene = addMotion(syntheticLanding()), width = 1440, reduced = false, pageId, noResizeObserver = false} = {}) {
+  const env = environment(t, {width, reduced, noResizeObserver}), container = new El('div', env), closed = [];
   const cloneRoot = (pid, rootId) => { const page = scene.pages.find(p => p.id === pid), node = page.nodes.find(n => n.id === rootId); const build = (n, isRoot) => { const el = new El('div', env); if (!isRoot) el.dataset.nodeKey = `${pid}:${n.id}`; el.dataset.board = 'editor-only'; if (n.type === 'text') el._text = n.text; for (const c of n.children || []) el.append(build(page.nodes.find(x => x.id === c), false)); el.node = n; return el; }; return build(node, true); };
   const raw = createPlayer({container, scene, preview: scene.preview, pageId: pageId || scene.pages[0].id, cloneRoot, onClose: () => closed.push(1)});
-  const player = Object.create(null); for (const name of ['update', 'destroy', 'go', 'seek', 'pause', 'resume', 'setState', 'setReduced', 'setViewport', 'key']) player[name] = (...args) => { env.use(); return raw[name](...args); }; Object.defineProperty(player, 'snapshot', {get: () => raw.snapshot});
+  const player = Object.create(null); for (const name of ['update', 'destroy', 'go', 'seek', 'pause', 'resume', 'setState', 'setReduced', 'setViewport', 'key', 'relayout']) player[name] = (...args) => { env.use(); return raw[name](...args); }; Object.defineProperty(player, 'snapshot', {get: () => raw.snapshot});
   t.after(() => player.destroy());
   const attached = el => { for (let n = el; n; n = n.parentNode) if (n === container) return true; return false; };
   const byNode = id => env.elements.find(e => e.dataset.playNode === String(id) && attached(e)), named = (name, page = scene.pages[0]) => page.nodes.find(n => n.name === name).id;
@@ -380,4 +381,80 @@ test('a key is acted on once: element and root listeners and the editor guard to
   const e3 = {key: 'Enter', target: label, preventDefault() {}, stopPropagation() {}}; assert.equal(m.player.key(e3), true); assert.notEqual(m.container.dataset.playPage, before, 'Enter on the label pressed its layer'); assert.equal(m.player.key(e3), true); assert.ok(navigations === 0 && child);
   // Another key is not handled, but is kept inside (stopPropagation) and not run twice either.
   const stops = []; const e4 = {key: 'x', target: m.byNode(m.named('D primary CTA')) ?? m.container, preventDefault() {}, stopPropagation() { stops.push(1); }}; assert.equal(m.player.key(e4), false); assert.equal(stops.length, 1);
+});
+
+// ---- Real resize (the lead's actual Firefox defect: Fit window never followed the window). Fake-DOM tests of Play's resize decision and what it keeps; they do not
+// ---- prove how a real browser reports sizes, which only the lead's resize run can.
+const resizeTo = (m, width) => { m.env.width = width; m.env.use(); for (const o of m.env.resizers.filter(o => !o.disconnected)) o.callback([{}]); let ran = 0; while (m.env.runFrame() && ran++ < 5); };
+const layersAlive = m => m.live().length;
+
+test('Fit window follows the window: narrowing to a phone rebuilds to the authored mobile variant, widening goes back, and each keeps the person’s place', t => {
+  const m = mount(t, {width: 1440}), {env} = m, scroller = m.find('play-viewport'); assert.equal(m.container.dataset.playVariant, 'landing-desktop'); assert.equal(m.container.dataset.playWidth, '1440');
+  assert.equal(env.resizers.length, 1, 'one lifecycle-owned observer, on the preview'); assert.ok(env.resizers[0].targets.has(scroller));
+  m.byNode(m.named('D Together toggle')).fire('click'); scroller.scrollTop = 1600; scroller.fire('scroll'); env.advance(9000); m.player.pause(); const time = m.player.snapshot.time, old = env.animations.filter(a => !a.cancelled);
+  resizeTo(m, 390);
+  assert.equal(m.container.dataset.playVariant, 'landing-mobile'); assert.equal(m.container.dataset.playRoot, String(m.named('Landing · mobile'))); assert.equal(m.container.dataset.playWidth, '390'); assert.equal(m.container.dataset.playScale, '1.000'); assert.ok(m.byNode(m.named('M hero headline')) && !m.byNode(m.named('D hero headline')), 'only the mobile layers are in the preview');
+  assert.ok(old.every(a => a.cancelled), 'every old animation is cancelled'); assert.ok(env.observers.filter(o => !o.disconnected).length >= 1);
+  assert.equal(m.player.snapshot.time, time, 'the paused time is the same exact time'); assert.equal(m.player.snapshot.playing, false); assert.equal(m.player.snapshot.states.mode, 'together', 'local state kept'); assert.equal(m.byNode(m.named('M state title')).textContent, 'Better, together.', 'and shown in the new variant');
+  assert.ok(loopsOf(m).length >= 2 && loopsOf(m).every(a => a.currentTime === time), 'the new loops are at the same phase'); assert.ok(m.live().every(a => !a.running), 'paused stays paused');
+  assert.equal(scroller.scrollTop, Math.round((1600 / 3200) * 3200 * 1), 'the scroll place is kept as a share of the page');
+  // Back to a wide window: desktop again, still the same clock and state.
+  resizeTo(m, 1440); assert.equal(m.container.dataset.playVariant, 'landing-desktop'); assert.equal(m.player.snapshot.time, time); assert.equal(m.byNode(m.named('D state title')).textContent, 'Better, together.');
+  // The window between: 1000px is inside the desktop range, scaled to fit (never a different design).
+  resizeTo(m, 1000); assert.equal(m.container.dataset.playVariant, 'landing-desktop'); assert.equal(m.container.dataset.playScale, (1000 / 1440).toFixed(3)); assert.match(m.find('play-status').textContent, /scaled to 69% to fit/);
+});
+
+test('playing continues through a resize without replaying entrances or resetting loops', t => {
+  const m = mount(t, {width: 1440}), {env} = m; env.advance(9000); const clock = m.player.snapshot.time; assert.equal(m.player.snapshot.playing, true);
+  resizeTo(m, 390); assert.equal(m.player.snapshot.playing, true); assert.equal(m.player.snapshot.time, clock, 'the clock carried over'); assert.ok(loopsOf(m).every(a => a.running && a.currentTime === clock), 'loops keep running from where they were');
+  const entrance = m.animationsFor(m.named('M hero headline')).find(a => a.frames[0].opacity === '0'); assert.ok(entrance.currentTime >= entrance.end && entrance.plays === 0 || !entrance.running, 'an entrance that was over is not replayed'); env.advance(250); assert.equal(m.player.snapshot.time, clock + 250);
+  assert.equal(env.frames.size, 1, 'one frame loop while playing, none left over');
+});
+
+test('a fixed Desktop or Mobile width is only ever as wide as the room: it rescales when the window, a panel or the host changes, without changing the variant', t => {
+  const m = mount(t, {width: 1440}); m.player.setViewport('1440'); assert.equal(m.container.dataset.playScale, '1.000');
+  resizeTo(m, 900); assert.equal(m.container.dataset.playVariant, 'landing-desktop', 'a fixed 1440 stays the desktop design'); assert.equal(m.container.dataset.playScale, (900 / 1440).toFixed(3));
+  resizeTo(m, 600); assert.equal(m.container.dataset.playScale, (600 / 1440).toFixed(3)); resizeTo(m, 1440); assert.equal(m.container.dataset.playScale, '1.000');
+  m.player.setViewport('390'); assert.equal(m.container.dataset.playVariant, 'landing-mobile'); resizeTo(m, 300); assert.equal(m.container.dataset.playScale, (300 / 390).toFixed(3)); assert.equal(m.container.dataset.playVariant, 'landing-mobile'); resizeTo(m, 1440); assert.equal(m.container.dataset.playScale, '1.000');
+});
+
+test('a resize that decides nothing new does nothing: no rebuild, no new animations, no loop with its own observer', t => {
+  const m = mount(t, {width: 1440}), {env} = m, before = env.animations.length, built = m.byNode(m.named('D hero headline'));
+  resizeTo(m, 1500); assert.equal(env.animations.length, before, 'wider desktop, same scale: not rebuilt'); assert.equal(m.byNode(m.named('D hero headline')), built, 'same elements'); assert.equal(m.container.dataset.playWidth, '1500', 'but the width shown is true'); assert.match(m.find('play-status').textContent, /1500 px wide/);
+  for (let i = 0; i < 20; i++) resizeTo(m, 1500); assert.equal(env.animations.length, before); assert.equal(env.frames.size, 1, 'only the playing clock’s frame');
+  // The observer firing because of our own rebuild: a rebuild at 390 triggers a callback at the same size, which must find nothing to do.
+  resizeTo(m, 390); const rebuilt = env.animations.length; for (const o of env.resizers) o.callback([{}]); env.runFrame(); assert.equal(env.animations.length, rebuilt, 'the callback caused by the rebuild itself changes nothing');
+  // Many events in one frame are one look.
+  m.env.width = 1440; for (let i = 0; i < 50; i++) for (const o of env.resizers) o.callback([{}]); assert.equal(env.frames.size <= 2, true, 'at most the clock frame and one resize frame'); for (let i = 0; i < 6 && env.runFrame(); i++); assert.equal(m.container.dataset.playVariant, 'landing-desktop');
+  // Zero room (Play hidden) is not a layout: nothing is decided from it.
+  const keep = m.container.dataset.playVariant; resizeTo(m, 0); assert.equal(m.container.dataset.playVariant, keep);
+});
+
+test('an authored artboard chosen by a click stays chosen through a resize, and a viewport or Page change releases it', t => {
+  const scene = addMotion(syntheticLanding()), page = scene.pages[0], mobileRoot = page.nodes.find(n => n.name === 'Landing · mobile').id;
+  scene.preview.interactions.push({id: 'to-mobile', page: page.id, node: page.nodes.find(n => n.name === 'D eyebrow').id, on: 'click', actions: [{type: 'navigate', page: page.id, root: mobileRoot}]});
+  const m = mount(t, {scene, width: 1440}); m.byNode(m.named('D eyebrow')).fire('click'); assert.equal(m.container.dataset.playRoot, String(mobileRoot), 'the click chose the mobile artboard on a wide window');
+  resizeTo(m, 1200); assert.equal(m.container.dataset.playRoot, String(mobileRoot), 'a resize does not override the artboard that was chosen'); resizeTo(m, 400); assert.equal(m.container.dataset.playRoot, String(mobileRoot));
+  m.player.setViewport('1440'); assert.equal(m.container.dataset.playVariant, 'landing-desktop', 'choosing a viewport hands the decision back to the width');
+});
+
+test('focus stays valid through a resize rebuild, and the editor behind it is never touched', t => {
+  const scene = addMotion(syntheticLanding()), before = JSON.stringify(scene), m = mount(t, {scene, width: 1440}), together = m.byNode(m.named('D Together toggle')); together.focus();
+  resizeTo(m, 390); assert.ok(attachedTo(m)(m.env.focused), 'focus is inside Play'); assert.equal(m.env.focused.className, 'play-viewport', 'that layer is not in the mobile build, so the preview has it'); const ring = ringOf(m); assert.ok(ring.every(attachedTo(m)));
+  assert.equal(tab(m, ring.at(-1)).focused, ring[0]); assert.equal(tab(m, ring[0], true).focused, ring.at(-1));
+  const field = msField(m); field.focus(); resizeTo(m, 1440); assert.equal(m.env.focused, field, 'toolbar focus is left where it is');
+  assert.equal(JSON.stringify(scene), before, 'the Paper is untouched'); assert.equal(m.closed.length, 0);
+  // Reduced motion: a resize shows the same states without moving.
+  const r = mount(t, {width: 1440, reduced: true}); resizeTo(r, 390); assert.equal(r.player.snapshot.playing, false); assert.equal(r.env.animations.filter(a => a.running).length, 0); assert.equal(r.container.dataset.playVariant, 'landing-mobile');
+});
+
+test('closing Play disconnects the observer and any pending resize frame, and a late callback does nothing', t => {
+  const m = mount(t, {width: 1440}), {env} = m, watcher = env.resizers[0]; env.width = 390; watcher.callback([{}]); assert.ok(env.frames.size >= 1); m.player.destroy();
+  assert.equal(watcher.disconnected, true); assert.equal(env.frames.size, 0, 'the pending frame is cancelled'); watcher.callback([{}]); for (let i = 0; i < 6 && env.runFrame(); i++); assert.equal(m.container.children.length, 0); assert.equal(env.added, env.removed);
+  m.player.relayout(); assert.equal(m.container.children.length, 0);
+});
+
+test('without ResizeObserver the window’s own resize event is used, once, and removed on close', t => {
+  const m = mount(t, {width: 1440, noResizeObserver: true}), {env} = m; assert.equal(env.resizers.length, 0); assert.equal(env.windowListeners.get('resize')?.length, 1);
+  env.width = 390; for (const fn of env.windowListeners.get('resize')) fn(); for (let i = 0; i < 6 && env.runFrame(); i++); assert.equal(m.container.dataset.playVariant, 'landing-mobile'); m.player.destroy(); assert.equal(env.windowListeners.get('resize')?.length ?? 0, 0);
 });

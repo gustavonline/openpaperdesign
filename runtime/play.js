@@ -23,7 +23,7 @@ export function createPlayer(host) {
   const states = initialStates(preview), trail = [], cleanups = [], entries = [], originals = new Map();
   const system = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   let reduced = !!system?.matches, userChose = false, viewport = 'auto', playing = false, resumeAfter = false, visible = true, frame = 0, notice = '', noticeTimer = null, shown = null;
-  let timeline = [], timelineMs = 0, scrolled = [], nodeMap = new Map(), forcedRoot = null;
+  let timeline = [], timelineMs = 0, scrolled = [], nodeMap = new Map(), lockedRoot = null, sizeWatch = null, resizeFrame = 0, lastRoom = 0;
   // One shared clock drives every timeline animation. A loop never ends, so the clock is allowed to run past the first cycle; `ends` is when each finite
   // animation is over and `loops` are the ones that repeat forever.
   const ends = new Map(), loops = new Set(), keyed = new Map(), handled = new WeakSet();
@@ -63,7 +63,7 @@ export function createPlayer(host) {
   function listen() {
     on(back, 'click', () => host.onClose());
     on(pageSelect, 'change', () => go(pageSelect.value));
-    on(viewSelect, 'change', () => { viewport = viewSelect.value; build(); });
+    on(viewSelect, 'change', () => { viewport = viewSelect.value; lockedRoot = null; build(); });
     on(replay, 'click', () => { seek(0); resume(); });
     on(toggle, 'click', () => { if (playing) pause(); else resume(); });
     on(scrub, 'input', () => { const at = Number(scrub.value); pause(); seek(at); });
@@ -88,15 +88,22 @@ export function createPlayer(host) {
     return map;
   }
 
+  // The one decision about what Play shows: the width asked for (Fit window = the room there is; a fixed width is only ever as wide as the room), the authored
+  // variant for it (unless a click action chose an artboard, which stays chosen until another Page, another viewport choice or a different Page's root), and
+  // the scale that fits it. Build uses it, and so does a resize, so the two can never disagree.
+  const layoutScale = (width, room, designWidth) => Math.min(1, Math.min(width, room || width) / designWidth);
+  function decide() {
+    const room = scroller.clientWidth || root.clientWidth || 0, width = viewport === 'auto' ? Math.max(1, room || 1) : Number(viewport), page = scene.pages.find(p => p.id === pageId);
+    let variant = resolveVariant(preview, scene, pageId, width);
+    if (lockedRoot !== null && page?.root.includes(lockedRoot)) { const declared = (preview?.variants || []).find(v => v.page === pageId && v.root === lockedRoot); variant = {root: lockedRoot, id: declared?.id || null, label: declared?.label || page.nodes.find(n => n.id === lockedRoot)?.name || 'Artboard', implicit: !declared}; }
+    return {room, width, page, variant, rootNode: variant && page?.nodes.find(n => n.id === variant.root)};
+  }
   function build({keepTime = null, autoplay = true} = {}) {
     const before = focusMemory();
     teardown(); listen(); pageSelect.replaceChildren(...scene.pages.map(p => make('option', {value: p.id, text: p.name || 'Page'}))); pageSelect.value = pageId; viewSelect.value = viewport;
-    const width = viewport === 'auto' ? Math.max(1, scroller.clientWidth || root.clientWidth || 1) : Number(viewport), page = scene.pages.find(p => p.id === pageId);
-    let variant = resolveVariant(preview, scene, pageId, width); const forced = forcedRoot; forcedRoot = null;
-    if (forced !== null && page?.root.includes(forced)) { const declared = (preview?.variants || []).find(v => v.page === pageId && v.root === forced); variant = {root: forced, id: declared?.id || null, label: declared?.label || page.nodes.find(n => n.id === forced)?.name || 'Artboard', implicit: !declared}; }
-    const rootNode = variant && page?.nodes.find(n => n.id === variant.root), clone = rootNode && host.cloneRoot(pageId, rootNode.id);
+    const {width, room, page, variant, rootNode} = decide(), clone = rootNode && host.cloneRoot(pageId, rootNode.id);
     if (!clone) { shown = null; status.textContent = 'This Page has nothing to play yet.'; scrub.max = '1'; readout.textContent = ''; refocus(before); return; }
-    const w = rootNode.rect.w, h = rootNode.rect.h, room = scroller.clientWidth || root.clientWidth || width, scale = Math.min(1, Math.min(width, room) / w);
+    const w = rootNode.rect.w, h = rootNode.rect.h, scale = layoutScale(width, room, w); lastRoom = room;
     nodeMap = collect(clone); nodeMap.set(rootNode.id, clone);
     // From here a layer is found by its own id; the editor's attribute is replaced by Play's, and no other attribute of the Paper is read.
     for (const [id, node] of nodeMap) { delete node.dataset.nodeKey; node.dataset.playNode = String(id); }
@@ -283,27 +290,46 @@ export function createPlayer(host) {
   // ---- Moving about
   function go(nextPage, nextRoot, scroll = 0) {
     if (!scene.pages.some(p => p.id === nextPage)) return;
-    pageId = nextPage; forcedRoot = nextRoot ?? null; build(); scroller.scrollTop = scroll; updateScroll();
+    pageId = nextPage; lockedRoot = nextRoot ?? null; build(); scroller.scrollTop = scroll; updateScroll();
   }
   // The Paper changed under Play (a new revision): rebuild from the new data, keeping the Page, scroll place, still-valid states and the time.
   function update(nextScene, nextPreview, label = 'Updated to the latest version') {
     if (stopped) return;
-    const ratio = scroller.scrollTop / Math.max(1, scroller.scrollHeight - scroller.clientHeight), at = timeline.length ? time() : null, was = playing;
     scene = nextScene; preview = nextPreview || null;
     for (const [id, value] of [...states]) { const definition = preview?.states?.find(s => s.id === id); if (!definition || !definition.values.includes(value)) states.delete(id); }
     for (const [id, value] of initialStates(preview)) if (!states.has(id)) states.set(id, value);
     if (!scene.pages.some(p => p.id === pageId)) pageId = scene.pages[0].id;
-    build({keepTime: at, autoplay: was}); scroller.scrollTop = Math.round(ratio * Math.max(0, scroller.scrollHeight - scroller.clientHeight)); updateScroll();
+    rebuildInPlace();
     say(label);
   }
+  // Rebuilds what is shown from the current data and keeps everything the person was in the middle of: the clock (a paused time stays that exact time, playing
+  // stays playing, finished entrances are not replayed), local states, the scroll place (as a share of the page) and focus. Old animations and observers are cancelled.
+  function rebuildInPlace() {
+    const ratio = scroller.scrollTop / Math.max(1, scroller.scrollHeight - scroller.clientHeight), at = timeline.length ? time() : null, was = playing;
+    build({keepTime: at, autoplay: was});
+    scroller.scrollTop = Math.round(ratio * Math.max(0, scroller.scrollHeight - scroller.clientHeight)); updateScroll();
+  }
+  // The window, a panel or the host changed the room Play has. Looked at once per frame, only when the browser says the size changed (no polling), and only
+  // acted on when the DECISION changed: another authored variant, or another fitting scale. A change that decides the same thing only updates the width shown,
+  // so an observer callback caused by our own rebuild finds nothing to do and cannot loop.
+  function relayout() {
+    if (stopped || !shown) return;
+    const d = decide(); if (!d.room || !d.rootNode) return;
+    const scale = layoutScale(d.width, d.room, d.rootNode.rect.w);
+    if (d.rootNode.id !== shown.root || Math.abs(scale - shown.scale) > 0.0005) { rebuildInPlace(); return; }
+    if (Math.round(d.width) !== Math.round(shown.width)) { shown.width = d.width; lastRoom = d.room; root.dataset.playWidth = String(Math.round(d.width)); describe(); }
+  }
+  function onResize() { if (stopped || resizeFrame) return; resizeFrame = frames.requestAnimationFrame(() => { resizeFrame = 0; relayout(); }); }
+  if (typeof ResizeObserver === 'function') { sizeWatch = new ResizeObserver(onResize); sizeWatch.observe(scroller); } else { globalThis.window?.addEventListener?.('resize', onResize); }
   function destroy() {
-    if (stopped) return; stopped = true; clearTimeout(noticeTimer); pause(true); teardown();
+    if (stopped) return; stopped = true; clearTimeout(noticeTimer); sizeWatch?.disconnect(); sizeWatch = null; globalThis.window?.removeEventListener?.('resize', onResize); frames.cancelAnimationFrame?.(resizeFrame); resizeFrame = 0; pause(true); teardown();
     root.replaceChildren(); root.hidden = true; for (const key of Object.keys(root.dataset || {})) if (key.startsWith('play')) delete root.dataset[key];
   }
   build();
   return {
     update, destroy, go, seek, pause, resume, setState, setReduced, key,
-    setViewport(value) { viewport = value; build(); },
+    setViewport(value) { viewport = value; lockedRoot = null; build(); },
+    relayout,
     get snapshot() { return {pageId, shown: shown && {...shown}, time: time(), loops: loops.size > 0, playing, reduced, states: Object.fromEntries(states), scrollTop: scroller.scrollTop, timelineMs, animations: entries.length}; },
     focus() { back.focus?.(); },
   };
