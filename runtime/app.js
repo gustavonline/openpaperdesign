@@ -7,7 +7,7 @@ import { createPlayer } from './play.js?v=e2d5b20465b4';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=5280214db005';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=157c1cd40cc3';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -1494,14 +1494,14 @@ function exportRootKey(key) {
   while (node && map.has(node.parent)) node = map.get(node.parent);
   return keyOf(entry.page, node.id);
 }
-// A quick size for the menu, from what is on screen now (the exact crop is measured when the image is rendered).
-function exportEstimate(keys) {
+// The size the menu advertises is measured on the very same untransformed off-screen copy that the capture draws (buildExportClone), never on the live,
+// camera-scaled canvas, so what is promised and what is saved cannot differ. (Fonts and images are not awaited here: their boxes are sized by the Paper.)
+function exportMeasure(keys) {
   if (!keys.length) return null;
-  const rects = keys.map(key => { const entry = nodes.get(key); if (entry.root) return {x: 0, y: 0, w: entry.node.rect.w, h: entry.node.rect.h}; const r = dom.get(key)?.getBoundingClientRect(); return r && {x: r.left / camera.z, y: r.top / camera.z, w: r.width / camera.z, h: r.height / camera.z}; });
-  return unionBox(rects);
+  let built; try { built = buildExportClone(keys); return measureExport(built); } catch { return null; } finally { built?.crop.remove(); }
 }
 function paintExportMenu() {
-  const keys = exportKeys(), estimate = exportEstimate(keys), ready = !!estimate && !!inspectionLib?.snapdom && !exporting;
+  const keys = exportKeys(), estimate = exportMeasure(keys), ready = !!estimate && !!inspectionLib?.snapdom && !exporting;
   const entry = keys.length === 1 ? nodes.get(keys[0]) : null, label = !keys.length ? 'Select layers to export' : entry ? entry.node.name : `${keys.length} layers`;
   $('#export-target').textContent = label; $('#export-target').title = entry ? `${entry.node.name} · ${entry.page.name}` : '';
   const px = estimate && exportPixels(estimate, exportScale);
@@ -1595,11 +1595,13 @@ async function exportImageCommand(kind) {
 }
 // Draws the chosen layers, as the canvas draws them, in an untransformed off-screen copy: only those layers (others hidden, holding layers drawing
 // nothing of their own), editor-only state removed, cropped to their rendered bounds, then encoded at the chosen scale.
-async function renderSelection(keys, kind, scale) {
-  if (!inspectionLib?.snapdom) throw new Error('Image export needs the toolbar bundle, which hasn’t loaded.');
+function measureExport({holder, kept}) {
+  const origin = holder.getBoundingClientRect();
+  return unionBox(kept.map(el => { const r = el.getBoundingClientRect(); return {x: r.left - origin.left, y: r.top - origin.top, w: r.width, h: r.height}; }));
+}
+function buildExportClone(keys) {
   const stillThere = keys.every(key => nodes.has(key)) && keys.every(key => nodes.get(key).page === nodes.get(keys[0]).page);
   if (!stillThere) throw new Error('The selected layers changed. Select them again.');
-  commitFields(); stopTextEdit();
   const rootKeys = [...new Set(keys.map(exportRootKey))], roots = rootKeys.map(key => boards.get(key)).filter(Boolean);
   if (roots.length !== rootKeys.length) throw new Error('The selected layers changed. Select them again.');
   const minX = Math.min(...roots.map(b => b.node.rect.x)), minY = Math.min(...roots.map(b => b.node.rect.y)), maxX = Math.max(...roots.map(b => b.node.rect.x + b.node.rect.w)), maxY = Math.max(...roots.map(b => b.node.rect.y + b.node.rect.h));
@@ -1619,10 +1621,16 @@ async function renderSelection(keys, kind, scale) {
     for (const el of [clone, ...clone.querySelectorAll('*')]) { el.classList?.remove('selected'); el.removeAttribute('title'); el.removeAttribute('contenteditable'); for (const attr of [...el.attributes]) if (attr.name.startsWith('data-')) el.removeAttribute(attr.name); }
   }
   crop.append(holder); body.append(crop);
+  return {crop, holder, kept: [...keep.values()].flat()};
+}
+async function renderSelection(keys, kind, scale) {
+  if (!inspectionLib?.snapdom) throw new Error('Image export needs the toolbar bundle, which hasn’t loaded.');
+  commitFields(); stopTextEdit();
+  const built = buildExportClone(keys), {crop, holder} = built;
   try {
     await document.fonts.ready;
     await Promise.all([...holder.querySelectorAll('img')].map(img => img.decode()));
-    const origin = holder.getBoundingClientRect(), box = unionBox([...keep.values()].flat().map(el => { const r = el.getBoundingClientRect(); return {x: r.left - origin.left, y: r.top - origin.top, w: r.width, h: r.height}; }));
+    const box = measureExport(built);
     if (!box) throw new Error('The selected layers have nothing visible to draw.');
     const px = exportPixels(box, scale);
     Object.assign(crop.style, {width: `${box.w}px`, height: `${box.h}px`}); Object.assign(holder.style, {left: `${-box.x}px`, top: `${-box.y}px`});
@@ -1632,7 +1640,7 @@ async function renderSelection(keys, kind, scale) {
     blob = jpeg ? await jpegCredits(blob) : await pngCredits(blob);
     // Whatever the encoder did, the file is checked against what was promised before anything is saved.
     const bitmap = await createImageBitmap(blob); const size = {width: bitmap.width, height: bitmap.height}; bitmap.close?.();
-    if (Math.abs(size.width - px.width) > 1 || Math.abs(size.height - px.height) > 1) throw new Error(`The image came out at ${size.width} × ${size.height} instead of ${px.width} × ${px.height}.`);
+    if (size.width !== px.width || size.height !== px.height) throw new Error(`The image came out at ${size.width} × ${size.height} instead of ${px.width} × ${px.height}.`);
     return blob;
   } finally { crop.remove(); }
 }

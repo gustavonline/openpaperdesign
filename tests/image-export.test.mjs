@@ -89,6 +89,37 @@ test('the Share menu offers PNG and JPEG with a scale, never says Exported befor
   assert.match(app, /async function download\(blob, name\) \{ if\(inPaperSurface\)\{if\(await surfaceDownload\(blob,name\)===false\)throw/, 'a host refusal is seen');
   assert.match(host, /rpc\('ui\/download-file',params\);if\(result\?\.isError\)throw[^]*return true;[^]*return false;/, 'the host download reports whether the request was accepted'); assert.match(surface, /surfaceDownload=\(blob,name\)=>window\.__paperNative\.download\(blob,name\)/);
   assert.match(app, /snapdom\(crop,\{width: ?px\.width|snapdom\(crop, \{width: px\.width/, 'the capture is the cropped box at the chosen scale'); assert.match(app, /backgroundColor: jpeg \? '#ffffff' : null/, 'PNG is transparent, JPEG sits on white');
-  assert.match(app, /Math\.abs\(size\.width - px\.width\) > 1/, 'the written file is checked against the promised size');
+  assert.match(app, /size\.width !== px\.width \|\| size\.height !== px\.height/, 'the written file is checked against the promised size');
   assert.equal(savePickerSupport({showSaveFilePicker() {}}), true);
+});
+
+test('measurement noise cannot change a whole-pixel size, while real fractional, rotated or stroked bounds still round outward and are never clipped', async () => {
+  const {snapEdge, EDGE_GRID} = await import('../runtime/editing-model.js');
+  // The reported case: two layers at 100/140/180/120 and 410/180/200/120 are exactly 510 x 160, however the browser's arithmetic wobbles.
+  const exact = [{x: 100, y: 140, w: 180, h: 120}, {x: 410, y: 180, w: 200, h: 120}];
+  assert.deepEqual(unionBox(exact), {x: 100, y: 140, w: 510, h: 160}); assert.deepEqual(exportPixels(unionBox(exact), 1), {width: 510, height: 160, scale: 1, requested: 1, reduced: false}); assert.equal(exportPixels(unionBox(exact), 2).height, 320);
+  for (const wobble of [1e-13, 3e-12, 1e-9, 1e-6, 0.001, 0.003]) {
+    const noisy = [{x: 100 - wobble, y: 140 + wobble, w: 180 + wobble, h: 120 + wobble}, {x: 410 + wobble, y: 180 - wobble, w: 200 + wobble, h: 120 + 2 * wobble}], box = unionBox(noisy);
+    assert.deepEqual([box.w, box.h], [510, 160], `noise of ${wobble} is not a pixel`); assert.deepEqual([exportPixels(box, 1).height, exportPixels(box, 2).height], [160, 320]);
+  }
+  assert.equal(snapEdge(160.00000000000003), 160); assert.equal(snapEdge(99.99999999999999), 100); assert.equal(EDGE_GRID, 64, 'the engine’s own layout grid');
+  // Real fractions are kept and round outward: 160.25 needs 161 rows, a box that starts at 99.75 starts at 99, and one layout step above a whole number is real.
+  assert.equal(unionBox([{x: 0, y: 0, w: 100, h: 160.25}]).h, 161); assert.deepEqual(unionBox([{x: 99.75, y: 10.5, w: 10, h: 10}]), {x: 99, y: 10, w: 11, h: 11});
+  assert.equal(unionBox([{x: 0, y: 0, w: 100, h: 160 + 1 / 64}]).h, 161, 'one layout step over is a real pixel row, not noise'); assert.equal(unionBox([{x: 0, y: 0, w: 100, h: 160 + 1 / 256}]).h, 160, 'a quarter of a step is below the grid and snaps away');
+  // A rotated square (bounding box of a 100x100 square turned 45 degrees is 141.42..) and a stroked layer (an extra 2px each side) are never cut short.
+  const turned = 100 * Math.SQRT2; assert.equal(unionBox([{x: -(turned - 100) / 2, y: -(turned - 100) / 2, w: turned, h: turned}]).w, 142); assert.deepEqual(unionBox([{x: -2, y: -2, w: 104, h: 104}]), {x: -2, y: -2, w: 104, h: 104});
+  // Order and negative coordinates do not matter.
+  assert.deepEqual(unionBox([...exact].reverse()), unionBox(exact)); assert.deepEqual(unionBox([{x: -10.5, y: -0.25, w: 5, h: 5}]), {x: -11, y: -1, w: 6, h: 6});
+});
+
+test('the Share menu advertises the size the capture draws: one off-screen measurement, no live camera-scaled bounds, and an exact size check on the file', async () => {
+  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
+  const menu = app.slice(app.indexOf('function exportMeasure('), app.indexOf('function paintExportMenu()')), render = app.slice(app.indexOf('function buildExportClone('), app.indexOf('async function jpegCredits('));
+  assert.match(menu, /buildExportClone\(keys\); return measureExport\(built\)/, 'the menu measures the clone'); assert.match(menu, /finally \{ built\?\.crop\.remove\(\); \}/, 'and removes it');
+  assert.doesNotMatch(app.slice(app.indexOf('function exportKeys()'), app.indexOf('function paintExportMenu()')) + render, /camera\.z|getBoundingClientRect\(\)\s*;?\s*return r && /, 'no live, camera-scaled measurement is left in the export code');
+  assert.match(render, /const box = measureExport\(built\);/, 'the capture measures with the same function'); assert.equal((app.match(/function measureExport\(/g) || []).length, 1); assert.equal((app.match(/unionBox\(/g) || []).length, 1, 'unionBox is called in one place');
+  assert.match(app, /exportMeasure\(keys\), ready =/, 'the menu uses it');
+  assert.match(render, /if \(size\.width !== px\.width \|\| size\.height !== px\.height\) throw new Error\(/, 'the written file must be exactly the size that was promised');
+  // The pixels, scale, transparency/white, notices and delivery wording are as they were.
+  assert.match(render, /backgroundColor: jpeg \? '#ffffff' : null/); assert.match(render, /blob = jpeg \? await jpegCredits\(blob\) : await pngCredits\(blob\)/); assert.match(app, /const px = exportPixels\(box, scale\)/);
 });

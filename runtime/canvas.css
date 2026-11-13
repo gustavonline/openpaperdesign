@@ -373,3 +373,25 @@ body:not(.left-open) #presence-roster,body:not(.right-open) #presence-roster{pad
 .motion-card .field,#motion-body select.field{height:26px;font-size:12px;min-width:0}.motion-card input[type=number]{width:74px}.motion-card .check{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)}
 .motion-card .title{font-weight:600;font-size:12px;color:var(--text)}.motion-card button{height:24px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);font:inherit;font-size:11px}.motion-card .danger{color:var(--danger)}
 #motion-body .note{margin:0;color:var(--text-2)}
+
+/* Top bars: real allocation of the width there is. Both bars are fixed to opposite corners, so their widths must add up to the viewport; they are
+   sized from the same tokens (never by z-index or screenshot offsets) so no control is ever drawn over another:
+   - the right cluster has a fixed content width per tier (--rfloat is its floating box), and a compact tier (below 520px) that keeps Share as an
+     icon, the zoom level (its menu offers zoom to fit, to selection and 100%), the Zoom to fit button and the Properties toggle; zoom out/in keep
+     their keys (+ and -) and the zoom menu;
+   - below 480px the shared panel width gives way a little (never below 200px) so a floating bar has room beside an open panel;
+   - the left bar, when it floats, takes only what the right side leaves (--rext), its Paper title shrinks first, and below 431px beside an open
+     Properties panel the title yields entirely (Rename Paper… stays in the Paper menu). Home, the Paper menu, Play and Pages always stay. */
+body{--rfloat:234px}
+body.right-open{--rext:var(--panel-w)}body:not(.right-open){--rext:calc(var(--rfloat) + 5px)}
+.share-button{width:66px;padding:0 6px;justify-content:center}.level{min-width:44px}
+body:not(.left-open) #left-bar{width:min(calc(var(--panel-w) - 10px),calc(100vw - var(--rext) - 11px))}
+@media(max-width:519px){body{--rfloat:136px}.share-button{width:28px}.share-button span{display:none}#zoom-out,#zoom-in{display:none}.level{min-width:40px;padding:0 4px}}
+@media(max-width:479px){body{--panel-w:clamp(200px,calc(100vw - 150px),240px)}}
+@media(max-width:430px){
+  body.right-open:not(.left-open) #left-bar{width:auto}body.right-open:not(.left-open) #left-bar .title{display:none}
+  /* Renaming the Paper from its menu gives the whole bar to the name field for as long as it is open. */
+  body.right-open:not(.left-open) #left-bar:has(.title-input:not([hidden])){width:min(calc(var(--panel-w) - 10px),calc(100vw - var(--rext) - 11px))}
+  body.right-open:not(.left-open) #left-bar:has(.title-input:not([hidden])) .title{display:flex}
+  body.right-open:not(.left-open) #left-bar:has(.title-input:not([hidden])) .ibtn{display:none}
+}

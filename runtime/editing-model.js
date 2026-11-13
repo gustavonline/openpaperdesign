@@ -337,12 +337,17 @@ export function plannedOriginal({captured, scene, node}) {
 // ---- Rendered export (Share → PNG / JPEG image). The image is what the canvas draws for the chosen layers, cropped to exactly their rendered
 // bounds: not the stored original of an image layer (that is Save image…), and never the editor's own chrome.
 export const EXPORT_SCALES = [1, 2, 3], EXPORT_MAX_SIDE = 8192, EXPORT_MAX_PIXELS = 16e6;
+// Layout engines place things on a 1/64 px grid and floating-point arithmetic adds noise far below that (160.00000000000003). Every measured edge is
+// snapped to that grid first, so noise cannot push a whole-pixel size up by one, while a genuinely fractional edge (160.25, a rotated or stroked bound)
+// is kept exactly and still rounds OUTWARD, so nothing real is ever clipped. This is the one measurement policy for the Share menu and the capture.
+export const EDGE_GRID = 64, snapEdge = value => Math.round(value * EDGE_GRID) / EDGE_GRID;
 // The smallest whole-pixel box that holds every rect, or null when there is nothing to draw.
 export function unionBox(rects) {
   const list = rects.filter(r => r && Number.isFinite(r.x + r.y + r.w + r.h) && r.w > 0 && r.h > 0);
   if (!list.length) return null;
-  const x = Math.floor(Math.min(...list.map(r => r.x))), y = Math.floor(Math.min(...list.map(r => r.y)));
-  return {x, y, w: Math.max(1, Math.ceil(Math.max(...list.map(r => r.x + r.w))) - x), h: Math.max(1, Math.ceil(Math.max(...list.map(r => r.y + r.h))) - y)};
+  const left = Math.min(...list.map(r => snapEdge(r.x))), top = Math.min(...list.map(r => snapEdge(r.y))), right = Math.max(...list.map(r => snapEdge(r.x + r.w))), bottom = Math.max(...list.map(r => snapEdge(r.y + r.h)));
+  const x = Math.floor(left), y = Math.floor(top);
+  return {x, y, w: Math.max(1, Math.ceil(right) - x), h: Math.max(1, Math.ceil(bottom) - y)};
 }
 // Output pixels for a box at 1×, 2× or 3×. Past 8192 px a side or 16 megapixels the scale comes down so the file stays one the browser can
 // encode and other apps can open; `reduced` says so, and the result is never silently a different size than reported.
