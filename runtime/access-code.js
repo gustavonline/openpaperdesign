@@ -28,7 +28,7 @@ export function findInvitationLink(text) {
   return link ? link[0].replace(/\)+$/, '') : '';
 }
 // Accepts a bare link, a bare 43-character key, or a whole pasted invitation message. The code is
-// taken from a labelled line ("Adgangskode:" or "Code:", the code on the same or the next line), or from the single
+// taken from a labelled line ("Access code:", "Code:" or the older Danish "Adgangskode:", the code on the same or the next line), or from the single
 // leftover code-shaped word after the link. Unlabelled words must contain a digit: ordinary words such as "december" or
 // "Derefter" are made only of code symbols and must never be read as a code.
 export function extractInvitation(text) {

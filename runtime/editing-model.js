@@ -302,19 +302,34 @@ export async function copyOriginalImage({getOriginal, toPng, clipboard, Clipboar
   catch { await made; throw new OriginalError('clipboard', 'The clipboard refused the image, so nothing was copied.'); }
   return {copied: true, converted};
 }
-// Save image…: a real save-location chooser where the browser has one. The original is fetched first (fresh, checked), then the chooser opens
-// (the click's activation is still valid for a moment), then exactly those bytes are written. Cancelling the chooser ends it: no download is
-// started elsewhere. Where there is no chooser the caller offers Download original instead, labelled as the browser's own download.
+// Save As: a real save-location chooser where the browser has one. The chooser is opened FIRST, inside the click (browsers only allow it while the
+// click's user activation is fresh, and fetching or rendering can take longer than that), then the bytes are produced, then exactly those bytes
+// are written. Cancelling the chooser ends it: no download is started elsewhere. If producing the bytes fails after a place was chosen, nothing is
+// written and the writer is never opened; the person is told that an empty file may have been left at the chosen place. Where there is no chooser
+// the caller offers a separately labelled browser download instead.
 export const savePickerSupport = env => typeof env.showSaveFilePicker === 'function';
-export async function saveOriginalImage({original, picker}) {
+const EMPTY_NOTE = ' If your browser created an empty file at the chosen place, you can delete it.';
+export async function saveWithChooser({picker, name, mime, description = 'Image', extensions, produce}) {
+  const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase(), accept = extensions || (ext ? ['.' + ext] : []);
   let handle;
-  try { handle = await picker({suggestedName: original.saveAs || original.name, types: [{description: 'Image', accept: {[original.mime]: ['.' + (original.saveAs || original.name).split('.').pop().toLowerCase()]}}]}); }
+  try { handle = await picker({suggestedName: name, types: [{description, accept: {[mime]: accept}}]}); }
   catch (error) {
     if (error?.name === 'AbortError') return {saved: false, cancelled: true};
-    throw new OriginalError('picker', error?.name === 'SecurityError' || error?.name === 'NotAllowedError' ? 'The browser did not allow a save location here, so nothing was saved. Use Download original instead.' : 'The save location could not be opened, so nothing was saved.');
+    throw new OriginalError('picker', error?.name === 'SecurityError' || error?.name === 'NotAllowedError' ? 'The browser did not allow a save location here, so nothing was saved. Use the download option instead.' : 'The save location could not be opened, so nothing was saved.');
   }
+  let blob;
+  try { blob = await produce(); if (!(blob instanceof Blob) || !blob.size) throw new OriginalError('failed', 'There was nothing to save.'); }
+  catch (error) { throw new OriginalError(error?.reason || 'failed', `${error?.message || 'The file could not be prepared.'} Nothing was saved.${EMPTY_NOTE}`.replace(/ Nothing was saved\. Nothing was saved\./, ' Nothing was saved.')); }
   let writable;
-  try { writable = await handle.createWritable(); await writable.write(original.blob); await writable.close(); }
+  try { writable = await handle.createWritable(); await writable.write(blob); await writable.close(); }
   catch { try { await writable?.abort?.(); } catch { /* Nothing more to clean up. */ } throw new OriginalError('write', 'The file could not be written to the chosen place.'); }
-  return {saved: true, name: handle.name || original.saveAs || original.name};
+  return {saved: true, name: handle.name || name};
+}
+// What Save image… will offer, known BEFORE anything is fetched (the chooser needs it first): this layer's stored original and its save name. The
+// same identity is checked again when the original is fetched, so a layer that changed in between saves nothing.
+export function plannedOriginal({captured, scene, node}) {
+  const found = originalOf(scene, node);
+  if (!found.ok) throw new OriginalError(found.reason, WORDS[found.reason]);
+  if (found.name !== (captured?.name ?? null)) throw new OriginalError('changed', WORDS.changed);
+  return {name: found.name, mime: found.mime, saveAs: saveNameFor(scene, node, found.name, found.mime)};
 }

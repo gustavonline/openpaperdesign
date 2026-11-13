@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
-import {safeAssetName, saveNameFor, imageSize, importImageFiles, importSummary, copyOriginalImage, copyImageSupport, saveOriginalImage, savePickerSupport, fetchOriginal, fetchCapturedOriginal, captureOriginal, OriginalError, MAX_IMAGE_BYTES} from '../runtime/editing-model.js';
+import {safeAssetName, saveNameFor, imageSize, importImageFiles, importSummary, copyOriginalImage, copyImageSupport, saveWithChooser, plannedOriginal, savePickerSupport, fetchOriginal, fetchCapturedOriginal, captureOriginal, OriginalError, MAX_IMAGE_BYTES} from '../runtime/editing-model.js';
 
 const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('png original '), Buffer.alloc(64, 1)]);
 const JPEG = Buffer.concat([Buffer.from([255, 216, 255, 224]), Buffer.from('jpeg original '), Buffer.alloc(64, 2)]);
@@ -77,17 +77,25 @@ test('Copy image puts a picture on the clipboard from a fresh original, converti
   assert.equal(copyImageSupport({ClipboardItem: class { static supports = () => false }, clipboard: {write() {}}}), false); assert.equal(copyImageSupport({ClipboardItem: class {}, clipboard: {write() {}}}), true, 'an engine without supports() is trusted to take PNG');
 });
 
-test('Save image… writes exactly the original to the chosen place; cancelling saves nothing and never falls back to a download', async () => {
-  const original = {blob: new Blob([PNG], {type: 'image/png'}), name: `${SHA}.png`, saveAs: 'Hero shot.png', mime: 'image/png'}, log = [];
+test('Save image… opens the chooser first, then writes exactly the original; cancelling saves nothing and never falls back to a download', async () => {
+  const blob = new Blob([PNG], {type: 'image/png'}), log = [];
   const handle = {name: 'Hero shot (1).png', async createWritable() { log.push('open'); return {write: async b => log.push(['write', b]), close: async () => log.push('close'), abort: async () => log.push('abort')}; }};
-  const options = []; const saved = await saveOriginalImage({original, picker: async o => { options.push(o); return handle; }});
+  const options = [], order = []; const saved = await saveWithChooser({name: 'Hero shot.png', mime: 'image/png', picker: async o => { order.push('picker'); options.push(o); return handle; }, produce: async () => { order.push('produce'); return blob; }});
+  assert.deepEqual(order, ['picker', 'produce'], 'the chooser is opened before the original is fetched, while the click is still fresh');
   assert.deepEqual(saved, {saved: true, name: 'Hero shot (1).png'}); assert.equal(options[0].suggestedName, 'Hero shot.png'); assert.deepEqual(options[0].types, [{description: 'Image', accept: {'image/png': ['.png']}}]);
-  assert.deepEqual(log.map(x => Array.isArray(x) ? x[0] : x), ['open', 'write', 'close']); assert.equal(log[1][1], original.blob, 'the very bytes that were fetched');
-  log.length = 0; assert.deepEqual(await saveOriginalImage({original, picker: async () => { throw new DOMException('cancelled', 'AbortError'); }}), {saved: false, cancelled: true}); assert.deepEqual(log, [], 'nothing was opened or written');
-  for (const name of ['SecurityError', 'NotAllowedError']) await assert.rejects(saveOriginalImage({original, picker: async () => { throw new DOMException('x', name); }}), e => e instanceof OriginalError && e.reason === 'picker' && /Use Download original instead/.test(e.message));
-  await assert.rejects(saveOriginalImage({original, picker: async () => { throw new Error('boom'); }}), e => e.reason === 'picker' && /nothing was saved/.test(e.message));
-  log.length = 0; await assert.rejects(saveOriginalImage({original, picker: async () => ({async createWritable() { return {write: async () => { throw new Error('disk full'); }, close: async () => {}, abort: async () => log.push('abort')}; }})}), e => e.reason === 'write'); assert.deepEqual(log, ['abort'], 'a failed write is aborted, not closed as a good file');
+  assert.deepEqual(log.map(x => Array.isArray(x) ? x[0] : x), ['open', 'write', 'close']); assert.equal(log[1][1], blob, 'the very bytes that were fetched');
+  let produced = 0; log.length = 0; assert.deepEqual(await saveWithChooser({name: 'a.png', mime: 'image/png', picker: async () => { throw new DOMException('cancelled', 'AbortError'); }, produce: async () => { produced++; return blob; }}), {saved: false, cancelled: true}); assert.deepEqual(log, [], 'nothing was opened or written'); assert.equal(produced, 0, 'a cancelled chooser fetches and renders nothing');
+  for (const name of ['SecurityError', 'NotAllowedError']) await assert.rejects(saveWithChooser({name: 'a.png', mime: 'image/png', picker: async () => { throw new DOMException('x', name); }, produce: async () => blob}), e => e instanceof OriginalError && e.reason === 'picker' && /Use the download option instead/.test(e.message));
+  await assert.rejects(saveWithChooser({name: 'a.png', mime: 'image/png', picker: async () => { throw new Error('boom'); }, produce: async () => blob}), e => e.reason === 'picker' && /nothing was saved/.test(e.message));
+  log.length = 0; await assert.rejects(saveWithChooser({name: 'a.png', mime: 'image/png', picker: async () => ({async createWritable() { return {write: async () => { throw new Error('disk full'); }, close: async () => {}, abort: async () => log.push('abort')}; }}), produce: async () => blob}), e => e.reason === 'write'); assert.deepEqual(log, ['abort'], 'a failed write is aborted, not closed as a good file');
+  // A fetch or render that fails after the place was chosen writes nothing, never opens the writer, and says what may be left behind.
+  log.length = 0; for (const failure of [new OriginalError('access-ended', 'This invitation no longer allows this download. Nothing was downloaded.'), new Error('render exploded')]) await assert.rejects(saveWithChooser({name: 'a.png', mime: 'image/png', picker: async () => handle, produce: async () => { throw failure; }}), e => e instanceof OriginalError && /Nothing was/.test(e.message) && /empty file/.test(e.message)); assert.deepEqual(log, [], 'the writer was never opened, so no false save');
+  await assert.rejects(saveWithChooser({name: 'a.png', mime: 'image/png', picker: async () => handle, produce: async () => new Blob([])}), e => /nothing to save/i.test(e.message)); assert.deepEqual(log, []);
   assert.equal(savePickerSupport({showSaveFilePicker() {}}), true); assert.equal(savePickerSupport({}), false); assert.equal(savePickerSupport({showSaveFilePicker: 'yes'}), false);
+  // The name and type come from the layer BEFORE any fetch, and a layer that changed is refused.
+  const node = {id: 2, type: 'rect', style: {fills: [{type: 'image', asset: 'k', mode: 'fit'}]}}, scene = {assets: {k: `assets/${SHA}.png`}, assetNames: {k: 'Hero shot.png'}};
+  assert.deepEqual(plannedOriginal({captured: {name: `${SHA}.png`}, scene, node}), {name: `${SHA}.png`, mime: 'image/png', saveAs: 'Hero shot.png'});
+  assert.throws(() => plannedOriginal({captured: {name: 'other.png'}, scene, node}), e => e.reason === 'changed'); assert.throws(() => plannedOriginal({captured: {name: null}, scene: {assets: {}}, node}), e => e.reason === 'missing');
 });
 
 test('the fetched original carries the remembered save name, and a replaced image is still refused', async () => {
@@ -107,7 +115,7 @@ test('the editor refuses to let a dropped file navigate away, imports only for e
   const state = {canEdit: true, inspection: false, messages: [], uploads: [], inserted: [], listeners: new Map(), measured: [{w: 800, h: 600}, {w: 400, h: 300}, {w: 4000, h: 2000}]};
   const stageNode = {}, overlayNode = {}, scratchNode = {}; const stage = {clientWidth: 1200, clientHeight: 800, contains: n => n === stageNode || n?.inStage === true}, overlayRoot = {contains: n => n === overlayNode};
   class FakeImage { set src(value) { const size = state.measured.shift() ?? {w: 100, h: 100}; this.naturalWidth = size.w; this.naturalHeight = size.h; queueMicrotask(() => size.fail ? this.onerror() : this.onload()); } }
-  const names = ['state', 'stage', 'overlayRoot', 'boards', 'keyOf', 'importImageFiles', 'importSummary', 'imageSize', 'copyOriginalImage', 'saveOriginalImage', 'fetchCapturedOriginal', 'insertTemplate', 'message', 'nodes', 'paperId', 'paperQuery', 'clientHeaders', 'fetch', 'Image', 'navigator', 'window', 'document', 'scene0', 'camera0'];
+  const names = ['state', 'stage', 'overlayRoot', 'boards', 'keyOf', 'importImageFiles', 'importSummary', 'imageSize', 'copyOriginalImage', 'saveWithChooser', 'plannedOriginal', 'OriginalError', 'fetchCapturedOriginal', 'insertTemplate', 'message', 'nodes', 'paperId', 'paperQuery', 'clientHeaders', 'fetch', 'Image', 'navigator', 'window', 'document', 'scene0', 'camera0'];
   const win = {addEventListener: (type, fn) => state.listeners.set(type, fn), ClipboardItem: undefined}, scene = {assets: {}, pages: []};
   // The slice reads canEdit and inspection as variables; give it live accessors through with-free wrappers.
   const build = new Function(...names, `let canEdit=state.canEdit,inspection=state.inspection,scene=scene0,camera=camera0,originalTarget=null,originalFocus=null;
@@ -115,7 +123,7 @@ test('the editor refuses to let a dropped file navigate away, imports only for e
     return {sync(){canEdit=state.canEdit;inspection=state.inspection;},setScene(next){scene=next;},get scene(){return scene;}};`);
   const upload = async (url, options) => { state.uploads.push({url, type: options.headers['Content-Type'], bytes: Buffer.from(options.body)}); return Response.json({asset: 'asset' + state.uploads.length, path: `assets/asset${state.uploads.length}.png`}, {status: 201}); };
   const board = {artboard: true, page: {id: 'pg'}, node: {id: 1}};
-  const api = build(state, stage, overlayRoot, new Map([['pg:1', board]]), (page, id) => `${page.id}:${id}`, importImageFiles, importSummary, imageSize, copyOriginalImage, saveOriginalImage, fetchCapturedOriginal,
+  const api = build(state, stage, overlayRoot, new Map([['pg:1', board]]), (page, id) => `${page.id}:${id}`, importImageFiles, importSummary, imageSize, copyOriginalImage, saveWithChooser, plannedOriginal, OriginalError, fetchCapturedOriginal,
     (template, drop) => state.inserted.push({template, drop}), text => state.messages.push(text), new Map(), 'p1', '?paper=p1', {'X-Paper-Client': 'c'}, upload, FakeImage, {clipboard: undefined}, win, {createElement() {}}, scene, {x: 0, y: 0, z: 1});
   const dragover = state.listeners.get('dragover'), drop = state.listeners.get('drop'); assert.equal(typeof dragover, 'function'); assert.equal(typeof drop, 'function');
   const event = (target, types = ['Files'], files = [], extra = {}) => ({target, dataTransfer: {types, files, dropEffect: ''}, clientX: 600, clientY: 400, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; }, ...extra});
@@ -136,11 +144,11 @@ test('the editor refuses to let a dropped file navigate away, imports only for e
   assert.deepEqual(api.scene.assets, {asset1: 'assets/asset1.png', asset2: 'assets/asset2.png'}); assert.deepEqual(api.scene.assetNames, {asset1: 'Hero shot.png', asset2: 'wide.jpg'});
   assert.match(state.messages.at(-1), /Added 2 images\. Not added: bad\.gif is not a PNG, JPEG or WebP image\./);
   // Zoomed in, the same drop is smaller in the document so it does not swamp the screen; dropped on empty canvas it becomes a free layer.
-  state.inserted.length = 0; state.uploads.length = 0; state.measured = [{w: 4000, h: 2000}]; api.setScene(api.scene); const zoomed = build(state, stage, overlayRoot, new Map(), (p, i) => `${p.id}:${i}`, importImageFiles, importSummary, imageSize, copyOriginalImage, saveOriginalImage, fetchCapturedOriginal, (template, drop) => state.inserted.push({template, drop}), t => state.messages.push(t), new Map(), 'p1', '?paper=p1', {}, upload, FakeImage, {}, {addEventListener: (type, fn) => state.listeners.set(type, fn)}, {}, {assets: {}}, {x: 0, y: 0, z: 3});
+  state.inserted.length = 0; state.uploads.length = 0; state.measured = [{w: 4000, h: 2000}]; api.setScene(api.scene); const zoomed = build(state, stage, overlayRoot, new Map(), (p, i) => `${p.id}:${i}`, importImageFiles, importSummary, imageSize, copyOriginalImage, saveWithChooser, plannedOriginal, OriginalError, fetchCapturedOriginal, (template, drop) => state.inserted.push({template, drop}), t => state.messages.push(t), new Map(), 'p1', '?paper=p1', {}, upload, FakeImage, {}, {addEventListener: (type, fn) => state.listeners.set(type, fn)}, {}, {assets: {}}, {x: 0, y: 0, z: 3});
   state.listeners.get('drop')(event(stageNode, ['Files'], [file('big.png', PNG)])); await settle(); assert.ok(state.inserted[0].template.nodes[0].rect.w * 3 <= 0.6 * 1200 + 1); assert.equal(state.inserted[0].drop.board, null, 'dropped on empty canvas: a free layer'); assert.ok(zoomed);
   // The Paper being replaced mid-import (a live refresh) stops the import from touching the new document.
   state.inserted.length = 0; state.uploads.length = 0; state.measured = [{w: 100, h: 100}, {w: 100, h: 100}]; state.canEdit = true; api.sync();
-  const replaced = build(state, stage, overlayRoot, new Map(), (p, i) => `${p.id}:${i}`, importImageFiles, importSummary, imageSize, copyOriginalImage, saveOriginalImage, fetchCapturedOriginal, (template, drop) => state.inserted.push({template, drop}), t => state.messages.push(t), new Map(), 'p1', '?paper=p1', {}, async (url, options) => { const response = await upload(url, options); replaced.setScene({assets: {}}); return response; }, FakeImage, {}, {addEventListener: (type, fn) => state.listeners.set(type, fn)}, {}, {assets: {}}, {x: 0, y: 0, z: 1});
+  const replaced = build(state, stage, overlayRoot, new Map(), (p, i) => `${p.id}:${i}`, importImageFiles, importSummary, imageSize, copyOriginalImage, saveWithChooser, plannedOriginal, OriginalError, fetchCapturedOriginal, (template, drop) => state.inserted.push({template, drop}), t => state.messages.push(t), new Map(), 'p1', '?paper=p1', {}, async (url, options) => { const response = await upload(url, options); replaced.setScene({assets: {}}); return response; }, FakeImage, {}, {addEventListener: (type, fn) => state.listeners.set(type, fn)}, {}, {assets: {}}, {x: 0, y: 0, z: 1});
   state.listeners.get('drop')(event(stageNode, ['Files'], [file('p.png', PNG), file('q.png', PNG)])); await settle(); assert.equal(state.inserted.length, 0, 'nothing is placed into a replaced Paper'); assert.match(state.messages.at(-1), /Paper changed/);
 });
 
@@ -149,6 +157,8 @@ test('the menu carries Copy image and Save image… for images only, wired to fr
   assert.match(html, /<button type="button" role="menuitem" data-edit="copy-image" hidden>Copy image<\/button>\s*<button type="button" role="menuitem" data-edit="save-image" hidden>Save image…<\/button>\s*<button type="button" role="menuitem" data-edit="download-original" hidden>Download original<\/button>/, 'hidden until an image is under the pointer; the browser download stays its own, separately labelled item');
   assert.match(app, /if\(action==='copy-image'\)return copyImage\(\);if\(action==='save-image'\)return saveImage\(\);/);
   for (const name of ['copyImage', 'saveImage']) { const body = app.slice(app.indexOf(`async function ${name}()`), app.indexOf('\n}\n', app.indexOf(`async function ${name}()`))); assert.match(body, /fetchCapturedOriginal|originalRequest\(target,entry\)/); assert.doesNotMatch(body, /assetUrl|paperAsset|dataUrl|selected|\.download\(|download\(/, `${name} never uses the display copy, the selection or a download`); }
+  const saveBody = app.slice(app.indexOf('async function saveImage()'), app.indexOf('\n}\n', app.indexOf('async function saveImage()')));
+  assert.ok(saveBody.indexOf('plannedOriginal(') > -1 && saveBody.indexOf('saveWithChooser(') > saveBody.indexOf('plannedOriginal(') && saveBody.indexOf('fetchCapturedOriginal(') > saveBody.indexOf('saveWithChooser('), 'Save image… plans from the layer, opens the chooser, and only then fetches the original');
   assert.match(app, /copyOk:copyImageSupport\(\{ClipboardItem:window\.ClipboardItem,clipboard:navigator\.clipboard\}\),saveOk:savePickerSupport\(window\)/, 'offered only where the browser can do it');
   assert.doesNotMatch(app.slice(app.indexOf('async function saveImage()'), app.indexOf('const hasFiles')), /download\(/, 'no download fallback when the chooser is cancelled or refused');
   assert.doesNotMatch(app, /showDirectoryPicker|FileSystemHandle|text\/uri-list.*clipboard|navigator\.clipboard\.write\(\[new ClipboardItem\(\{'text\/uri-list'/, 'no file clipboard is claimed');

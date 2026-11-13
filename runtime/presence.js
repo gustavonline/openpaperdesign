@@ -1,6 +1,7 @@
 import {transitionAgent,changedArtwork,EFFECT_MS,REVEAL_MS} from './agent-motion.js?v=3b1734f2e2bd';
 // Badge placement. A badge nobody has moved sits in a centred strip along the top of the canvas; a moved badge keeps a position of its own,
 // kept only as a local preference per participant identity (never in the Paper), clamped into the visible canvas whenever it is placed.
+// A moved badge stays in the strip's layout (so its slot is kept and the others never shift) and is only offset from that slot.
 const BADGE_GAP = 8, BADGE_LIMIT = 24, BADGE_ID = /^[\w:.@-]{1,100}$/;
 export function clampBadge(position, size, area, gap = BADGE_GAP) {
   return {x: Math.round(Math.max(gap, Math.min(position.x, area.width - size.w - gap))), y: Math.round(Math.max(gap, Math.min(position.y, area.height - size.h - gap)))};
@@ -24,10 +25,13 @@ export function setupPresence(host){
   const hint='Drag to move · Arrow keys to move · Double-click or Home to reset';
   function remember(){try{localStorage.setItem(positionKey,writeBadgePositions(positions))}catch{}}
   function place(){
-    const r=host.stage.getBoundingClientRect(),area={width:r.width,height:r.height};
+    const r=host.stage.getBoundingClientRect(),area={width:r.width,height:r.height},slots=new Map();
+    // Measure every slot with no offsets applied, so a badge's own offset never feeds back into where its slot is.
+    for(const chip of chips.values())chip.style.left=chip.style.top='';
+    for(const [identity,chip] of chips){const c=chip.getBoundingClientRect();slots.set(identity,{x:c.left-r.left,y:c.top-r.top});}
     for(const [identity,chip] of chips){const saved=positions.get(identity);chip.classList.toggle('moved',!!saved);
-      if(!saved){chip.style.left=chip.style.top='';continue;}
-      const p=clampBadge(saved,{w:chip.offsetWidth,h:chip.offsetHeight},area);chip.style.left=p.x+'px';chip.style.top=p.y+'px';}
+      if(!saved)continue;
+      const p=clampBadge(saved,{w:chip.offsetWidth,h:chip.offsetHeight},area),slot=slots.get(identity);chip.style.left=Math.round(p.x-slot.x)+'px';chip.style.top=Math.round(p.y-slot.y)+'px';}
   }
   const where=chip=>{const r=chip.getBoundingClientRect(),s=host.stage.getBoundingClientRect();return {x:r.left-s.left,y:r.top-s.top};};
   function moveTo(identity,chip,position){const r=host.stage.getBoundingClientRect();positions.delete(identity);positions.set(identity,clampBadge(position,{w:chip.offsetWidth,h:chip.offsetHeight},{width:r.width,height:r.height}));place();}

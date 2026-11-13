@@ -1,11 +1,11 @@
 import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
-import {setupPresence} from './presence.js?v=0533180fa588';
+import {setupPresence} from './presence.js?v=ad47b40267f6';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
-import { setupSharing } from './sharing.js?v=37f4c823cf59';
+import { setupSharing } from './sharing.js?v=a989571611a9';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,saveOriginalImage,copyImageSupport,savePickerSupport} from './editing-model.js?v=1cc12cb33966';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=4f592a58217a';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -506,7 +506,9 @@ async function saveImage(){
   const target=originalTarget,back=originalFocus;originalTarget=originalFocus=null;
   try{
     const entry=nodes.get(target?.key);if(!entry)throw new Error('Choose an image to save.');
-    const original=await fetchCapturedOriginal(originalRequest(target,entry)),result=await saveOriginalImage({original,picker:options=>window.showSaveFilePicker(options)});
+    const plan=plannedOriginal({captured:target,scene,node:entry.node});
+    // The chooser opens now, inside the click; the original is then fetched fresh through the scoped fetch and checked against the same layer.
+    const result=await saveWithChooser({picker:options=>window.showSaveFilePicker(options),name:plan.saveAs,mime:plan.mime,description:'Image',produce:async()=>{const original=await fetchCapturedOriginal(originalRequest(target,nodes.get(target.key)||entry));if(original.mime!==plan.mime||original.saveAs!==plan.saveAs)throw new OriginalError('changed','This image changed while the save location was open.');return original.blob;}});
     message(result.saved?`Saved ${result.name}.`:'Save cancelled. Nothing was saved.');
   }catch(error){if(error?.name!=='AbortError')message(error?.message||'The image could not be saved.');}
   back?.focus?.();

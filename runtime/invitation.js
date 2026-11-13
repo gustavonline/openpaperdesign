@@ -30,16 +30,18 @@ export function describeExpiry(expiresAt, now = Date.now()){
 }
 // A finite end with its date, time and time zone, so a recipient in another zone or on another day reads it the same way.
 export function exactExpiry(expiresAt, timeZone){
-  return new Intl.DateTimeFormat('da-DK',{...(timeZone?{timeZone}:{}),weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false,timeZoneName:'short'}).format(expiresAt);
+  return new Intl.DateTimeFormat('en-GB',{...(timeZone?{timeZone}:{}),weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false,timeZoneName:'short'}).format(expiresAt);
 }
 // The plain-text message the owner pastes into any email or chat. The link and the code are each alone on a line (no
 // quotes, brackets or trailing punctuation), so they can be clicked and copied; the browser is all the recipient needs.
-// Danish, as written for the owner's recipients. The code block is left out entirely when the invitation has no code.
+// English. The code block is left out entirely when the invitation has no code. What it promises is only what is true: the permission
+// of this invitation, the end it really has, and that a link with no end still needs the owner's computer to be on and online.
+// Recipients who paste an older Danish message still read through the same parser (access-code.js).
 export function invitationMessage({role, url, code, expiresAt, timeZone}){
   const shown=code?readCode(code):'';
-  const open=`Åbn linket i din browser${shown?', og indtast koden':''}. ${role==='edit'?'Du kan redigere.':'Du kan se Paper, men ikke redigere.'} Du behøver intet plugin.`;
-  const ends=expiresAt===null?'Linket har ingen udløbstid, men virker kun, mens min computer er tændt og online og kører Paper. Det er ikke permanent.':Number.isFinite(expiresAt)?`Linket udløber ${exactExpiry(expiresAt,timeZone)}.`:'';
-  return ['Se mit Paper:','',url,'',...(shown?['Adgangskode:',shown,'']:[]),open,...(ends?[ends]:[])].join('\n');
+  const open=`Open the link in your browser${shown?' and enter the code':''}. ${role==='edit'?'You can edit the Paper.':'You can view the Paper but not edit it.'} You do not need a plugin.`;
+  const ends=expiresAt===null?'This link has no end time, but it only works while my computer is on, online and running Paper. It is not permanent.':Number.isFinite(expiresAt)?`This link expires ${exactExpiry(expiresAt,timeZone)}.`:'';
+  return ['See my Paper:','',url,'',...(shown?['Access code:',shown,'']:[]),open,...(ends?[ends]:[])].join('\n');
 }
 // Why an invitation ended, in plain words. Only a reason the server gave is named; anything else stays neutral
 // (an older server, a dropped stream) rather than blaming the owner.
