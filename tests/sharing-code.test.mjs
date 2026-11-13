@@ -318,6 +318,13 @@ test('the Danish message round-trips for the plugin and the browser, with other 
   // Unlabelled words with no digit are never a code; a hand-typed code with digits still is.
   assert.equal(extractInvitation(`${URL_} Derefter december`).code,'');
   assert.equal(extractInvitation(`${URL_} koden er k7qm 4p2x`).code,'K7QM-4P2X');
+  // The digit is required of the code as it reads after normalization, so full-width and other forms still count.
+  for(const typed of ['Ｋ７ＱＭ－４Ｐ２Ｘ','ｋ７ｑｍ ４ｐ２ｘ','k7qm‑4p2x'])
+    assert.deepEqual(extractInvitation(`${URL_}\n${typed}`),{token:key,code:'K7QM-4P2X'},JSON.stringify(typed));
+  // Ambiguous unlabelled all-letter words stay rejected, in plain or full-width form, while labelled all-letter codes are accepted.
+  for(const word of ['december','Derefter','ＤＥＣＥＭＢＥＲ','ABCD-EFGH'])assert.equal(extractInvitation(`${URL_}\n${word}`).code,'',word);
+  for(const label of ['Adgangskode:\n','Adgangskode: ','Code: ','Access code:\n'])assert.equal(extractInvitation(`${URL_}\n${label}ABCD-EFGH`).code,'ABCD-EFGH',label);
+  assert.equal(extractInvitation(`${URL_}\nAdgangskode:\nＡＢＣＤ－ＥＦＧＨ`).code,'ABCD-EFGH');
   // The link may sit alone on its line with the owner's other lines around it.
   assert.equal(extractInvitation(`Hej!\n\n${URL_}\n\nAdgangskode:\nK7QM-4P2X`).token,key);
 });

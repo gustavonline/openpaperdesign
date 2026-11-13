@@ -44,7 +44,7 @@ export function extractInvitation(text) {
   if (labelled) code = readCode(labelled[1].trim().split(/\s{2,}|[,;]/)[0]);
   if (!code && token) {
     const words = rest.match(/(?<![\p{L}\p{N}])[\p{L}\p{N}]{4}[ \p{Pd}]?[\p{L}\p{N}]{4}(?![\p{L}\p{N}])/gu) || [];
-    const found = words.filter(word => /\d/.test(word)).map(readCode).filter(Boolean);
+    const found = words.map(readCode).filter(read => read && /\d/.test(read));
     if (found.length === 1) code = found[0];
   }
   return { token, code };
