@@ -130,3 +130,59 @@ export function statusFrame(anchor, stageLeft, view, {edge = 8, readable = 320} 
   if (room >= Math.min(readable, view.width - 2 * edge)) return {right: Math.round(view.width - anchor + edge), maxWidth: room};
   return {right: edge, maxWidth: view.width - 2 * edge};
 }
+
+// "Download original" for one image element. Only an image fill that points at a managed asset of THIS Paper counts: the
+// original is the stored file named by the Paper's own asset map, never a display copy, a data URL or an outside address.
+// The stored name is a content hash plus its extension (the person's own file name is not kept), so that real name and its
+// real type are what is offered; nothing about a source file name is invented.
+const KINDS = {png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp'};
+const ASSET = /^assets\/([a-zA-Z0-9_.-]+)$/;
+const PAPER = /^[a-zA-Z0-9_-]{1,80}$/;
+export class OriginalError extends Error { constructor(reason, message) { super(message); this.reason = reason; } }
+// The signature of the bytes actually received, so a renamed or substituted file is never offered as an image.
+export function imageKind(bytes) {
+  const at = (offset, text) => [...text].every((c, i) => bytes[offset + i] === c.charCodeAt(0));
+  if (bytes.length > 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b)) return 'image/png';
+  if (bytes.length > 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return 'image/jpeg';
+  if (bytes.length > 12 && at(0, 'RIFF') && at(8, 'WEBP')) return 'image/webp';
+  return null;
+}
+export const imageFillOf = node => node?.style?.fills?.find(fill => fill.type === 'image');
+// {name, mime} for the node's first image fill, or why there is nothing to download.
+export function originalOf(scene, node) {
+  const fill = imageFillOf(node);
+  if (!fill) return {ok: false, reason: 'not-image'};
+  const stored = typeof fill.asset === 'string' && Object.hasOwn(scene?.assets || {}, fill.asset) ? scene.assets[fill.asset] : null, match = ASSET.exec(typeof stored === 'string' ? stored : '');
+  // The pattern already allows no slash, so a name cannot leave assets/; a leading dot is a hidden file the server never serves.
+  if (!match || match[1].startsWith('.')) return {ok: false, reason: 'missing'};
+  const mime = KINDS[match[1].slice(match[1].lastIndexOf('.') + 1).toLowerCase()];
+  return mime && match[1].includes('.') ? {ok: true, name: match[1], mime} : {ok: false, reason: 'unsupported'};
+}
+const WORDS = {
+  'not-image': 'Choose an image to download its original.',
+  missing: 'This image has no stored original in this Paper, so nothing was downloaded.',
+  unsupported: 'Only PNG, JPEG and WebP originals can be downloaded.',
+  'access-ended': 'This invitation no longer allows this download. Nothing was downloaded.',
+  'not-found': 'The original is no longer in this Paper, so nothing was downloaded.',
+  'wrong-file': 'The stored file is not the expected image, so nothing was downloaded.',
+  failed: 'The original could not be downloaded. Nothing was saved.',
+};
+// Fetches the stored file again through the caller's own scoped fetch (cache:'no-store'), checks it and returns it with its real
+// name. `fetchImpl` is the view's fetch: in the browser the signed-in session, in the native app the same authorized transport as
+// every other request, so a revoked or expired invitation is refused here even while its pictures are still on screen.
+export async function fetchOriginal({paperId, scene, node, fetchImpl, signal}) {
+  const found = originalOf(scene, node);
+  if (!found.ok) throw new OriginalError(found.reason, WORDS[found.reason]);
+  if (typeof paperId !== 'string' || !PAPER.test(paperId)) throw new OriginalError('failed', WORDS.failed);
+  let response;
+  try { response = await fetchImpl(`/Paper/${encodeURIComponent(paperId)}/assets/${encodeURIComponent(found.name)}`, {cache: 'no-store', signal}); }
+  catch (error) { if (error?.name === 'AbortError') throw error; throw new OriginalError('failed', WORDS.failed); }
+  if (response.status === 401 || response.status === 403) throw new OriginalError('access-ended', WORDS['access-ended']);
+  if (response.status === 404) throw new OriginalError('not-found', WORDS['not-found']);
+  if (!response.ok) throw new OriginalError('failed', WORDS.failed);
+  const type = String(response.headers?.get?.('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (type !== found.mime) throw new OriginalError('wrong-file', WORDS['wrong-file']);
+  const bytes = new Uint8Array(await (await response.blob()).arrayBuffer());
+  if (!bytes.length || imageKind(bytes) !== found.mime) throw new OriginalError('wrong-file', WORDS['wrong-file']);
+  return {blob: new Blob([bytes], {type: found.mime}), name: found.name, mime: found.mime};
+}

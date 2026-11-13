@@ -13,6 +13,7 @@ import {joinInvitation,invitationURL} from '../server/invitation.mjs';
 import {normalizeCode,readCode,extractInvitation,formatCode} from '../runtime/access-code.js';
 import {invitationMessage,invitationLinks,joinRequest,describeExpiry,endedCopy,endedStatus,knownEnd} from '../runtime/invitation.js';
 import {TOOLS} from '../server/server.mjs';
+import {fetchOriginal,OriginalError} from '../runtime/editing-model.js';
 
 const RUNTIME=path.resolve(path.dirname(new URL(import.meta.url).pathname),'../runtime');
 const bytes=value=>Buffer.from(JSON.stringify(value));
@@ -241,7 +242,7 @@ test('owner secrets: status and overview never carry the code or key; only the r
   const reuse=await r.sharing.create(r.made.id,'edit',false,false,{protect:true,expiry:'never'});assert.equal(reuse.createdId,g.id);
   const changed=await r.sharing.create(r.made.id,'edit',false,false,{protect:false,expiry:'never'});assert.notEqual(changed.createdId,g.id);
   assert.equal((await r.sharing.status(r.made.id)).invitations.some(i=>i.id===g.id),false,'the replaced invitation ended');
-  assert.equal(VERSION.includes('preview.25'),true);
+  assert.equal(VERSION.includes('preview.26'),true);
 });
 
 test('Home Shared lists protected and Never invitations without secrets, and the owner API validates the new options',async t=>{
@@ -363,4 +364,70 @@ test('the native open-link allowlist stays the same two generic app schemes, and
   for(const [value,scheme,host_,key] of [[links.codex,'codex:','threads','prompt'],[links.claude,'claude:','code','q']]){
     const url=new URL(value);assert.equal(url.protocol,scheme);assert.equal(url.hostname,host_);assert.equal(url.pathname,'/new');assert.deepEqual([...url.searchParams.keys()],[key]);assert.ok(!url.username&&!url.password&&!url.hash&&url.href.length<=16000);
   }
+});
+
+const PNG_BYTES=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from('synthetic original png '),Buffer.alloc(300,7)]);
+const JPEG_BYTES=Buffer.concat([Buffer.from([255,216,255,224]),Buffer.from('synthetic original jpeg '),Buffer.alloc(300,9)]);
+const WEBP_BYTES=Buffer.concat([Buffer.from('RIFF'),Buffer.from([40,0,0,0]),Buffer.from('WEBPVP8 synthetic original webp '),Buffer.alloc(300,3)]);
+const imageNode=(id,asset)=>({id,parent:1,type:'rect',name:'Photo '+id,rect:{x:10+id*20,y:10,w:100,h:80},style:{fills:[{type:'image',asset,mode:'fit'}],opacity:1},visible:true,locked:false});
+// A Paper whose image fills point at real stored assets, saved through the library like any import.
+async function withImages(library,id,files){
+  const current=await library.read(id),paper=current.paper,page=paper.pages[0];let next=page.next_id||2;const found=[];
+  for(const [key,bytes] of Object.entries(files)){const stored=await library.addAsset(id,bytes);paper.assets[key]=stored.path;const node=imageNode(next++,key);page.nodes.push(node);page.nodes[0].children.push(node.id);found.push({key,node,path:stored.path,name:stored.path.slice(7),bytes});}
+  page.next_id=next;await library.save(id,Buffer.from(JSON.stringify(paper)),current.revision);
+  return {scene:(await library.read(id)).paper,found};
+}
+test('Download original returns the stored bytes, name and type for view and edit guests in the browser and the native path, and only then',async t=>{
+  const r=await rig(t),view=await r.grant('view',{protect:true}),edit=await r.grant('edit',{protect:true}),other=await r.grant('view',{protect:true},r.other.id);
+  const {scene,found}=await withImages(r.library,r.made.id,{png:PNG_BYTES,jpg:JPEG_BYTES,webp:WEBP_BYTES});
+  const names=found.map(f=>f.name);assert.deepEqual(names.map(n=>n.split('.')[1]),['png','jpg','webp'],'addAsset keeps the extension and names the file by its hash, not the person\'s file name');
+  const otherFiles=await withImages(r.library,r.other.id,{png:Buffer.concat([PNG_BYTES,Buffer.from('other paper')])});
+  const guest=r.browser();assert.equal((await guest.join(view,view.code)).status,200);assert.equal((await guest.join(edit,edit.code)).status,200);
+  const fetchFor=(who,base)=>(url,options)=>who.request(base,url,{headers:options?.cache==='no-store'?{'Cache-Control':'no-store'}:{}});
+  for(const f of found){
+    const got=await fetchOriginal({paperId:r.made.id,scene,node:f.node,fetchImpl:fetchFor(guest,view.base)});
+    assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()),f.bytes,'byte-identical to what was stored');assert.equal(got.name,f.name);assert.equal(got.blob.type,{png:'image/png',jpg:'image/jpeg',webp:'image/webp'}[f.name.split('.')[1]]);
+  }
+  // A guest with only the view invitation (its own cookie jar) can download too; and so can one with only the edit invitation.
+  for(const g of [view,edit]){const only=r.browser();await only.join(g,g.code);const got=await fetchOriginal({paperId:r.made.id,scene,node:found[0].node,fetchImpl:fetchFor(only,g.base)});assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()),PNG_BYTES);}
+  // The native guest uses the plugin's own authorized path (the same call paper_ui forwards), with the code held by the joined invitation.
+  const joined=await joinInvitation(joinRequest({url:view.url,code:view.code}));
+  const nativeFetch=async url=>{const answer=await joined.api(url,{method:'GET'});return new Response(Buffer.from(answer.body,'base64'),{status:answer.status,headers:answer.headers});};
+  const nativeGot=await fetchOriginal({paperId:r.made.id,scene,node:found[1].node,fetchImpl:nativeFetch});assert.deepEqual(Buffer.from(await nativeGot.blob.arrayBuffer()),JPEG_BYTES);assert.equal(nativeGot.name,found[1].name);
+  // Another Paper's original is not reachable with this invitation, whichever way it is asked for.
+  const foreign=otherFiles.found[0];
+  await assert.rejects(fetchOriginal({paperId:r.other.id,scene:otherFiles.scene,node:foreign.node,fetchImpl:fetchFor(guest,view.base)}),e=>e instanceof OriginalError&&e.reason==='access-ended');
+  await assert.rejects(fetchOriginal({paperId:r.other.id,scene:otherFiles.scene,node:foreign.node,fetchImpl:nativeFetch}),e=>e instanceof OriginalError&&e.reason==='failed','the native route refuses another Paper before any request');
+  await assert.rejects(fetchOriginal({paperId:r.made.id,scene:{assets:{png:foreign.path}},node:foreign.node,fetchImpl:fetchFor(guest,view.base)}),e=>e.reason==='not-found','this Paper does not hold the other Paper\'s file');
+  // A stored file that was removed gives a message and no download; an image with no asset entry never asks.
+  await fs.rm(path.join(r.made.path,'assets',found[2].name));
+  await assert.rejects(fetchOriginal({paperId:r.made.id,scene,node:found[2].node,fetchImpl:fetchFor(guest,view.base)}),e=>e.reason==='not-found');
+  await assert.rejects(fetchOriginal({paperId:r.made.id,scene:{assets:{}},node:found[0].node,fetchImpl:()=>{throw new Error('must not ask');}}),e=>e.reason==='missing');
+  // Paths the server would never serve stay refused even if a hand-made scene named them.
+  for(const bad of ['assets/../paper.json','assets/.write-lock','assets/..%2Fpaper.json'])await assert.rejects(fetchOriginal({paperId:r.made.id,scene:{assets:{png:bad}},node:found[0].node,fetchImpl:fetchFor(guest,view.base)}),e=>e instanceof OriginalError);
+  // An invitation for another Paper does not open this one's assets.
+  const stranger=r.browser();await stranger.join(other,other.code);
+  await assert.rejects(fetchOriginal({paperId:r.made.id,scene,node:found[0].node,fetchImpl:fetchFor(stranger,other.base)}),e=>e.reason==='access-ended');
+});
+
+test('revoking or expiring an invitation stops a fresh original download even though the picture is already on screen',async t=>{
+  const r=await rig(t),hour=await r.grant('edit',{protect:true,expiry:'1h'}),never=await r.grant('view',{protect:true,expiry:'never'}),stopped=await r.grant('view',{protect:true});
+  const {scene,found}=await withImages(r.library,r.made.id,{png:PNG_BYTES}),node=found[0].node;
+  const sessions=new Map(),open=async g=>{const guest=r.browser();assert.equal((await guest.join(g,g.code)).status,200);sessions.set(g.id,guest);return (url,options)=>guest.request(g.base,url,{headers:options?.cache==='no-store'?{'Cache-Control':'no-store'}:{}});};
+  const askHour=await open(hour),askNever=await open(never),askStopped=await open(stopped);
+  // The picture was loaded earlier, as the editor does on open.
+  for(const ask of [askHour,askNever,askStopped])assert.equal((await ask(`/Paper/${r.made.id}/assets/${found[0].name}`)).status,200);
+  await r.sharing.stop(r.made.id,stopped.id);
+  await assert.rejects(fetchOriginal({paperId:r.made.id,scene,node,fetchImpl:askStopped}),e=>e.reason==='access-ended','revoked: refused');
+  r.clock.value+=2*3600000;
+  await assert.rejects(fetchOriginal({paperId:r.made.id,scene,node,fetchImpl:askHour}),e=>e.reason==='access-ended','expired: refused');
+  const still=await fetchOriginal({paperId:r.made.id,scene,node,fetchImpl:askNever});assert.deepEqual(Buffer.from(await still.blob.arrayBuffer()),PNG_BYTES);
+  // The native joined guest is refused the same way after revocation.
+  const joined=await joinInvitation(joinRequest({url:never.url,code:never.code}));
+  const nativeFetch=async url=>{const answer=await joined.api(url,{method:'GET'});return new Response(Buffer.from(answer.body,'base64'),{status:answer.status,headers:answer.headers});};
+  const nativeBefore=await fetchOriginal({paperId:r.made.id,scene,node,fetchImpl:nativeFetch});assert.deepEqual(Buffer.from(await nativeBefore.blob.arrayBuffer()),PNG_BYTES);
+  await r.sharing.stop(r.made.id,never.id);
+  await assert.rejects(fetchOriginal({paperId:r.made.id,scene,node,fetchImpl:nativeFetch}),e=>e.reason==='access-ended','native guest revoked: refused');
+  // Nothing was written into the Paper by any of this.
+  assert.deepEqual(Buffer.from(JSON.stringify((await r.library.read(r.made.id)).paper)),Buffer.from(JSON.stringify(scene)));
 });

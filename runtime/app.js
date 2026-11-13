@@ -5,7 +5,7 @@ import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=37f4c823cf59';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame} from './editing-model.js?v=718e4bb39407';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchOriginal,imageFillOf} from './editing-model.js?v=4771d4d3edfa';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -63,7 +63,7 @@ const keyOf = (page, id) => `${page.id}:${id}`;
 const point = e => { const r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 const editable = target => target.isContentEditable || !!target.closest?.('input,textarea,select');
 const isVector = node => node.type === 'stroke' || node.type === 'connector';
-const imageFill = node => node.style?.fills?.find(f => f.type === 'image');
+const imageFill = imageFillOf;
 
 function message(text) {
   $('#toast').textContent = text; $('#toast').hidden = false;
@@ -460,8 +460,19 @@ async function pasteSelection(){
     pageChange(targetPage,()=>pasteLayers(targetPage,payload,{samePage:local}));setTool('select');
   }catch(error){message(`Paste failed: ${error instanceof SyntaxError?'The clipboard does not contain Paper layers.':error.message}`);}
 }
+let originalTarget=null;
+// One image's stored original, fetched again now through this view's own scoped fetch, never from the display copy.
+async function downloadOriginal(){
+  const entry=nodes.get(originalTarget);originalTarget=null;
+  try{
+    if(!entry)throw new Error('Choose an image to download its original.');
+    const original=await fetchOriginal({paperId,scene,node:entry.node,fetchImpl:(url,options)=>fetch(url,options)});
+    download(original.blob,original.name);message(`Downloading the original: ${original.name}`);
+  }catch(error){if(error?.name!=='AbortError')message(error?.message||'The original could not be downloaded. Nothing was saved.');}
+}
 function editCommand(action){
   const entry=nodes.get(selected),page=entry?.page;
+  if(action==='download-original')return downloadOriginal();
   if(action==='copy')return copySelection();if(action==='link')return copyLink();if(action==='paste')return pasteSelection();
   if(!canEdit||!page)return;
   if(action==='cut')return copySelection(true);if(action==='duplicate')return duplicateSelection();if(action==='delete')return removeSelected();
@@ -1095,7 +1106,7 @@ $('#zoom-in').addEventListener('click', () => zoomCenter(1.2)); $('#zoom-out').a
 // Small menus (project, zoom, canvas view, shapes): one open at a time. Arrows move, Enter/Space choose,
 // Escape or a press outside closes, and focus returns to the control that opened it.
 let openMenuEl = null, menuTrigger = null;
-const menuItems = el => [...el.querySelectorAll('button:not(:disabled),input')];
+const menuItems = el => [...el.querySelectorAll('button:not(:disabled):not([hidden]),input')];
 function showMenu(el, { at, trigger = null, keyboard = false }) {
   closeMenu(); el.hidden = false;
   const w = el.offsetWidth, h = el.offsetHeight, p = at(w, h);
@@ -1312,7 +1323,10 @@ stage.addEventListener('contextmenu', e => {
   if (inspection || e.target.isContentEditable) return;
   e.preventDefault();
   const key=hitSymbol(e.target)||e.target.closest('[data-board-select]')?.dataset.boardSelect;
-  if(key){if(!selection.has(key))selectNode(key);for(const item of $('#edit-menu').querySelectorAll('[data-edit]'))item.disabled=!canEdit&&!['copy','copy-style','link'].includes(item.dataset.edit);showMenu($('#edit-menu'),{at:()=>({x:e.clientX,y:e.clientY}),keyboard:e.clientX===0&&e.clientY===0});return;}
+  if(key){if(!selection.has(key))selectNode(key);for(const item of $('#edit-menu').querySelectorAll('[data-edit]'))item.disabled=!canEdit&&!['copy','copy-style','link','download-original'].includes(item.dataset.edit);
+    // "Download original" belongs to the element actually under the pointer (or focused), whatever else is selected, and only when it is an image.
+    const under=e.target.closest?.('[data-node-key]')?.dataset.nodeKey;originalTarget=under&&nodes.get(under)&&imageFillOf(nodes.get(under).node)?under:null;$('#edit-menu [data-edit="download-original"]').hidden=!originalTarget;
+    showMenu($('#edit-menu'),{at:()=>({x:e.clientX,y:e.clientY}),keyboard:e.clientX===0&&e.clientY===0});return;}
   const keyboard = e.clientX === 0 && e.clientY === 0, r = stage.getBoundingClientRect();
   paintCanvasMenu(); showMenu(canvasMenu, { at: () => keyboard ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: e.clientX, y: e.clientY }, keyboard });
 });
