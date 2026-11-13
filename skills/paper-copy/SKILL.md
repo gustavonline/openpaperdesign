@@ -40,7 +40,7 @@ Pass the selected text back to the calling workflow for composition. Keep meanin
 
 Read the rendered artifact at its intended viewing size. Check whether the goal and sequence are clear without the author explaining them. Remove repeated or decorative text before shrinking it; adjust the layout when necessary instead of making required labels unreadable. Check wrapping, hierarchy, clipped labels, and useful actions or legends. Typography size alone is not a reason to rewrite approved wording.
 
-Verify that each retained claim comes from the brief or is marked as a proposal/placeholder, and that no necessary meaning or recovery step disappeared. For a revision, compare the original and result; keep the original when an alternative was requested. Save/reopen through the calling workflow and report only material editorial questions in the handoff. A copy review by itself does not authorize changing the artwork.
+Verify that each retained claim comes from the brief or is marked as a proposal/placeholder, and that no necessary meaning or recovery step disappeared. For a revision, compare the original and result; keep the original when an alternative was requested. Save through the calling workflow and verify by reading the Paper back and inspecting the canvas that is already open (the workflow's open-once rule decides when a reopen is warranted); report only material editorial questions in the handoff. A copy review by itself does not authorize changing the artwork.
 
 ## Method sources
 

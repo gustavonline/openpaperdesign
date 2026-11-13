@@ -1357,7 +1357,8 @@ tree.addEventListener('contextmenu', e => {
   e.preventDefault();
   const keyboard = e.clientX === 0 && e.clientY === 0, r = row.getBoundingClientRect();
   if (keyboard) originalFocus = row;
-  showMenu($('#edit-menu'), { at: () => keyboard ? { x: r.left + 24, y: r.bottom } : { x: e.clientX, y: e.clientY }, keyboard, trigger: keyboard ? { setAttribute() {}, focus: () => row.focus() } : null });
+  // The stand-in trigger of a keyboard-opened menu: Escape returns focus to the row, and a press anywhere outside the menu (even on the row, which is not a toggle) dismisses it.
+  showMenu($('#edit-menu'), { at: () => keyboard ? { x: r.left + 24, y: r.bottom } : { x: e.clientX, y: e.clientY }, keyboard, trigger: keyboard ? { setAttribute() {}, focus: () => row.focus(), contains: () => false } : null });
 });
 canvasMenu.addEventListener('click', e => {
   const p = e.target.closest('[data-pattern]');

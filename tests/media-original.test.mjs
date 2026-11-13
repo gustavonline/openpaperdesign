@@ -185,11 +185,54 @@ test('the editor wires the command: stage menu, Inspect overlay, Layers tree, an
   assert.match(app, /overlayRoot\.addEventListener\('contextmenu'[\s\S]*?\}, true\);/, 'Inspect overlay, in the capture phase so it is seen first');
   assert.match(app, /layerUnderPointer\(document\.elementsFromPoint\(e\.clientX, e\.clientY\)/);
   assert.match(app, /e\.preventDefault\(\); showMenu\(\$\('#edit-menu'\)/, 'only an image takes over the right-click');
-  assert.match(app, /tree\.addEventListener\('contextmenu'[\s\S]*?keyboard \? \{ setAttribute\(\) \{\}, focus: \(\) => row\.focus\(\) \} : null/, 'Layers tree: mouse and keyboard, focus returns to the row');
+  assert.match(app, /tree\.addEventListener\('contextmenu'[\s\S]*?keyboard \? \{ setAttribute\(\) \{\}, focus: \(\) => row\.focus\(\), contains: \(\) => false \} : null/, 'Layers tree: mouse and keyboard, focus returns to the row');
   assert.match(app, /button:not\(:disabled\):not\(\[hidden\]\)/, 'a hidden item is never a keyboard stop');
   assert.match(app, /if\(action==='download-original'\)return downloadOriginal\(\);/);
   const body = app.slice(app.indexOf('async function downloadOriginal()'), app.indexOf('// Fills the shared edit menu'));
   assert.match(body, /fetchCapturedOriginal\(\{captured:target/); assert.doesNotMatch(body, /selected|assetUrl|paperAsset|dataUrl/, 'never the selection, the display cache or a data URL');
   const overlay = app.slice(app.indexOf('const overlayRoot'), app.indexOf("tree.addEventListener('contextmenu'"));
   assert.doesNotMatch(overlay, /pointerEvents|pointer-events|\.remove\(|\.hidden\s*=|canEdit\s*=|readOnly/, 'the overlay is neither removed nor bypassed and no edit right is granted');
+});
+
+// The editor's own Layers-tree handler, closeMenu and outside-press listener, run exactly as written in runtime/app.js.
+test('a menu opened from a Layers row by keyboard is dismissed by an outside press, and Escape returns focus to the row', async () => {
+  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
+  const cut = (from, to) => { const a = app.indexOf(from), b = app.indexOf(to, a); assert.ok(a > -1 && b > a, from); return app.slice(a, b); };
+  const treeHandler = cut("tree.addEventListener('contextmenu'", "canvasMenu.addEventListener('click'"), closeMenuSource = cut('function closeMenu(refocus = false) {', 'function menuKeys('), pointer = cut("document.addEventListener('pointerdown', e => { if (openMenuEl", '\n');
+  const make = new Function('tree', 'document', 'paintEditMenu', 'showMenuSpy', '$', `let openMenuEl=null,menuTrigger=null,originalFocus=null;
+    function showMenu(el,{at,trigger=null,keyboard=false}){closeMenu();el.hidden=false;openMenuEl=el;menuTrigger=trigger;trigger?.setAttribute('aria-expanded','true');showMenuSpy({el,trigger,keyboard,at:at(10,10)});}
+    ${closeMenuSource}\n${treeHandler}\n${pointer}\nreturn {closeMenu,get originalFocus(){return originalFocus;},get open(){return openMenuEl},get trigger(){return menuTrigger}};`);
+  const log = {focused: 0, shown: [], listeners: new Map(), painted: []};
+  const menu = {hidden: true, contains: target => target?.inside === true, setAttribute() {}};
+  const row = {dataset: {key: 'p:2'}, focus: () => log.focused++, getBoundingClientRect: () => ({left: 10, bottom: 50}), contains: target => target === row};
+  const tree = {addEventListener: (type, fn) => log.listeners.set('tree:' + type, fn)}, document = {addEventListener: (type, fn) => log.listeners.set('document:' + type, fn)};
+  const editor = make(tree, document, (key, only) => { log.painted.push([key, only]); return key === 'p:2'; }, shown => log.shown.push(shown), () => menu);
+  const contextmenu = log.listeners.get('tree:contextmenu'), outside = log.listeners.get('document:pointerdown');
+  assert.equal(typeof contextmenu, 'function'); assert.equal(typeof outside, 'function');
+  const event = (extra = {}) => ({target: {closest: () => row}, clientX: 0, clientY: 0, preventDefault() { this.prevented = true; }, ...extra});
+  // Menu key / Shift+F10 on an image row.
+  let first = event(); contextmenu(first);
+  assert.equal(first.prevented, true); assert.deepEqual(log.painted.at(-1), ['p:2', true]); assert.equal(log.shown.at(-1).keyboard, true); assert.equal(editor.originalFocus, row);
+  const trigger = log.shown.at(-1).trigger; assert.equal(typeof trigger.contains, 'function', 'the stand-in trigger answers contains() like a real trigger');
+  assert.doesNotThrow(() => outside({target: {inside: true}})); assert.equal(menu.hidden, false, 'a press inside the menu keeps it open');
+  assert.doesNotThrow(() => outside({target: {inside: false}})); assert.equal(menu.hidden, true, 'a press outside dismisses it');
+  assert.equal(log.focused, 0, 'an outside press does not steal focus back');
+  // The row is not a toggle: pressing it also dismisses the menu.
+  contextmenu(event()); assert.equal(menu.hidden, false); outside({target: row}); assert.equal(menu.hidden, true);
+  // Escape (closeMenu with refocus) returns focus to the row through the same trigger.
+  contextmenu(event()); assert.equal(menu.hidden, false); editor.closeMenu(true); assert.equal(menu.hidden, true); assert.equal(log.focused, 1);
+  // Opened by the mouse there is no trigger, and an outside press still closes it.
+  const mouse = event({clientX: 40, clientY: 60}); contextmenu(mouse); assert.equal(log.shown.at(-1).trigger, null); assert.equal(menu.hidden, false); outside({target: {inside: false}}); assert.equal(menu.hidden, true);
+  // A row that is not an image leaves the browser's own menu alone.
+  const plain = event({target: {closest: () => ({dataset: {key: 'p:3'}, getBoundingClientRect: () => ({left: 0, bottom: 0})})}}), shown = log.shown.length; contextmenu(plain); assert.notEqual(plain.prevented, true); assert.equal(log.shown.length, shown);
+});
+
+test('every skill keeps explicit, switch and recovery opens but none says to reopen or display after a routine save', async () => {
+  const names = ['paper', 'paper-copy', 'paper-design', 'paper-diagram'], skills = await Promise.all(names.map(name => fs.readFile(new URL(`../skills/${name}/SKILL.md`, import.meta.url), 'utf8')));
+  const main = skills[0], section = main.slice(main.indexOf('## Open once, then work'), main.indexOf('## Work on the Paper'));
+  assert.match(section, /Reopen only when the person asks to see it again, when you switch to a different Paper or library, or to recover/);
+  assert.match(section, /Do not call `paper_home` after a save to refresh or check it/);
+  for (const [i, text] of skills.entries()) assert.doesNotMatch(text.replace('(for example "save and reopen" when persistence itself is the question)', ''), /save\s*(?:\/|and)\s*reopen|reopen the saved/i, names[i] + ' has no routine save-then-reopen shorthand');
+  for (const [i, text] of skills.entries()) for (const line of text.split('\n').filter(line => /reopen/i.test(line))) assert.match(line, /only|request|switch|recover|deliberate|already open|read(ing)? (it|the Paper) back|when needed/i, `${names[i]}: ${line.slice(0, 80)}`);
+  for (const [i, text] of skills.slice(1).entries()) assert.match(text, /already open|open-once|read(ing)?( it| the Paper)? back/, names[i + 1] + ' points at reading back or the open canvas');
 });
