@@ -315,7 +315,10 @@ body.read-only .paper-design-mode{pointer-events:none}body.read-only #rail [data
 .board-resizers [data-resize=nw],.board-resizers [data-resize=se]{cursor:nwse-resize}.board-resizers [data-resize=ne],.board-resizers [data-resize=sw]{cursor:nesw-resize}
 
 /* Ephemeral collaborators: never part of artwork/export or hit testing. */
-#presence-layer{position:absolute;inset:0;z-index:34;pointer-events:none;overflow:hidden}#presence-roster{position:absolute;z-index:35;left:12px;top:52px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;max-width:calc(100% - 24px);pointer-events:auto;touch-action:none;cursor:grab;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:3px;box-shadow:0 2px 8px #0000000a}#presence-roster[hidden]{display:none}
+#presence-layer{position:absolute;inset:0;z-index:34;pointer-events:none;overflow:hidden}#presence-roster{position:absolute;z-index:35;left:0;right:0;top:0;display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:6px;padding:10px 8px 0;pointer-events:none}
+/* With a side panel closed, its floating corner bar sits over the canvas; the centred badges keep clear of it. */
+body:not(.left-open) #presence-roster{padding-left:calc(var(--panel-w) + 4px)}body:not(.right-open) #presence-roster{padding-right:calc(var(--panel-w) + 4px)}
+@media(max-width:900px){#presence-roster,body:not(.left-open) #presence-roster,body:not(.right-open) #presence-roster{padding:48px 8px 0}}#presence-roster[hidden]{display:none}
 .presence-avatar{display:flex;align-items:center;justify-content:center;gap:4px;padding:0 7px;width:auto;height:24px;flex:none;border-radius:12px;background:color-mix(in srgb,var(--peer) 12%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--peer) 25%,transparent);font:14px system-ui;color:var(--peer);pointer-events:auto}
 .presence-status{font-size:11px;color:var(--text-2);padding:0 8px 0 4px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.presence-more{font-size:10px;color:var(--text-2);padding:0 4px}
 .presence-box{position:absolute;border:1.5px solid var(--peer);border-radius:2px;box-sizing:border-box}.presence-box.ghost{border-style:dashed;background:color-mix(in srgb,var(--peer) 4%,transparent)}
@@ -337,7 +340,9 @@ body.read-only .paper-design-mode{pointer-events:none}body.read-only #rail [data
 #notion-share-icon{display:flex;align-items:center;flex:0 0 16px}#notion-share-icon svg{width:16px;height:16px}
 #properties input[type=color]{width:100%;height:30px;border:1px solid var(--line);border-radius:5px;background:var(--field);padding:3px}
 
-.presence-grip{display:grid;place-items:center;width:18px;height:24px;border:0;background:transparent;color:var(--text-2);font:16px system-ui;cursor:grab;padding:0;border-radius:12px}.presence-grip:focus-visible{outline:2px solid var(--accent);outline-offset:1px}#presence-roster:active{cursor:grabbing}
+/* Each badge stands alone: draggable, focusable, never boxed together with the others. */
+.presence-avatar{cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--peer) 25%,transparent),0 1px 5px #00000014}.presence-avatar:active{cursor:grabbing}.presence-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.presence-avatar.moved{position:absolute;z-index:1}
+.presence-status{pointer-events:none;background:var(--surface);border-radius:12px;padding:4px 10px;box-shadow:0 1px 5px #00000014}.presence-more{pointer-events:none}
 
 #design-tokens summary{list-style:none}#design-tokens summary::-webkit-details-marker{display:none}#design-tokens:not([open]) .section-chevron{transform:rotate(0)}.tokens-body{padding:4px 8px 12px}#design-tokens h3{margin:12px 6px 6px}
 #text-section>.pair+ .pair{margin-top:8px}#text-section textarea.field{margin-bottom:10px}.inspector-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.inspector-actions .btn{height:auto;min-height:28px;padding:5px 8px;white-space:normal;text-align:left}.inspector-actions #save-symbol{grid-column:1/-1}#node-kind{margin-left:auto}

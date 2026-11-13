@@ -1,19 +1,50 @@
 import {transitionAgent,changedArtwork,EFFECT_MS,REVEAL_MS} from './agent-motion.js?v=3b1734f2e2bd';
+// Badge placement. A badge nobody has moved sits in a centred strip along the top of the canvas; a moved badge keeps a position of its own,
+// kept only as a local preference per participant identity (never in the Paper), clamped into the visible canvas whenever it is placed.
+const BADGE_GAP = 8, BADGE_LIMIT = 24, BADGE_ID = /^[\w:.@-]{1,100}$/;
+export function clampBadge(position, size, area, gap = BADGE_GAP) {
+  return {x: Math.round(Math.max(gap, Math.min(position.x, area.width - size.w - gap))), y: Math.round(Math.max(gap, Math.min(position.y, area.height - size.h - gap)))};
+}
+export function badgeKeyMove(position, key, big = false) {
+  const step = big ? 40 : 10, delta = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]}[key];
+  return delta ? {x: position.x + delta[0], y: position.y + delta[1]} : null;
+}
+export function readBadgePositions(raw) {
+  const out = new Map();
+  try { const data = JSON.parse(raw); if (data && typeof data === 'object' && !Array.isArray(data)) for (const [id, p] of Object.entries(data).slice(-BADGE_LIMIT)) if (BADGE_ID.test(id) && Number.isFinite(p?.x) && Number.isFinite(p?.y)) out.set(id, {x: p.x, y: p.y}); } catch { /* Nothing saved, or not readable: every badge starts at the default. */ }
+  return out;
+}
+export const writeBadgePositions = map => JSON.stringify(Object.fromEntries([...map].slice(-BADGE_LIMIT)));
 // One small, disposable overlay for people and agents. Artwork stays in paper.json.
 export function setupPresence(host){
   const layer=document.createElement('div'),roster=document.createElement('div');layer.id='presence-layer';layer.setAttribute('aria-hidden','true');roster.id='presence-roster';roster.dataset.canvasChrome='';roster.setAttribute('aria-label','Participants');roster.setAttribute('role','group');host.stage.append(layer,roster);
-  const grip=document.createElement('button');grip.type='button';grip.className='presence-grip';grip.textContent='⠿';grip.setAttribute('aria-label','Move participants');grip.title='Drag to move · Arrow keys to move · Double-click to reset';
-  const positionKey='openpaperdesign:participants:'+host.paperId;let position,drag;
-  try{const p=JSON.parse(localStorage.getItem(positionKey));if(Number.isFinite(p?.x)&&Number.isFinite(p?.y))position=p;}catch{}
-  function place(){if(!position)return;const r=host.stage.getBoundingClientRect();position={x:Math.max(8,Math.min(position.x,r.width-roster.offsetWidth-8)),y:Math.max(8,Math.min(position.y,r.height-roster.offsetHeight-8))};roster.style.left=position.x+'px';roster.style.top=position.y+'px';}
-  function remember(){try{localStorage.setItem(positionKey,JSON.stringify(position))}catch{}}
-  function reset(){position=null;roster.style.left=roster.style.top='';try{localStorage.removeItem(positionKey)}catch{}}
-  roster.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();const r=roster.getBoundingClientRect(),s=host.stage.getBoundingClientRect();drag={id:event.pointerId,x:event.clientX,y:event.clientY,left:r.left-s.left,top:r.top-s.top};try{roster.setPointerCapture(event.pointerId)}catch{}});
-  roster.addEventListener('pointermove',event=>{if(!drag||event.pointerId!==drag.id)return;event.preventDefault();event.stopPropagation();position={x:drag.left+event.clientX-drag.x,y:drag.top+event.clientY-drag.y};place();});
-  function drop(event){if(!drag||event.pointerId!==drag.id)return;event.stopPropagation();drag=null;remember();}
-  roster.addEventListener('pointerup',drop);roster.addEventListener('pointercancel',drop);roster.addEventListener('lostpointercapture',drop);roster.addEventListener('dblclick',event=>{event.stopPropagation();reset();});
-  grip.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home'].includes(event.key))return;event.preventDefault();event.stopPropagation();if(event.key==='Home'){reset();return;}const r=roster.getBoundingClientRect(),s=host.stage.getBoundingClientRect();position={x:r.left-s.left+(event.key==='ArrowLeft'?-10:event.key==='ArrowRight'?10:0),y:r.top-s.top+(event.key==='ArrowUp'?-10:event.key==='ArrowDown'?10:0)};place();remember();});
-  const sizeObserver=new ResizeObserver(place);sizeObserver.observe(host.stage);sizeObserver.observe(roster);
+  // Each participant is a separate badge. No enclosing box, no shared handle: the strip only lays out the badges nobody has moved.
+  const positionKey='openpaperdesign:presence-badges:1:'+host.paperId,chips=new Map();let structure='',positions=new Map(),drag=null;
+  try{positions=readBadgePositions(localStorage.getItem(positionKey));}catch{}
+  const hint='Drag to move · Arrow keys to move · Double-click or Home to reset';
+  function remember(){try{localStorage.setItem(positionKey,writeBadgePositions(positions))}catch{}}
+  function place(){
+    const r=host.stage.getBoundingClientRect(),area={width:r.width,height:r.height};
+    for(const [identity,chip] of chips){const saved=positions.get(identity);chip.classList.toggle('moved',!!saved);
+      if(!saved){chip.style.left=chip.style.top='';continue;}
+      const p=clampBadge(saved,{w:chip.offsetWidth,h:chip.offsetHeight},area);chip.style.left=p.x+'px';chip.style.top=p.y+'px';}
+  }
+  const where=chip=>{const r=chip.getBoundingClientRect(),s=host.stage.getBoundingClientRect();return {x:r.left-s.left,y:r.top-s.top};};
+  function moveTo(identity,chip,position){const r=host.stage.getBoundingClientRect();positions.delete(identity);positions.set(identity,clampBadge(position,{w:chip.offsetWidth,h:chip.offsetHeight},{width:r.width,height:r.height}));place();}
+  function reset(identity){positions.delete(identity);remember();place();}
+  function wire(identity,chip){
+    chip.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.stopPropagation();const start=where(chip);drag={id:event.pointerId,identity,chip,x:event.clientX,y:event.clientY,start,moved:false};try{chip.setPointerCapture(event.pointerId)}catch{}});
+    chip.addEventListener('pointermove',event=>{if(!drag||drag.chip!==chip||event.pointerId!==drag.id)return;event.preventDefault();event.stopPropagation();const dx=event.clientX-drag.x,dy=event.clientY-drag.y;if(!drag.moved&&Math.hypot(dx,dy)<4)return;drag.moved=true;moveTo(identity,chip,{x:drag.start.x+dx,y:drag.start.y+dy});});
+    function drop(event){if(!drag||drag.chip!==chip||event.pointerId!==drag.id)return;event.stopPropagation();const moved=drag.moved;drag=null;if(moved)remember();}
+    chip.addEventListener('pointerup',drop);chip.addEventListener('pointercancel',drop);chip.addEventListener('lostpointercapture',drop);
+    chip.addEventListener('dblclick',event=>{event.stopPropagation();reset(identity);});
+    chip.addEventListener('keydown',event=>{
+      if(event.key==='Home'){event.preventDefault();event.stopPropagation();reset(identity);return;}
+      const next=badgeKeyMove(positions.get(identity)||where(chip),event.key,event.shiftKey);if(!next)return;
+      event.preventDefault();event.stopPropagation();moveTo(identity,chip,next);remember();
+    });
+  }
+  const sizeObserver=new ResizeObserver(place);sizeObserver.observe(host.stage);
   const delay=window.__paperNative?500:100,lifetime=new AbortController();
   const peers=new Map(),marks=new Map(),animations=new Set(),seenRevisions=new Set([host.revision()]);
   const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');let commits=[],effectTimer=null,view=host.view(),updates=0,connection=0;
@@ -49,10 +80,23 @@ export function setupPresence(host){
       if(Number(!!p.focused)>Number(!!previous.focused)||!!p.focused===!!previous.focused&&(p.updateSeq||0)>(previous.updateSeq||0))group.peer=p;
     }
     const list=[...groups].map(([identity,{peer,count}])=>({...peer,identity,windows:count})),key=JSON.stringify([mine,list.map(p=>[p.identity,p.name,p.avatar,p.color,p.kind,p.status,p.windows])]);
-    if(key!==rosterKey){rosterKey=key;roster.replaceChildren(grip);roster.hidden=!list.length;
-      for(const p of list.slice(0,6)){const chip=document.createElement('span');chip.className='presence-avatar'+(p.kind==='agent'&&p.status?' working':'');chip.style.setProperty('--peer',p.color);const icon=document.createElement('span'),role=document.createElement('span');icon.className='presence-avatar-icon';icon.textContent=p.avatar;icon.setAttribute('aria-hidden','true');role.className='presence-avatar-role';role.textContent=p.kind==='agent'?'Agent':p.identity===mine?'You':'Person';chip.append(icon,role);chip.dataset.kind=p.kind;chip.title=`${p.name}${p.identity===mine?' (you)':''} · ${p.kind==='agent'?'Agent':'Person'}${p.status?' · '+p.status:''}${p.windows>1?' · '+p.windows+' windows':''}`;chip.setAttribute('aria-label',chip.title);roster.append(chip);}
-      if(list.length>6){const more=document.createElement('span');more.className='presence-more';more.textContent='+'+(list.length-6);roster.append(more);}
-      const active=list.find(p=>p.kind==='agent'&&p.status);if(active){const status=document.createElement('span');status.className='presence-status';status.textContent=active.name+' · '+active.status;roster.append(status);}place();
+    if(key!==rosterKey){rosterKey=key;roster.hidden=!list.length;
+      const shown=list.slice(0,6),ids=new Set(shown.map(p=>p.identity));
+      for(const [identity,chip] of chips)if(!ids.has(identity)){chip.remove();chips.delete(identity);}
+      for(const p of shown){
+        let chip=chips.get(p.identity);if(!chip){chip=document.createElement('span');chips.set(p.identity,chip);wire(p.identity,chip);chip.tabIndex=0;chip.setAttribute('role','group');}
+        chip.className='presence-avatar'+(p.kind==='agent'&&p.status?' working':'')+(positions.has(p.identity)?' moved':'');chip.style.setProperty('--peer',p.color);
+        const icon=document.createElement('span'),role=document.createElement('span');icon.className='presence-avatar-icon';icon.textContent=p.avatar;icon.setAttribute('aria-hidden','true');role.className='presence-avatar-role';role.textContent=p.kind==='agent'?'Agent':p.identity===mine?'You':'Person';chip.replaceChildren(icon,role);chip.dataset.kind=p.kind;chip.dataset.identity=p.identity;
+        chip.title=`${p.name}${p.identity===mine?' (you)':''} · ${p.kind==='agent'?'Agent':'Person'}${p.status?' · '+p.status:''}${p.windows>1?' · '+p.windows+' windows':''}`;chip.setAttribute('aria-label',chip.title+'. '+hint);
+      }
+      const active=list.find(p=>p.kind==='agent'&&p.status),more=list.length>6?'+'+(list.length-6):'',statusText=active?active.name+' · '+active.status:'';
+      // The strip is rebuilt only when who is shown changes, so a badge that is being moved or has focus is never replaced under the pointer or keyboard.
+      const next=shown.map(p=>p.identity).join(',')+'|'+more+'|'+statusText;
+      if(next!==structure){structure=next;const nodes=[];for(const p of shown)nodes.push(chips.get(p.identity));
+        if(more){const m=document.createElement('span');m.className='presence-more';m.textContent=more;nodes.push(m);}
+        if(statusText){const status=document.createElement('span');status.className='presence-status';status.textContent=statusText;nodes.push(status);}
+        roster.replaceChildren(...nodes);}
+      place();
     }
     layer.hidden=document.hidden;roster.classList.toggle('presence-paused',document.hidden);
     const visible=new Set();

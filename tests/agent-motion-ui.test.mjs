@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {promises as fs} from 'node:fs';
 import {setupPresence} from '../runtime/presence.js';
 
 class El {
@@ -14,17 +15,17 @@ class El {
  remove(){if(this.parent)this.parent.children=this.parent.children.filter(c=>c!==this);this.parent=null;}
  get firstChild(){return this.children[0];}
  get lastChild(){return this.children.at(-1);}
- getBoundingClientRect(){return {left:0,top:0,width:1000,height:700};}
+ getBoundingClientRect(){return this.rect||{left:0,top:0,width:1000,height:700};}
  contains(el){return el===this||this.children.some(c=>c.contains(el));}
  all(){return this.children.flatMap(c=>[c,...c.all()]);}
 }
 const doc=ids=>({pages:[{id:'page',nodes:ids.map(id=>({id,type:'rect',rect:{x:id*20,y:10,w:100,h:60}}))}]});
 const peer={id:'agent',kind:'agent',name:'Quiet Owl',avatar:'✦',color:'#487c70',ttl:300000,status:'Drawing',pageId:'page',nodeId:1};
-function harness(t,{reduced=false,presenceIdentity,shared=false}={}){
+function harness(t,{reduced=false,presenceIdentity,shared=false,storage}={}){
  t.mock.timers.enable({apis:['Date','setTimeout','setInterval'],now:100000});
  const document=new El('document'),window=new El('window'),media=new El('media'),stage=new El('stage'),elements=new Map(),animations=[],observers=[];
  document.hidden=false;document.hasFocus=()=>true;document.createElement=tag=>new El(tag);document.body=stage;media.matches=reduced;window.matchMedia=()=>media;window.getComputedStyle=el=>({opacity:el.style.opacity||'1'});
- const globals={document,window,localStorage:{getItem(){return null;},setItem(){},removeItem(){}},ResizeObserver:class{constructor(){observers.push(this);}observe(){}disconnect(){this.disconnected=true;}},fetch:async()=>({ok:true,json:async()=>({})})},saved={};
+ const globals={document,window,localStorage:storage||{getItem(){return null;},setItem(){},removeItem(){}},ResizeObserver:class{constructor(callback){this.callback=callback;observers.push(this);}observe(){}disconnect(){this.disconnected=true;}},fetch:async()=>({ok:true,json:async()=>({})})},saved={};
  for(const [k,v] of Object.entries(globals)){saved[k]=globalThis[k];globalThis[k]=v;}
  let view='page',offset=0;
  function element(page,id){const key=page+':'+id;if(!elements.has(key)){const el=new El();el.animate=(frames,options)=>{const a={frames,options,cancelled:false,cancel(){this.cancelled=true;}};animations.push(a);return a;};elements.set(key,el);}return elements.get(key);}
@@ -102,8 +103,8 @@ test('roster groups humans and chooses focused then latest windows, with legacy 
  receive([a,{...b,focused:true}]);assert.equal(chips(h).length,1);assert.equal(h.layer.firstChild.style.left,'40px');
  receive([{...a,focused:false},b]);assert.equal(h.layer.firstChild.style.left,'40px');
  receive([{...a,focused:false},b,{...peer},{...peer,id:'agent2'},human('legacy',undefined,false,1)]);assert.equal(chips(h).length,4);assert.equal(h.layer.children.length,4);
- // Existing drag/keyboard controls remain usable with a grouped roster.
- h.roster.firstChild.fire('keydown',{key:'ArrowRight'});assert.equal(h.roster.style.left,'10px');h.roster.firstChild.fire('keydown',{key:'Home'});assert.equal(h.roster.style.left,'');
+ // Each badge keeps its own keyboard controls with a grouped roster: it moves alone and Home puts it back.
+ const first=chips(h)[0],second=chips(h)[1];first.fire('keydown',{key:'ArrowRight'});assert.equal(first.style.left,'10px');assert.equal(second.style.left??'',''.padEnd(0));first.fire('keydown',{key:'Home'});assert.equal(first.style.left,'');
 });
 test('POST identity marks the whole own participant as you and suppresses every own cursor and selection',async t=>{
  const h=harness(t,{presenceIdentity:1}),own=human('own','person',true,1),other=human('other','person',true,2,2);
@@ -139,4 +140,70 @@ test('participants visibly distinguish people and agents while keeping accessibl
  assert.equal(people.length,1);assert.equal(agents.length,1);
  assert.equal(people[0].children[1].textContent,'Person');assert.equal(agents[0].children[1].textContent,'Agent');
  assert.match(people[0].title,/Sunny Otter.*Person/);assert.match(agents[0].title,/Quiet Owl.*Agent/);
+});
+
+// ---- #20: independent, draggable badges
+const KEY = 'openpaperdesign:presence-badges:1:paper';
+const two = () => [human('a', 'alice', true, 1, 1), {...human('b', 'bob', false, 2, 2), name: 'Bob Heron'}];
+const press = (chip, init = {}) => chip.fire('pointerdown', {button: 0, pointerId: 1, clientX: 400, clientY: 20, ...init});
+const drag = (chip, dx, dy, steps = 3) => { press(chip); for (let i = 1; i <= steps; i++) chip.fire('pointermove', {pointerId: 1, clientX: 400 + dx * i / steps, clientY: 20 + dy * i / steps}); chip.fire('pointerup', {pointerId: 1}); };
+test('badges stand alone: no enclosing box or shared handle, in the canvas viewport, unmoved ones centred by the layout', async t => {
+ const h = harness(t); h.ui.receive({paperId: 'paper', peers: two()});
+ assert.equal(chips(h).length, 2); assert.ok(h.roster.children.every(c => c.className.includes('presence-avatar')), 'only badges: no grip button, no wrapper');
+ assert.ok(!h.roster.all().some(c => c.tag === 'button' || c.className.includes('grip')));
+ for (const c of chips(h)) { assert.equal(c.style.left ?? '', ''); assert.ok(!c.className.includes('moved'), 'an unmoved badge is laid out, not positioned'); assert.equal(c.tabIndex, 0, 'reachable by keyboard'); assert.match(c.title, /Sunny Otter|Bob Heron/); }
+ const css = await fs.readFile(new URL('../runtime/canvas.css', import.meta.url), 'utf8'), roster = /#presence-roster\{([^}]*)\}/.exec(css)[1];
+ for (const gone of ['background', 'border', 'box-shadow', 'cursor:grab', 'pointer-events:auto']) assert.ok(!roster.includes(gone), `the strip draws nothing and takes no input (${gone})`);
+ assert.match(roster, /pointer-events:none/); assert.match(roster, /left:0;right:0;top:0/); assert.match(roster, /justify-content:center/);
+ assert.match(css, /body:not\(\.left-open\) #presence-roster\{padding-left:calc\(var\(--panel-w\) \+ 4px\)\}body:not\(\.right-open\) #presence-roster\{padding-right:calc\(var\(--panel-w\) \+ 4px\)\}/, 'clear of the floating corner bars');
+ assert.match(css, /#stage\{position:fixed;top:0;bottom:0;left:var\(--lw\);right:var\(--rw\)/, 'the stage the strip lives in excludes the panels'); assert.match(css, /\.presence-avatar\.moved\{position:absolute/);
+ assert.match(css, /\.presence-avatar\{cursor:grab;touch-action:none/); assert.equal(h.roster.parent, h.host.stage, 'the strip is part of the canvas viewport');
+});
+test('each badge drags independently, keeps its own position as a local preference, and does not touch the document', async t => {
+ const writes = new Map(), storage = {getItem: k => writes.get(k) ?? null, setItem: (k, v) => writes.set(k, v), removeItem: k => writes.delete(k)}, h = harness(t, {storage, presenceIdentity: 1}), bodies = [];
+ t.mock.method(globalThis, 'fetch', async (_u, o) => { bodies.push(o.body); return Response.json({}); });
+ h.ui.receive({paperId: 'paper', peers: two()}); const [a, b] = chips(h);
+ // A press without real movement is not a move.
+ press(a); a.fire('pointerup', {pointerId: 1}); assert.ok(!a.className.includes('moved')); assert.equal(writes.size, 0);
+ drag(a, 120, 80); assert.equal(a.style.left, '120px'); assert.equal(a.style.top, '80px'); assert.ok(a.className.includes('moved')); assert.equal(b.style.left ?? '', ''); assert.ok(!b.className.includes('moved'), 'the other badge did not move');
+ drag(b, -30, 160); assert.equal(b.style.left, '8px', 'clamped inside the canvas, not off its edge'); assert.equal(b.style.top, '160px'); assert.equal(a.style.left, '120px', 'the first stays where it was put');
+ const saved = JSON.parse(writes.get(KEY)); assert.deepEqual(Object.keys(saved).sort(), ['alice', 'bob'], 'keyed by participant identity, not by position in the list'); assert.deepEqual(saved.alice, {x: 120, y: 80});
+ assert.deepEqual([...writes.keys()], [KEY], 'only this local preference is written; nothing about the Paper'); assert.ok(bodies.every(body => !/badge|"x":120/.test(body)), 'positions are never sent to the server');
+ // Pointer events on a badge never reach the canvas's own handlers.
+ let reached = 0; const ev = {button: 0, pointerId: 2, clientX: 5, clientY: 5, preventDefault() {}, stopPropagation() { reached--; }}; a.fire('pointerdown', ev); assert.equal(reached, -1, 'the press is stopped at the badge');
+});
+test('moved positions survive refresh, reconnect and a participant leaving and returning, and new badges start at the default', t => {
+ const writes = new Map(), storage = {getItem: k => writes.get(k) ?? null, setItem: (k, v) => writes.set(k, v), removeItem: k => writes.delete(k)};
+ const h = harness(t, {storage}); h.ui.receive({paperId: 'paper', peers: two()}); drag(chips(h)[0], 200, 100);
+ // Presence refresh with a different status: the same badge elements, still moved.
+ const before = chips(h)[0]; h.ui.receive({paperId: 'paper', peers: [{...two()[0], status: 'x'}, two()[1]]}); assert.equal(chips(h)[0], before); assert.equal(chips(h)[0].style.left, '200px');
+ // Reconnect clears every peer, then they return.
+ h.ui.disconnect(); assert.equal(chips(h).length, 0); h.ui.receive({paperId: 'paper', peers: two()}); const back = chips(h).find(c => c.dataset.identity === 'alice'); assert.equal(back.style.left, '200px'); assert.equal(back.style.top, '100px');
+ // One leaves and returns while the other stays; a newcomer is unmoved.
+ h.ui.receive({paperId: 'paper', peers: [two()[1]]}); assert.equal(chips(h).length, 1); h.ui.receive({paperId: 'paper', peers: [...two(), {...human('c', 'carol', false, 3, 3), name: 'Carol'}]});
+ assert.equal(chips(h).find(c => c.dataset.identity === 'alice').style.left, '200px'); assert.equal(chips(h).find(c => c.dataset.identity === 'carol').style.left ?? '', '');
+});
+test('badges are clamped into the visible canvas on resize, including narrow layouts, and unreadable preferences are ignored', t => {
+ const h = harness(t, {storage: {getItem: () => JSON.stringify({alice: {x: 900, y: 600}, bad: 'x', '': {x: 1, y: 1}, bob: {x: NaN, y: 1}}), setItem() {}, removeItem() {}}});
+ h.ui.receive({paperId: 'paper', peers: two()}); const [a, b] = chips(h);
+ assert.equal(a.style.left, '832px'); assert.equal(a.style.top, '600px'); assert.equal(b.style.left ?? '', '', 'a damaged entry is dropped, not guessed');
+ h.host.stage.rect = {left: 0, top: 0, width: 320, height: 480}; h.observers[0].callback();
+ assert.equal(a.style.left, '152px'); assert.equal(a.style.top, '440px'); assert.ok(Number.parseInt(a.style.left) >= 8 && Number.parseInt(a.style.left) + a.offsetWidth <= 320 - 8);
+ h.host.stage.rect = {left: 0, top: 0, width: 100, height: 60}; h.observers[0].callback(); assert.equal(a.style.left, '8px', 'a stage too small keeps the badge at the edge instead of off screen'); assert.equal(a.style.top, '20px');
+ assert.equal(chips(h).length, 2);
+});
+test('a badge can be moved and put back with the keyboard, and other keys are left alone', t => {
+ const writes = new Map(), h = harness(t, {storage: {getItem: k => writes.get(k) ?? null, setItem: (k, v) => writes.set(k, v), removeItem: k => writes.delete(k)}});
+ h.ui.receive({paperId: 'paper', peers: two()}); const [a, b] = chips(h); let prevented = 0, stopped = 0; const key = (chip, init) => chip.fire('keydown', {preventDefault() { prevented++; }, stopPropagation() { stopped++; }, ...init});
+ key(a, {key: 'ArrowDown'}); assert.equal(a.style.top, '10px'); key(a, {key: 'ArrowRight', shiftKey: true}); assert.equal(a.style.left, '48px'); key(a, {key: 'ArrowRight'}); assert.equal(a.style.left, '58px');
+ assert.equal(JSON.parse(writes.get(KEY)).alice.x, 58); assert.equal(b.style.left ?? '', ''); const kept = prevented;
+ for (const k of ['Tab', 'Enter', ' ', 'a', 'Escape']) key(a, {key: k}); assert.equal(prevented, kept, 'only arrows and Home are handled'); assert.equal(a.style.left, '58px');
+ key(a, {key: 'Home'}); assert.equal(a.style.left, ''); assert.ok(!a.className.includes('moved')); assert.equal(JSON.parse(writes.get(KEY)).alice, undefined); key(b, {key: 'ArrowLeft'}); assert.equal(b.style.left, '8px');
+ // Double-click resets only that badge.
+ b.fire('dblclick'); assert.equal(b.style.left ?? '', ''); assert.ok(!b.className.includes('moved'));
+});
+test('moving a badge never changes who or what is shown, and stop() leaves nothing behind', t => {
+ const h = harness(t); h.ui.receive({paperId: 'paper', peers: two()}); const [a] = chips(h); drag(a, 50, 50);
+ assert.deepEqual(chips(h).map(c => c.dataset.identity), ['alice', 'bob']); assert.equal(h.layer.children.length >= 0, true);
+ h.ui.stop(); assert.ok(h.observers.every(o => o.disconnected));
 });
