@@ -26,10 +26,12 @@ export function createPlayer(host) {
   let timeline = [], timelineMs = 0, scrolled = [], nodeMap = new Map(), forcedRoot = null;
   // One shared clock drives every timeline animation. A loop never ends, so the clock is allowed to run past the first cycle; `ends` is when each finite
   // animation is over and `loops` are the ones that repeat forever.
-  const ends = new Map(), loops = new Set(), keyed = new Map();
+  const ends = new Map(), loops = new Set(), keyed = new Map(), handled = new WeakSet();
 
   // ---- The toolbar and the one scroll container. Everything here is created by Play and removed by Play.
-  const root = host.container; root.replaceChildren(); root.hidden = false; root.setAttribute('role', 'region'); root.setAttribute('aria-label', 'Play preview');
+  const root = host.container; root.replaceChildren(); root.hidden = false; root.tabIndex = -1;
+  // Play behaves as a modal dialog: it covers the whole window, keeps focus inside (Tab and Shift+Tab wrap, see key()), and closes with Escape or Back to Edit.
+  root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true'); root.setAttribute('aria-label', 'Play preview');
   const back = make('button', {type: 'button', class: 'play-back', text: 'Back to Edit'}), pageSelect = make('select', {class: 'field', 'aria-label': 'Page'}), viewSelect = make('select', {class: 'field', 'aria-label': 'Viewport width'});
   const replay = make('button', {type: 'button', class: 'ibtn', 'aria-label': 'Replay from the start', title: 'Replay', text: '⟲'}), toggle = make('button', {type: 'button', class: 'play-toggle', text: 'Play'});
   const scrub = make('input', {type: 'range', class: 'play-scrub', min: '0', max: '1', step: '1', value: '0', 'aria-label': 'Time in milliseconds'}), readout = make('output', {class: 'play-time'});
@@ -87,12 +89,13 @@ export function createPlayer(host) {
   }
 
   function build({keepTime = null, autoplay = true} = {}) {
+    const before = focusMemory();
     teardown(); listen(); pageSelect.replaceChildren(...scene.pages.map(p => make('option', {value: p.id, text: p.name || 'Page'}))); pageSelect.value = pageId; viewSelect.value = viewport;
     const width = viewport === 'auto' ? Math.max(1, scroller.clientWidth || root.clientWidth || 1) : Number(viewport), page = scene.pages.find(p => p.id === pageId);
     let variant = resolveVariant(preview, scene, pageId, width); const forced = forcedRoot; forcedRoot = null;
     if (forced !== null && page?.root.includes(forced)) { const declared = (preview?.variants || []).find(v => v.page === pageId && v.root === forced); variant = {root: forced, id: declared?.id || null, label: declared?.label || page.nodes.find(n => n.id === forced)?.name || 'Artboard', implicit: !declared}; }
     const rootNode = variant && page?.nodes.find(n => n.id === variant.root), clone = rootNode && host.cloneRoot(pageId, rootNode.id);
-    if (!clone) { shown = null; status.textContent = 'This Page has nothing to play yet.'; scrub.max = '1'; readout.textContent = ''; return; }
+    if (!clone) { shown = null; status.textContent = 'This Page has nothing to play yet.'; scrub.max = '1'; readout.textContent = ''; refocus(before); return; }
     const w = rootNode.rect.w, h = rootNode.rect.h, room = scroller.clientWidth || root.clientWidth || width, scale = Math.min(1, Math.min(width, room) / w);
     nodeMap = collect(clone); nodeMap.set(rootNode.id, clone);
     // From here a layer is found by its own id; the editor's attribute is replaced by Play's, and no other attribute of the Paper is read.
@@ -117,6 +120,7 @@ export function createPlayer(host) {
     if (keepTime !== null) seek(keepTime);
     applyMotionMode();
     if (!reduced && autoplay) { playTimeline(); setPlaying(true); } else { setPlaying(false); readTime(); }
+    refocus(before);
   }
 
   // ---- Text states: a layer shows the text of the state it is in, else its own.
@@ -149,7 +153,7 @@ export function createPlayer(host) {
         entry.apply = () => { const {from, to} = record.trigger, p = Math.min(1, Math.max(0, (scroller.scrollTop / scale - from) / (to - from))); animation.pause(); animation.currentTime = (reduced ? (p >= .5 ? 1 : 0) : p) * record.durationMs; };
       } else if (type === 'hover' || type === 'focus') {
         const around = source(), enter = type === 'hover' ? 'pointerenter' : 'focusin', leave = type === 'hover' ? 'pointerleave' : 'focusout';
-        if (type === 'focus' && !around.tabIndex) around.tabIndex = 0;
+        if (type === 'focus' && around.tabIndex < 0) around.tabIndex = 0;
         entry.rest = () => snap(false);
         const toward = forward => { if (reduced) snap(forward); else { animation.playbackRate = forward ? 1 : -1; animation.play(); } };
         on(around, enter, () => toward(true)); on(around, leave, () => toward(false));
@@ -229,11 +233,43 @@ export function createPlayer(host) {
     return true;
   }
   // Keys inside Play. The editor's capture-phase guard hands every key to key(), so Play's own handlers still work while no other part of the page sees it.
-  function bindKey(el, handler) { keyed.set(el, handler); on(el, 'keydown', event => { handler(event); }); }
+  function bindKey(el, handler) { keyed.set(el, handler); on(el, 'keydown', event => { if (!handled.has(event)) { const done = handler(event); if (done) handled.add(event); } }); }
+  // Focus containment. What can take focus inside Play, in reading order: the toolbar's controls (not disabled), the scrolling preview, and every layer that
+  // was made focusable (a click action, or a focus effect). Hidden, disabled and tabindex -1 things are not in the ring.
+  function focusables() {
+    const out = [], walk = node => { for (const child of Array.from(node.children || [])) { if (child.hidden || child.inert) continue; if (child.tabIndex >= 0 && !child.disabled && child.type !== 'hidden') out.push(child); walk(child); } };
+    walk(root); return out;
+  }
+  const inside = el => !!el && (el === root || !!root.contains?.(el));
+  // Tab at the last stop goes to the first, Shift+Tab at the first goes to the last, and focus that is somewhere else (the page body after a click on empty
+  // space, a layer that was just replaced) comes back in. Everything in between is left to the browser, so selects, the number field and the slider keep
+  // their native behaviour.
+  function trapTab(event) {
+    const ring = focusables(), active = inside(event.target) ? event.target : globalThis.document?.activeElement, index = ring.indexOf(active), last = ring.length - 1;
+    const send = to => { event.preventDefault(); event.stopPropagation(); (to || root).focus?.(); return true; };
+    if (!ring.length) return send(null);
+    if (index < 0) return send(event.shiftKey ? ring[last] : ring[0]);
+    if (event.shiftKey && index === 0) return send(ring[last]);
+    if (!event.shiftKey && index === last) return send(ring[0]);
+    return false;
+  }
+  // The editor's capture-phase guard calls this for every key while Play is open, and Play's own root listener calls it for the same key when the guard is absent.
+  // An event is only ever acted on once.
   function key(event) {
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); host.onClose(); return true; }
-    for (let n = event.target; n && n !== root; n = n.parentNode) { const handler = keyed.get(n); if (handler?.(event)) return true; }
+    if (handled.has(event)) return true;
+    if (event.key === 'Escape') { handled.add(event); event.preventDefault(); event.stopPropagation(); host.onClose(); return true; }
+    if (event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey && trapTab(event)) { handled.add(event); return true; }
+    for (let n = event.target; n && n !== root; n = n.parentNode) { const handler = keyed.get(n); if (handler?.(event)) { handled.add(event); return true; } }
     event.stopPropagation(); return false;
+  }
+  // A rebuild (another variant, Page or revision) replaces the layers. If focus was on one, it goes to the same layer in the new build, else to the preview
+  // itself; focus that was in the toolbar stays where it is. It never falls to the page behind.
+  function focusMemory() { const active = globalThis.document?.activeElement; return inside(active) ? {layer: active.dataset?.playNode ?? null, was: active} : null; }
+  function refocus(before) {
+    if (!before || stopped) return;
+    if (before.layer === null) { if (!inside(globalThis.document?.activeElement)) scroller.focus?.({preventScroll: true}); return; }
+    const same = nodeMap.get(Number(before.layer));
+    (same && same.tabIndex >= 0 ? same : scroller).focus?.({preventScroll: true});
   }
   function applyMotionMode() {
     motion.setAttribute('aria-pressed', String(reduced)); root.classList.toggle('play-reduced', reduced); root.dataset.playReduced = String(reduced);

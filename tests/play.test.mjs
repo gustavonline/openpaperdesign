@@ -9,7 +9,7 @@ import {syntheticLanding, addMotion} from './fixtures/motion-landing.mjs';
 
 class Style { setProperty(k, v) { this[k] = v; } }
 class El {
-  constructor(tag, env) { Object.assign(this, {tag, env, children: [], parentNode: null, dataset: {}, style: new Style(), attrs: {}, listeners: new Map(), _text: '', className: '', tabIndex: 0, scrollTop: 0, hidden: false, value: ''}); this.classList = {toggle: (name, on) => { const set = new Set(this.className.split(' ').filter(Boolean)); if (on) set.add(name); else set.delete(name); this.className = [...set].join(' '); }}; env.elements.push(this); }
+  constructor(tag, env) { Object.assign(this, {tag, env, children: [], parentNode: null, dataset: {}, style: new Style(), attrs: {}, listeners: new Map(), _text: '', className: '', tabIndex: ['button', 'select', 'input', 'textarea'].includes(tag) ? 0 : -1, scrollTop: 0, hidden: false, value: ''}); this.classList = {toggle: (name, on) => { const set = new Set(this.className.split(' ').filter(Boolean)); if (on) set.add(name); else set.delete(name); this.className = [...set].join(' '); }}; env.elements.push(this); }
   get clientWidth() { return this.env.width; } get clientHeight() { return 800; } get scrollHeight() { return 4000; }
   get textContent() { return this.children.length ? this.children.map(c => c.textContent).join('') : this._text; } set textContent(v) { this.children.forEach(c => { c.parentNode = null; }); this.children = []; this._text = String(v); }
   setAttribute(k, v) { this.attrs[k] = v; } removeAttribute(k) { delete this.attrs[k]; }
@@ -23,6 +23,7 @@ class El {
   getBoundingClientRect() { return {top: this.rectTop ?? 0, left: 0, width: 100, height: 40}; }
   scrollTo(options) { this.scrolledTo = options; if (options?.top !== undefined) this.scrollTop = options.top; }
   focus() { this.env.focused = this; }
+  contains(other) { for (let n = other; n; n = n.parentNode) if (n === this) return true; return false; }
   animate(frames, options) { const a = {frames, options, currentTime: null, playbackRate: 1, running: false, cancelled: false, plays: 0, target: this,
     get end() { return options.iterations === Infinity ? Infinity : options.delay + options.duration * options.iterations; },
     get playState() { return a.running ? 'running' : (a.playbackRate > 0 && a.currentTime >= a.end ? 'finished' : 'paused'); },
@@ -32,7 +33,7 @@ const ORIGINAL = {document: globalThis.document, window: globalThis.window, Inte
 function environment(t, {width = 1440, reduced = false} = {}) {
   const env = {elements: [], animations: [], added: 0, removed: 0, width, frames: new Map(), frameId: 0, observers: [], visibility: [], media: {matches: reduced, listeners: new Set()}, focused: null};
   const fakes = {};
-  fakes.document = {hidden: false, createElement: tag => new El(tag, env), addEventListener: (type, fn) => { if (type === 'visibilitychange') { env.visibility.push(fn); env.added++; } }, removeEventListener: (type, fn) => { const i = env.visibility.indexOf(fn); if (i >= 0) { env.visibility.splice(i, 1); env.removed++; } }};
+  fakes.document = {hidden: false, get activeElement() { return env.focused; }, createElement: tag => new El(tag, env), addEventListener: (type, fn) => { if (type === 'visibilitychange') { env.visibility.push(fn); env.added++; } }, removeEventListener: (type, fn) => { const i = env.visibility.indexOf(fn); if (i >= 0) { env.visibility.splice(i, 1); env.removed++; } }};
   fakes.window = {matchMedia: () => ({get matches() { return env.media.matches; }, addEventListener: (_, fn) => { env.media.listeners.add(fn); env.added++; }, removeEventListener: (_, fn) => { if (env.media.listeners.delete(fn)) env.removed++; }})};
   fakes.IntersectionObserver = class { constructor(callback, options) { this.callback = callback; this.options = options; this.targets = new Set(); this.disconnected = false; env.observers.push(this); } observe(target) { this.targets.add(target); } disconnect() { this.disconnected = true; this.targets.clear(); } };
   fakes.requestAnimationFrame = fn => { const id = ++env.frameId; env.frames.set(id, fn); return id; }; fakes.cancelAnimationFrame = id => { env.frames.delete(id); };
@@ -301,4 +302,82 @@ test('the key guard hands Play its own keys and keeps everything else out: Escap
   press(together, 'Escape'); assert.deepEqual(m.closed, [1]);
   const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
   assert.match(app, /window\.addEventListener\('keydown', e => \{ if \(!playOpen\) return; if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); closePlay\(\); \} else player\?\.key\(e\); e\.stopImmediatePropagation\(\); \}, true\);/, 'the guard calls Play first and then blocks every other listener, native toolbar included');
+});
+
+// ---- Focus boundary (the lead's actual Firefox defect: Tab from a Play layer landed on <body>). Fake-DOM tests of Play's own focus ring and wrap logic;
+// ---- they do not prove what a real browser does with Tab, which only the lead's browser run can.
+const attachedTo = m => el => { for (let n = el; n; n = n.parentNode) if (n === m.container) return true; return false; };
+// An independent walk of the stop list: what a real DOM would make tabbable inside Play, in document order.
+function ringOf(m) { const out = [], walk = node => { for (const c of node.children) { if (c.hidden) continue; if (c.tabIndex >= 0 && !c.disabled && c.type !== 'hidden') out.push(c); walk(c); } }; walk(m.container); return out; }
+function tab(m, from, shift = false) { let prevented = 0, stopped = 0; const event = {key: 'Tab', shiftKey: shift, target: from, preventDefault() { prevented++; }, stopPropagation() { stopped++; }}; const handled = m.player.key(event); return {handled, prevented, stopped, focused: m.env.focused, event}; }
+const labelOf = el => el.attrs['aria-label'] || el.textContent || el.className;
+
+test('Play is a modal dialog with a defined ring of tab stops: the toolbar in order, the preview, then every designed interactive layer', t => {
+  const m = mount(t), c = m.container; assert.equal(c.attrs.role, 'dialog'); assert.equal(c.attrs['aria-modal'], 'true'); assert.equal(c.attrs['aria-label'], 'Play preview'); assert.equal(c.tabIndex, -1, 'it can hold focus itself as a last resort, but is not a stop');
+  const ring = ringOf(m), labels = ring.map(labelOf);
+  assert.deepEqual(labels.slice(0, 9), ['Back to Edit', 'Page', 'Viewport width', 'Replay from the start', 'Pause', 'Time in milliseconds', 'Set time in milliseconds (exact)', 'Reduce motion', 'Preview, scrolls'], 'the toolbar in reading order, then the scrolling preview');
+  const layers = ring.slice(9); assert.equal(layers.length, 6, 'D Solo, D Together, D primary CTA, Navigation CTA, Details navigation, Section navigation'); assert.ok(layers.every(el => el.dataset.playNode && el.attrs.role === 'button'), 'only layers that were designed to be pressed follow'); assert.ok(layers.every(attachedTo(m)));
+  // Nothing hidden, disabled or tabindex -1 is a stop: the plain layers, the sticky strips and the option elements are not.
+  assert.ok(!ring.some(el => el.className === 'play-sticky' || el.className === 'play-scaler' || el.tag === 'option')); assert.ok(m.byNode(m.named('D hero headline')).tabIndex < 0 && !ring.includes(m.byNode(m.named('D hero headline'))));
+  // A layer that only has a focus effect (no click action) is made focusable too: a div's tabindex is -1 until set (the real-browser default the test DOM now mirrors).
+  const scene = addMotion(syntheticLanding()), eyebrow = scene.pages[0].nodes.find(n => n.name === 'D eyebrow').id; scene.preview.animations.push({id: 'glow', page: scene.pages[0].id, node: eyebrow, trigger: {type: 'focus'}, keyframes: [{scale: 1}, {scale: 1.1}], durationMs: 120});
+  const f = mount(t, {scene}); assert.equal(f.byNode(eyebrow).tabIndex, 0, 'focus effect on a plain layer: it becomes a stop'); assert.ok(ringOf(f).includes(f.byNode(eyebrow)));
+  // Disabled controls leave the ring: the slider and time field have nothing to do on a Page with no timeline? (they stay enabled; a disabled control would be skipped).
+  const bar = ringOf(m).find(el => el.tag === 'button' && el.textContent === 'Reduce motion'); bar.disabled = true; assert.ok(!ringOf(m).includes(bar)); const last = ringOf(m).at(-1), r = tab(m, last); assert.equal(r.handled, true);
+});
+
+test('Tab wraps at both ends of the ring and comes back from anywhere outside it; the middle is left to the browser', t => {
+  const m = mount(t), ring = ringOf(m), first = ring[0], last = ring.at(-1);
+  let r = tab(m, last); assert.deepEqual([r.handled, r.prevented, r.focused], [true, 1, first], 'Tab at the last stop goes to the first');
+  r = tab(m, first, true); assert.deepEqual([r.handled, r.prevented, r.focused], [true, 1, last], 'Shift+Tab at the first stop goes to the last');
+  for (let i = 0; i < ring.length - 1; i++) { r = tab(m, ring[i]); assert.deepEqual([r.handled, r.prevented], [false, 0], `stop ${i} forward is the browser’s own move`); }
+  for (let i = 1; i < ring.length; i++) { r = tab(m, ring[i], true); assert.deepEqual([r.handled, r.prevented], [false, 0], `stop ${i} backward is the browser’s own move`); }
+  // Following the browser's own order all the way round never leaves: walk forward through the ring twice.
+  let at = first; for (let n = 0; n < ring.length * 2 + 3; n++) { r = tab(m, at); at = r.handled ? r.focused : ring[ring.indexOf(at) + 1]; assert.ok(ring.includes(at), `stop ${n} is inside Play`); }
+  at = last; for (let n = 0; n < ring.length * 2 + 3; n++) { r = tab(m, at, true); at = r.handled ? r.focused : ring[ring.indexOf(at) - 1]; assert.ok(ring.includes(at), `back-stop ${n} is inside Play`); }
+  // From the page body (focus lost by clicking empty space), from the dialog itself, and from a layer's text child: back in, at the right end.
+  const body = {tag: 'body', parentNode: null}; assert.equal(tab(m, body).focused, first); assert.equal(tab(m, body, true).focused, last); assert.equal(tab(m, m.container).focused, first);
+  const child = m.byNode(m.named('D Together toggle')).children[0]; assert.ok(child.parentNode, 'a designed text child'); r = tab(m, child); assert.equal(r.handled, true, 'not a stop itself: focus is brought to a real one'); assert.equal(r.focused, first);
+  // Modified Tab (Ctrl/Alt/Meta+Tab) is the system's, never ours.
+  for (const flag of ['ctrlKey', 'altKey', 'metaKey']) { let prevented = 0; const handled = m.player.key({key: 'Tab', [flag]: true, target: last, preventDefault() { prevented++; }, stopPropagation() {}}); assert.deepEqual([handled, prevented], [false, 0], flag); }
+  assert.equal(m.closed.length, 0);
+});
+
+test('with a paused or reduced-motion preview the ring and its wrap are the same, and hover or focus effects do not change it', t => {
+  const a = mount(t), b = mount(t, {reduced: true}); a.player.pause(); a.player.seek(4000);
+  for (const m of [a, b]) { const ring = ringOf(m), r1 = tab(m, ring.at(-1)), r2 = tab(m, ring[0], true); assert.deepEqual([r1.focused, r2.focused], [ring[0], ring.at(-1)]); }
+  assert.deepEqual(ringOf(a).map(labelOf), ringOf(b).map(labelOf), 'the same stops in the same order, paused or reduced');
+  const el = a.byNode(a.named('D primary CTA')); el.fire('pointerenter'); el.fire('focusin'); assert.deepEqual(ringOf(a).filter(x => x.dataset.playNode).length, ringOf(b).filter(x => x.dataset.playNode).length);
+});
+
+test('after a rebuild (viewport, Page, live revision) focus stays inside Play: the same layer again if it is there, else the preview; toolbar focus is left alone', t => {
+  const m = mount(t), together = m.byNode(m.named('D Together toggle')); together.focus(); assert.equal(m.env.focused, together);
+  // Live revision: a new element for the same layer, focused.
+  const next = addMotion(syntheticLanding()); m.player.update(next, next.preview); const again = m.byNode(m.named('D Together toggle')); assert.notEqual(again, together, 'a new element'); assert.equal(m.env.focused, again, 'focus follows the layer to its new element'); assert.ok(attachedTo(m)(again));
+  // Another variant: that layer is not in the mobile artboard, so focus goes to the preview, not the page behind.
+  m.player.setViewport('390'); assert.equal(m.container.dataset.playVariant, 'landing-mobile'); assert.equal(m.env.focused.className, 'play-viewport'); assert.ok(attachedTo(m)(m.env.focused));
+  const mobile = ringOf(m), nodes = mobile.filter(x => x.dataset.playNode).map(x => Number(x.dataset.playNode)), mobileIds = new Set(m.scene.pages[0].nodes.filter(n => n.name.startsWith('M ') || ['Mobile details navigation', 'Landing · mobile'].includes(n.name) || n.parent !== undefined).map(n => n.id));
+  assert.ok(nodes.length >= 4 && nodes.every(id => mobileIds.has(id)) && ![...nodes].some(id => id === m.named('D Together toggle')), 'the ring after the rebuild lists only the new variant’s layers');
+  assert.ok(mobile.every(attachedTo(m)), 'and every stop is attached: none left over from the old build');
+  const last = mobile.at(-1); assert.equal(tab(m, last).focused, mobile[0], 'wrap works on the rebuilt ring'); assert.equal(tab(m, mobile[0], true).focused, last);
+  // Toolbar focus survives a rebuild where it is.
+  const field = msField(m); field.focus(); m.player.setViewport('1440'); assert.equal(m.env.focused, field, 'the time field keeps focus while the preview is rebuilt under it');
+  // Page navigation by a click on a layer: the layer is gone, focus is on the preview.
+  const cta = m.byNode(m.named('D primary CTA')); cta.focus(); cta.fire('click'); assert.equal(m.container.dataset.playPage, m.scene.pages[1].id); assert.equal(m.env.focused.className, 'play-viewport'); assert.ok(ringOf(m).includes(m.env.focused));
+  // The Page picker (a native select in the toolbar) keeps focus through its own change.
+  const select = m.env.elements.find(e => e.tag === 'select' && e.attrs['aria-label'] === 'Page' && attachedTo(m)(e)); select.focus(); select.value = m.scene.pages[0].id; select.fire('change'); assert.equal(m.env.focused, select);
+  // The whole Page goes in a live update: nothing to focus there, still not the body.
+  m.byNode(m.named('D Solo toggle')).focus(); const single = addMotion(syntheticLanding()); single.pages = [single.pages[0]]; single.preview = undefined; m.player.update(single, undefined); assert.ok(attachedTo(m)(m.env.focused), 'focus is still inside Play');
+});
+
+test('a key is acted on once: element and root listeners and the editor guard together run each handler a single time, including from a text child of a layer', t => {
+  const m = mount(t), scroller = m.find('play-viewport'), nav = m.byNode(m.named('Section navigation')); let scrolls = 0; scroller.scrollTo = () => { scrolls++; };
+  const through = (el, event) => { for (const fn of el.listeners.get('keydown') || []) fn(event); };
+  const e1 = {key: 'Enter', target: nav, preventDefault() {}, stopPropagation() {}}; through(nav, e1); through(m.container, e1); assert.equal(scrolls, 1, 'element listener, then the root listener, one scroll'); assert.equal(m.player.key(e1), true); assert.equal(scrolls, 1, 'and the guard path with the same event does nothing more');
+  const e2 = {key: ' ', target: nav, preventDefault() {}, stopPropagation() {}}; m.player.key(e2); through(nav, e2); through(m.container, e2); assert.equal(scrolls, 2, 'guard first, then the listeners: still once');
+  // A text child of a designed layer: the nearest layer with a handler acts, once, and an inner layer wins over its parent.
+  const child = nav.children[0] ?? m.byNode(m.named('Navigation CTA')).children[0]; const cta = m.byNode(m.named('Navigation CTA')), label = cta.children[0]; assert.ok(label, 'the CTA has a text child'); let navigations = 0; const before = m.container.dataset.playPage;
+  const e3 = {key: 'Enter', target: label, preventDefault() {}, stopPropagation() {}}; assert.equal(m.player.key(e3), true); assert.notEqual(m.container.dataset.playPage, before, 'Enter on the label pressed its layer'); assert.equal(m.player.key(e3), true); assert.ok(navigations === 0 && child);
+  // Another key is not handled, but is kept inside (stopPropagation) and not run twice either.
+  const stops = []; const e4 = {key: 'x', target: m.byNode(m.named('D primary CTA')) ?? m.container, preventDefault() {}, stopPropagation() { stops.push(1); }}; assert.equal(m.player.key(e4), false); assert.equal(stops.length, 1);
 });

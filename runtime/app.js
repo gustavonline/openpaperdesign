@@ -3,7 +3,7 @@ import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLea
 import {setupPresence} from './presence.js?v=ad47b40267f6';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
-import { createPlayer } from './play.js?v=ed519a8a6c64';
+import { createPlayer } from './play.js?v=c3dde918454e';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
@@ -1055,7 +1055,9 @@ function inspectionOwns(e) {
   }
   return false;
 }
+// While Play is open it owns every pointer, wheel and gesture over the whole window, scrolling natively; the editor's camera and tools take none of it.
 function overCanvas(e) {
+  if (playOpen) return false;
   const r = stage.getBoundingClientRect();
   return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom && !e.target.closest?.('#left-panel,#right-panel,#library-panel,.topbar,#rail,.menu,dialog,#status') && !inspectionOwns(e);
 }
@@ -1270,7 +1272,7 @@ $('#page-menu').addEventListener('click', e => {
 // ---- Play and Motion. Play is a separate, full-window preview with its own scroll container (play.js): opening and closing it never touches the camera,
 // the selection, the shown Page or an open draft, and nothing done while playing is written to the Paper. Motion is the inspector's small section for what the
 // selected layer does when played: it edits the Paper's preview model (preview-model.js) as ordinary, undoable changes.
-let player = null, playOpen = false, playReturn = null;
+let player = null, playOpen = false, playReturn = null; const playInert = [];
 const playButton = $('#play-toggle');
 function playablePreview() { const problem = previewProblem(scene.preview, scene); return { preview: problem ? null : scene.preview || null, problem }; }
 function playPage() { if (pageId !== 'all' && scene.pages.some(p => p.id === pageId)) return pageId; return nodes.get(selected)?.page.id || scene.pages[0].id; }
@@ -1284,9 +1286,11 @@ function playClone(pid, rootId) {
 function openPlay() {
   if (playOpen) return;
   if (accessRevoked) { message('This invitation has ended, so Play is unavailable.'); return; }
-  commitFields(); stopTextEdit(); finishGesture(); closeMenu();
+  commitFields(); stopTextEdit(); finishGesture(); closeMenu(); nativePinch = null;
   const { preview, problem } = playablePreview(); playReturn = document.activeElement;
   playOpen = true; body.classList.add('paper-play'); playButton.setAttribute('aria-pressed', 'true');
+  // Everything behind Play leaves the tab order and the pointer's reach (inert) until it closes; the toast stays announced. Play itself keeps focus inside.
+  for (const el of body.children) if (el !== $('#play') && el.id !== 'toast' && el.tagName !== 'SCRIPT' && !el.inert) { el.inert = true; playInert.push(el); }
   player = createPlayer({ container: $('#play'), scene, preview, pageId: playPage(), cloneRoot: playClone, onClose: closePlay });
   if (problem) message(`${problem} Playing without motion.`);
   player.focus();
@@ -1294,6 +1298,7 @@ function openPlay() {
 function closePlay() {
   if (!playOpen) return;
   player?.destroy(); player = null; playOpen = false; body.classList.remove('paper-play'); playButton.setAttribute('aria-pressed', 'false');
+  for (const el of playInert.splice(0)) el.inert = false;
   const back = playReturn && document.contains(playReturn) ? playReturn : playButton; playReturn = null; back.focus?.({ preventScroll: true });
 }
 // The same authorized revision arrives while Play is open: Play rebuilds from it, keeping Page, scroll place, still-valid states and time.
@@ -1303,7 +1308,7 @@ function refreshPlay() { if (!player) return; const { preview, problem } = playa
 // interactive layer) and then stops it, and every other key keeps its ordinary default effect (typing, arrows, Tab), because only propagation is stopped.
 window.addEventListener('keydown', e => { if (!playOpen) return; if (e.key === 'Escape') { e.preventDefault(); closePlay(); } else player?.key(e); e.stopImmediatePropagation(); }, true);
 playButton.addEventListener('click', () => { if (playOpen) closePlay(); else openPlay(); });
-onSurfaceDispose(() => { player?.destroy(); player = null; playOpen = false; });
+onSurfaceDispose(() => { player?.destroy(); player = null; playOpen = false; for (const el of playInert.splice(0)) el.inert = false; });
 
 // One change to the preview model: checked against the Paper before it is kept, one undo step, saved like any other edit.
 function motionEdit(change) {

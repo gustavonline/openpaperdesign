@@ -2,7 +2,7 @@
 // screen and real input are not claimed here.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {promises as fs} from 'node:fs';
+import {promises as fs, readFileSync} from 'node:fs';
 import {previewProblem, withRecord, withoutRecord, uniqueId} from '../runtime/preview-model.js';
 import {syntheticLanding, addMotion} from './fixtures/motion-landing.mjs';
 
@@ -23,7 +23,7 @@ test('Play is its own full-window preview: it never touches the camera, selectio
   assert.ok(slice(app, 'function onKey(e) {', 'const mod =').includes('if (playOpen) return;'), 'the shortcut handler stands down'); assert.equal((app.match(/playOpen \|\| !inspector/g) || []).length, 2, 'and so do both capture handlers');
   assert.match(app, /window\.addEventListener\('keydown', e => \{ if \(!playOpen\) return; if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); closePlay\(\); \} else player\?\.key\(e\); e\.stopImmediatePropagation\(\); \}, true\);/, 'Play gets its own keys first, then no other listener, native toolbar included, sees a key while Play is open');
   // Same revision, revoke and teardown all reach Play.
-  assert.match(app, /updateHistory\(\); refreshPlay\(\);/, 'a new revision updates Play'); assert.match(app, /function revoked\(reason\)\{\s*closePlay\(\); playButton\.disabled = true;/, 'an ended invitation closes Play at once and disables it'); assert.match(app, /onSurfaceDispose\(\(\) => \{ player\?\.destroy\(\); player = null; playOpen = false; \}\)/);
+  assert.match(app, /updateHistory\(\); refreshPlay\(\);/, 'a new revision updates Play'); assert.match(app, /function revoked\(reason\)\{\s*closePlay\(\); playButton\.disabled = true;/, 'an ended invitation closes Play at once and disables it'); assert.match(app, /onSurfaceDispose\(\(\) => \{ player\?\.destroy\(\); player = null; playOpen = false; for \(const el of playInert\.splice\(0\)\) el\.inert = false; \}\)/);
   assert.match(app, /import \{ createPlayer \} from '\.\/play\.js\?v=[a-f0-9]+';/); assert.match(app, /from '\.\/preview-model\.js\?v=[a-f0-9]+'/);
 });
 
@@ -72,4 +72,60 @@ test('the Motion section offers the stated presets and tuning, only to people wh
   assert.match(app, /function populateInspector\(\) \{\s*renderMotion\(\);/, 'it follows the selection');
   // Nothing in it can put a Paper string into markup or a style.
   assert.doesNotMatch(ui, /innerHTML|insertAdjacentHTML|setAttribute\('style'|\.style\.cssText|eval\(|new Function/);
+});
+
+// ---- Who owns input while Play is open (the lead's actual Firefox defect: a wheel over Play moved the camera of the editor behind it). These run the editor's
+// ---- own wheel, pinch and middle-pan code as written, with its few free variables supplied; whether a real browser then scrolls Play is the lead's browser proof.
+function inputHarness() {
+  const registry = new Map(), calls = {zoom: 0, paint: 0, save: 0, finish: 0, pointerCapture: 0}, camera = {x: 100, y: -500, z: .4};
+  let playOpen = false, gesture = null; const stage = {clientHeight: 800, getBoundingClientRect: () => ({left: 0, top: 0, right: 1200, bottom: 800}), contains: () => true, addEventListener() {}, setPointerCapture() { calls.pointerCapture++; }};
+  const window = {addEventListener(name, fn, options) { registry.set(name, [...(registry.get(name) || []), {fn, options}]); }};
+  const source = readSync('app.js'), slice = source.slice(source.indexOf('const middlePan = e =>'), source.indexOf('// Keyboard. Nothing fires while typing'));
+  const bound = (v, lo = -1e6, hi = 1e6) => Math.max(lo, Math.min(hi, v));
+  // `gesture`/`playOpen` are module variables in the editor; the slice reads them as free names, so give it accessors through a with-style proxy scope.
+  const scope = new Proxy({}, {has: (_, name) => name === 'playOpen' || name === 'gesture', get: (_, name) => name === 'playOpen' ? playOpen : name === 'gesture' ? gesture : undefined, set: (_, name, value) => { if (name === 'gesture') gesture = value; return true; }});
+  const wrapped = new Function('scope', 'state', 'window', 'world', 'stage', '$', 'point', 'editable', 'finishGesture', 'camera', 'bound', 'paintCamera', 'saveView', 'zoomAt', 'textAt', 'startTextEdit', 'selectNode', 'getComputedStyle', 'Element', 'inspection', 'canEdit',
+    `with (scope) { ${slice} }`);
+  wrapped(scope, null, window, {addEventListener() {}}, stage, () => ({}), e => ({x: e.clientX, y: e.clientY}), () => false, () => { calls.finish++; gesture = null; }, camera, bound, () => { calls.paint++; }, () => { calls.save++; }, () => { calls.zoom++; }, () => null, () => {}, () => {}, () => ({overflowX: '', overflowY: ''}), class {}, false, true);
+  const event = (extra = {}) => { const e = {clientX: 600, clientY: 400, button: 0, pointerId: 1, deltaX: 0, deltaY: 400, deltaMode: 0, ctrlKey: false, metaKey: false, scale: 1.2, target: {closest: () => null}, composedPath: () => [], defaultPrevented: false, stopped: false, preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() { this.stopped = true; }, ...extra}; return e; };
+  const fire = (name, extra) => { const e = event(extra); for (const {fn} of registry.get(name) || []) fn(e); return e; };
+  return {camera, calls, fire, registry, open: value => { playOpen = value; }, get gesture() { return gesture; }, set gesture(value) { gesture = value; }};
+}
+function readSync(name) { return readFileSync(new URL('../runtime/' + name, import.meta.url), 'utf8'); }
+
+test('with Play open the editor takes no wheel, pinch or middle-button pan: nothing moves behind it, nothing is prevented, so Play scrolls natively', () => {
+  const h = inputHarness(), start = {...h.camera};
+  // The editor as before, outside Play: a wheel over the canvas pans the camera and is taken (preventDefault); ctrl+wheel zooms.
+  let e = h.fire('wheel'); assert.equal(e.defaultPrevented, true); assert.notDeepEqual(h.camera, start, 'the editor pans'); assert.equal(h.camera.y, -900); const panned = {...h.camera};
+  e = h.fire('wheel', {ctrlKey: true, deltaY: -50}); assert.equal(h.calls.zoom, 1, 'and zooms with ctrl'); assert.equal(e.defaultPrevented, true);
+  h.fire('gesturestart'); h.fire('gesturechange'); assert.equal(h.calls.zoom, 2, 'and takes a trackpad pinch');
+  h.fire('pointerdown', {button: 1}); assert.equal(h.gesture?.kind, 'pan'); assert.equal(h.gesture?.middle, true, 'and a middle-button pan'); h.fire('pointerup', {button: 1}); assert.equal(h.gesture, null);
+  // Play open: the same events over the same place are none of the editor's business.
+  h.open(true); const before = JSON.stringify(h.camera), calls = {...h.calls};
+  for (const extra of [{}, {deltaY: -900}, {deltaX: 300}, {deltaMode: 1}, {deltaMode: 2}, {ctrlKey: true}, {metaKey: true, deltaY: 30}]) { e = h.fire('wheel', extra); assert.equal(e.defaultPrevented, false, `wheel ${JSON.stringify(extra)} is left to Play and the browser`); assert.equal(e.stopped, false); }
+  assert.equal(JSON.stringify(h.camera), before, 'the camera behind Play did not move'); assert.deepEqual(h.calls, calls, 'no paint, save or zoom');
+  e = h.fire('gesturestart'); assert.equal(e.defaultPrevented, false); e = h.fire('gesturechange'); assert.equal(e.defaultPrevented, false); h.fire('gestureend'); assert.equal(h.calls.zoom, calls.zoom, 'a pinch does not zoom the editor');
+  e = h.fire('pointerdown', {button: 1}); assert.equal(h.gesture, null, 'no middle-button pan starts'); assert.equal(e.defaultPrevented, false); assert.equal(e.stopped, false); assert.equal(h.calls.pointerCapture, calls.pointerCapture);
+  for (const name of ['mousedown', 'auxclick']) { e = h.fire(name, {button: 1}); assert.equal(e.defaultPrevented, false, `${name}: the browser's own middle-click behaviour over Play`); }
+  for (const name of ['pointermove', 'pointerup']) { e = h.fire(name); assert.equal(e.stopped, false); }
+  // Closed again, the editor behaves exactly as before.
+  h.open(false); e = h.fire('wheel'); assert.equal(e.defaultPrevented, true); assert.equal(h.camera.y, panned.y - 400, 'the editor pans again'); h.fire('pointerdown', {button: 1}); assert.equal(h.gesture?.middle, true); h.fire('pointerup', {button: 1});
+});
+
+test('opening Play ends any gesture in progress and puts the editor’s own parts out of reach, and closing puts back exactly what it set', async () => {
+  const app = readSync('app.js'), source = app.slice(app.indexOf('function openPlay()'), app.indexOf('// The same authorized revision arrives'));
+  const make = (extraInert = []) => { const body = {children: [], classList: {added: new Set(), add(n) { this.added.add(n); }, remove(n) { this.added.delete(n); }}}, node = (id, tag = 'DIV', inert = false) => ({id, tagName: tag, inert}); const play = node('play'), toast = node('toast'), script = node('', 'SCRIPT'), bar = node('left-bar'), canvas = node('stage'), already = node('menu', 'DIV', true);
+    body.children.push(bar, canvas, play, toast, script, already); const log = []; let nativePinch = {scale: 2}, playOpen = false, player = null, playReturn = null, accessRevoked = false; const playInert = [];
+    const button = {attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, disabled: false, title: ''}, document = {activeElement: button, contains: () => true};
+    const fn = new Function('body', '$', 'playButton', 'document', 'message', 'commitFields', 'stopTextEdit', 'finishGesture', 'closeMenu', 'playablePreview', 'createPlayer', 'scene', 'playPage', 'playClone', 'accessRevoked', 'playInert', 'state',
+      `let player = null, playOpen = false, playReturn = null; let nativePinch = state.pinch;\n${source}\nreturn {openPlay, closePlay, get open() { return playOpen; }, get pinch() { return nativePinch; }, get player() { return player; }};`);
+    const state = {pinch: {scale: 2}}, api = fn(body, id => id === '#play' ? play : null, button, document, text => log.push(['message', text]), () => log.push('commit'), () => log.push('text'), () => log.push('finish'), () => log.push('menu'), () => ({preview: null, problem: null}), () => ({focus() { log.push('focus'); }, destroy() { log.push('destroy'); }}), {}, () => 'p', () => null, false, playInert, state);
+    return {api, body, nodes: {bar, canvas, play, toast, script, already}, log};
+  };
+  const m = make(); m.api.openPlay();
+  assert.equal(m.api.open, true); assert.equal(m.api.pinch, null, 'a trackpad pinch in progress is dropped'); assert.deepEqual(m.log.slice(0, 4), ['commit', 'text', 'finish', 'menu'], 'drafts are committed, any drag or middle pan is finished, open menus closed, before Play appears');
+  assert.deepEqual([m.nodes.bar.inert, m.nodes.canvas.inert, m.nodes.already.inert], [true, true, true]); assert.deepEqual([m.nodes.play.inert, m.nodes.toast.inert, m.nodes.script.inert], [false, false, false], 'Play, the toast and scripts are not inert');
+  m.api.closePlay(); assert.deepEqual([m.nodes.bar.inert, m.nodes.canvas.inert], [false, false], 'what Play made inert is live again'); assert.equal(m.nodes.already.inert, true, 'what was inert before Play stays inert');
+  m.api.openPlay(); m.api.openPlay(); m.api.closePlay(); m.api.closePlay(); assert.deepEqual([m.nodes.bar.inert, m.nodes.canvas.inert, m.nodes.already.inert], [false, false, true], 'opening twice or closing twice changes nothing more');
+  assert.match(app, /function overCanvas\(e\) \{\s*if \(playOpen\) return false;/, 'the one place that decides what the canvas owns says no while Play is open');
 });
