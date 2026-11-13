@@ -1076,6 +1076,8 @@ tree.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight' && open === 'false') { e.preventDefault(); expanded.add(key); renderTree(); focusRow(key); }
   else if (e.key === 'ArrowLeft' && open === 'true') { e.preventDefault(); expanded.delete(key); renderTree(); focusRow(key); }
   else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectNode(key, { reveal: true }); focusRow(key); }
+  // Menu key or Shift+F10 on the focused row: only an image row has a menu, so any other row keeps its keys and the browser's own behaviour.
+  else if (!e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey && ((e.key === 'ContextMenu' && !e.shiftKey) || (e.key === 'F10' && e.shiftKey))) { if (openRowMenu(row, { keyboard: true })) e.preventDefault(); }
 });
 $('#layer-search').addEventListener('input', renderTree);
 $('#layer-search').addEventListener('keydown', e => { if (e.key === 'Escape') { e.target.value = ''; renderTree(); } });
@@ -1350,15 +1352,22 @@ overlayRoot.addEventListener('contextmenu', e => {
   if (!key || !paintEditMenu(key, true)) return;
   e.preventDefault(); showMenu($('#edit-menu'), { at: () => ({ x: e.clientX, y: e.clientY }) });
 }, true);
-// The Layers tree reaches the same command with the keyboard (Menu key or Shift+F10 on a focused row) as well as the mouse.
-tree.addEventListener('contextmenu', e => {
-  const row = e.target.closest?.('.tree-row');
-  if (!row?.dataset.key || !paintEditMenu(row.dataset.key, true)) return;
-  e.preventDefault();
-  const keyboard = e.clientX === 0 && e.clientY === 0, r = row.getBoundingClientRect();
-  if (keyboard) originalFocus = row;
+// The Layers tree reaches the same command by mouse and by keyboard. A browser may deliver Menu / Shift+F10 on a focused row as a
+// keydown only, with no contextmenu event, so the key is handled in the tree's keydown handler and opens the menu through this same
+// function; a contextmenu event that does arrive for that same press is ignored.
+let menuKeyAt = 0;
+function openRowMenu(row, { keyboard, x = 0, y = 0 }) {
+  if (!row?.dataset.key || !paintEditMenu(row.dataset.key, true)) return false;
+  const r = row.getBoundingClientRect();
+  if (keyboard) { originalFocus = row; menuKeyAt = Date.now(); }
   // The stand-in trigger of a keyboard-opened menu: Escape returns focus to the row, and a press anywhere outside the menu (even on the row, which is not a toggle) dismisses it.
-  showMenu($('#edit-menu'), { at: () => keyboard ? { x: r.left + 24, y: r.bottom } : { x: e.clientX, y: e.clientY }, keyboard, trigger: keyboard ? { setAttribute() {}, focus: () => row.focus(), contains: () => false } : null });
+  showMenu($('#edit-menu'), { at: () => keyboard ? { x: r.left + 24, y: r.bottom } : { x, y }, keyboard, trigger: keyboard ? { setAttribute() {}, focus: () => row.focus(), contains: () => false } : null });
+  return true;
+}
+tree.addEventListener('contextmenu', e => {
+  const row = e.target.closest?.('.tree-row'), keyboard = e.clientX === 0 && e.clientY === 0;
+  if (keyboard && row && Date.now() - menuKeyAt < 600 && openMenuEl === $('#edit-menu')) { e.preventDefault(); return; }
+  if (openRowMenu(row, { keyboard, x: e.clientX, y: e.clientY })) e.preventDefault();
 });
 canvasMenu.addEventListener('click', e => {
   const p = e.target.closest('[data-pattern]');

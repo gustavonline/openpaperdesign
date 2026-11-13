@@ -185,7 +185,7 @@ test('the editor wires the command: stage menu, Inspect overlay, Layers tree, an
   assert.match(app, /overlayRoot\.addEventListener\('contextmenu'[\s\S]*?\}, true\);/, 'Inspect overlay, in the capture phase so it is seen first');
   assert.match(app, /layerUnderPointer\(document\.elementsFromPoint\(e\.clientX, e\.clientY\)/);
   assert.match(app, /e\.preventDefault\(\); showMenu\(\$\('#edit-menu'\)/, 'only an image takes over the right-click');
-  assert.match(app, /tree\.addEventListener\('contextmenu'[\s\S]*?keyboard \? \{ setAttribute\(\) \{\}, focus: \(\) => row\.focus\(\), contains: \(\) => false \} : null/, 'Layers tree: mouse and keyboard, focus returns to the row');
+  assert.match(app, /function openRowMenu[\s\S]*?keyboard \? \{ setAttribute\(\) \{\}, focus: \(\) => row\.focus\(\), contains: \(\) => false \} : null/, 'Layers tree: mouse and keyboard, focus returns to the row');
   assert.match(app, /button:not\(:disabled\):not\(\[hidden\]\)/, 'a hidden item is never a keyboard stop');
   assert.match(app, /if\(action==='download-original'\)return downloadOriginal\(\);/);
   const body = app.slice(app.indexOf('async function downloadOriginal()'), app.indexOf('// Fills the shared edit menu'));
@@ -198,8 +198,8 @@ test('the editor wires the command: stage menu, Inspect overlay, Layers tree, an
 test('a menu opened from a Layers row by keyboard is dismissed by an outside press, and Escape returns focus to the row', async () => {
   const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
   const cut = (from, to) => { const a = app.indexOf(from), b = app.indexOf(to, a); assert.ok(a > -1 && b > a, from); return app.slice(a, b); };
-  const treeHandler = cut("tree.addEventListener('contextmenu'", "canvasMenu.addEventListener('click'"), closeMenuSource = cut('function closeMenu(refocus = false) {', 'function menuKeys('), pointer = cut("document.addEventListener('pointerdown', e => { if (openMenuEl", '\n');
-  const make = new Function('tree', 'document', 'paintEditMenu', 'showMenuSpy', '$', `let openMenuEl=null,menuTrigger=null,originalFocus=null;
+  const treeHandler = cut('let menuKeyAt = 0;', "canvasMenu.addEventListener('click'"), closeMenuSource = cut('function closeMenu(refocus = false) {', 'function menuKeys('), pointer = cut("document.addEventListener('pointerdown', e => { if (openMenuEl", '\n');
+  const make = new Function('tree', 'document', 'paintEditMenu', 'showMenuSpy', '$', `let openMenuEl=null,menuTrigger=null,originalFocus=null;const Date={now:()=>0};
     function showMenu(el,{at,trigger=null,keyboard=false}){closeMenu();el.hidden=false;openMenuEl=el;menuTrigger=trigger;trigger?.setAttribute('aria-expanded','true');showMenuSpy({el,trigger,keyboard,at:at(10,10)});}
     ${closeMenuSource}\n${treeHandler}\n${pointer}\nreturn {closeMenu,get originalFocus(){return originalFocus;},get open(){return openMenuEl},get trigger(){return menuTrigger}};`);
   const log = {focused: 0, shown: [], listeners: new Map(), painted: []};
@@ -235,4 +235,45 @@ test('every skill keeps explicit, switch and recovery opens but none says to reo
   for (const [i, text] of skills.entries()) assert.doesNotMatch(text.replace('(for example "save and reopen" when persistence itself is the question)', ''), /save\s*(?:\/|and)\s*reopen|reopen the saved/i, names[i] + ' has no routine save-then-reopen shorthand');
   for (const [i, text] of skills.entries()) for (const line of text.split('\n').filter(line => /reopen/i.test(line))) assert.match(line, /only|request|switch|recover|deliberate|already open|read(ing)? (it|the Paper) back|when needed/i, `${names[i]}: ${line.slice(0, 80)}`);
   for (const [i, text] of skills.slice(1).entries()) assert.match(text, /already open|open-once|read(ing)?( it| the Paper)? back/, names[i + 1] + ' points at reading back or the open canvas');
+});
+
+// A real browser may deliver Menu / Shift+F10 on a focused row as a keydown only. These run the editor's own tree keydown handler and
+// menu opener as written, and never synthesize a contextmenu event.
+test('Menu key and Shift+F10 on a focused image row open the image-only menu from keydown alone; other rows and keys are left alone', async () => {
+  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
+  const cut = (from, to) => { const a = app.indexOf(from), b = app.indexOf(to, a); assert.ok(a > -1 && b > a, from); return app.slice(a, b); };
+  const keydown = cut("tree.addEventListener('keydown'", "$('#layer-search').addEventListener('input'"), opener = cut('let menuKeyAt = 0;', "canvasMenu.addEventListener('click'"), closeMenuSource = cut('function closeMenu(refocus = false) {', 'function menuKeys(');
+  const clock = {value: 1000}, log = {shown: [], painted: [], focused: 0, rowsFocused: [], selected: [], listeners: new Map()};
+  const make = new Function('tree', 'paintEditMenu', 'showMenuSpy', '$', 'focusRow', 'selectNode', 'expanded', 'renderTree', 'clock', `let openMenuEl=null,menuTrigger=null,originalFocus=null;const Date={now:()=>clock.value};
+    function showMenu(el,{at,trigger=null,keyboard=false}){closeMenu();el.hidden=false;openMenuEl=el;menuTrigger=trigger;trigger?.setAttribute('aria-expanded','true');showMenuSpy({el,trigger,keyboard,at:at(10,10)});}
+    ${closeMenuSource}\n${keydown}\n${opener}\nreturn {closeMenu,get originalFocus(){return originalFocus;},get open(){return openMenuEl;}};`);
+  const menu = {hidden: true, contains: target => target?.inside === true, setAttribute() {}};
+  const image = {dataset: {key: 'p:2'}, getAttribute: () => null, focus: () => log.focused++, getBoundingClientRect: () => ({left: 10, bottom: 50}), closest: () => image};
+  const shape = {dataset: {key: 'p:3'}, getAttribute: () => null, focus() {}, getBoundingClientRect: () => ({left: 10, bottom: 80}), closest: () => shape};
+  const tree = {addEventListener: (type, fn) => log.listeners.set(type, fn), querySelectorAll: () => [image, shape]};
+  const editor = make(tree, (key, only) => { log.painted.push([key, only]); return key === 'p:2'; }, shown => log.shown.push(shown), () => menu, key => log.rowsFocused.push(key), key => log.selected.push(key), new Set(), () => {}, clock);
+  const keyHandler = log.listeners.get('keydown'), contextHandler = log.listeners.get('contextmenu');
+  const press = (target, init) => { const e = {key: '', shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, repeat: false, target, preventDefault() { this.prevented = true; }, ...init}; keyHandler(e); return e; };
+  // Menu key: the menu opens on keydown alone, in the image-only form, with the keyboard trigger and focus path.
+  let e = press(image, {key: 'ContextMenu'}); assert.equal(e.prevented, true, 'the native context event is suppressed'); assert.deepEqual(log.painted.at(-1), ['p:2', true]);
+  assert.equal(log.shown.length, 1); assert.equal(log.shown.at(-1).keyboard, true); assert.equal(editor.originalFocus, image); assert.equal(menu.hidden, false); assert.equal(typeof log.shown.at(-1).trigger.contains, 'function');
+  // A contextmenu event that does arrive for the same press (some browsers add one) does not reopen or duplicate it.
+  const echo = {target: image, clientX: 0, clientY: 0, preventDefault() { this.prevented = true; }}; clock.value += 100; contextHandler(echo);
+  assert.equal(echo.prevented, true); assert.equal(log.shown.length, 1, 'no second menu for the same press');
+  // Escape returns focus to the row; an outside press dismisses it.
+  editor.closeMenu(true); assert.equal(menu.hidden, true); assert.equal(log.focused, 1);
+  // Shift+F10 does the same.
+  clock.value += 5000; e = press(image, {key: 'F10', shiftKey: true}); assert.equal(e.prevented, true); assert.equal(log.shown.length, 2); assert.equal(menu.hidden, false); editor.closeMenu();
+  // A later keyboard contextmenu event (not the echo of a press) still opens it.
+  clock.value += 5000; const later = {target: image, clientX: 0, clientY: 0, preventDefault() { this.prevented = true; }}; contextHandler(later); assert.equal(log.shown.length, 3, 'a real contextmenu event with the keyboard position opens it too'); editor.closeMenu();
+  // Not these keys, or not alone: nothing happens.
+  const before = log.shown.length;
+  for (const init of [{key: 'F10'}, {key: 'ContextMenu', ctrlKey: true}, {key: 'ContextMenu', altKey: true}, {key: 'ContextMenu', metaKey: true}, {key: 'F10', shiftKey: true, ctrlKey: true}, {key: 'ContextMenu', shiftKey: true}, {key: 'ContextMenu', repeat: true}, {key: 'a'}, {key: 'Shift'}, {key: 'F9', shiftKey: true}]) { const pressed = press(image, init); assert.notEqual(pressed.prevented, true, JSON.stringify(init)); }
+  assert.equal(log.shown.length, before);
+  // A row that is not an image keeps the browser's own behaviour; the key is neither handled nor swallowed.
+  e = press(shape, {key: 'ContextMenu'}); assert.notEqual(e.prevented, true); e = press(shape, {key: 'F10', shiftKey: true}); assert.notEqual(e.prevented, true); assert.equal(log.shown.length, before);
+  // A control inside the row, not the row itself, is not the row's key.
+  const inner = {closest: () => image}; e = press(inner, {key: 'ContextMenu'}); assert.notEqual(e.prevented, true); assert.equal(log.shown.length, before);
+  // Navigation and selection keys still work as before.
+  press(image, {key: 'ArrowDown'}); assert.deepEqual(log.rowsFocused, ['p:3']); press(image, {key: 'Enter'}); assert.deepEqual(log.selected, ['p:2']);
 });
