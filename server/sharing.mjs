@@ -138,7 +138,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
       if(req.headers.origin&&req.headers.origin!==requestOrigin)throw new PaperError(403,'Invalid origin');
       if(pathname==='/api/health'&&req.method==='GET')return json(res,200,{paperShare:listener.health});
       if(pathname==='/mcp')return await mcp(req,res,url,listener);
-      if(pathname==='/join'||(pathname==='/'&&!url.search))return editor.serve(req,res,'join.html');
+      if(pathname==='/join'||(pathname==='/'&&!url.search)){res.setHeader('Link','</agent.md>; rel="help"; type="text/markdown", </agent.json>; rel="describedby"; type="application/json"');return editor.serve(req,res,'join.html');}
       if(pathname==='/api/join'&&req.method==='POST'){
         if(req.headers.origin!==requestOrigin)throw new PaperError(403,'Open the invitation in its browser origin');
         const args=JSON.parse(await readBody(req,1024)),token=args?.token;

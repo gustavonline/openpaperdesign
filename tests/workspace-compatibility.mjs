@@ -73,7 +73,7 @@ test('simultaneous clients elect one workspace listener and reconnect to its ins
 
 test('retained native Home resource URIs reconnect across known preview updates',()=>{
  assert.equal(isHomeResource(HOME_URI),true);
- for(let n=4;n<=26;n++)assert.equal(isHomeResource(`ui://openpaperdesign/home/0.7.0-preview.${n}`),true);
- for(const version of [12,13,14,15,16,17,18,19,20,21,22,23,24,25])assert.equal(isHomeResource(`ui://openpaperdesign/home/0.7.0-preview.${version}/0123456789abcdef`),true);
+ for(let n=4;n<=27;n++)assert.equal(isHomeResource(`ui://openpaperdesign/home/0.7.0-preview.${n}`),true);
+ for(const version of [12,13,14,15,16,17,18,19,20,21,22,23,24,25,26])assert.equal(isHomeResource(`ui://openpaperdesign/home/0.7.0-preview.${version}/0123456789abcdef`),true);
  for(const uri of ['ui://openpaperdesign/home/0.7.0-preview.99/0123456789abcdef','ui://openpaperdesign/home/0.7.0-preview.16/not-a-nonce','ui://openpaperdesign/home/0.7.0-preview.16/0123456789abcdef/extra'])assert.equal(isHomeResource(uri),false);
 });

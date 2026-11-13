@@ -242,7 +242,7 @@ test('owner secrets: status and overview never carry the code or key; only the r
   const reuse=await r.sharing.create(r.made.id,'edit',false,false,{protect:true,expiry:'never'});assert.equal(reuse.createdId,g.id);
   const changed=await r.sharing.create(r.made.id,'edit',false,false,{protect:false,expiry:'never'});assert.notEqual(changed.createdId,g.id);
   assert.equal((await r.sharing.status(r.made.id)).invitations.some(i=>i.id===g.id),false,'the replaced invitation ended');
-  assert.equal(VERSION.includes('preview.26'),true);
+  assert.equal(VERSION.includes('preview.27'),true);
 });
 
 test('Home Shared lists protected and Never invitations without secrets, and the owner API validates the new options',async t=>{
@@ -430,4 +430,54 @@ test('revoking or expiring an invitation stops a fresh original download even th
   await assert.rejects(fetchOriginal({paperId:r.made.id,scene,node,fetchImpl:nativeFetch}),e=>e.reason==='access-ended','native guest revoked: refused');
   // Nothing was written into the Paper by any of this.
   assert.deepEqual(Buffer.from(JSON.stringify((await r.library.read(r.made.id)).paper)),Buffer.from(JSON.stringify(scene)));
+});
+
+// The static public bootstrap: what an agent that was handed an invitation link can read without any credential.
+const RUNTIME_DIR=path.resolve(path.dirname(new URL(import.meta.url).pathname),'../runtime');
+test('the public agent bootstrap is discoverable from /join, versioned, matches the real tools and holds nothing private',async t=>{
+  const r=await rig(t),edit=await r.grant('edit',{protect:true}),view=await r.grant('view',{protect:true}),origin=edit.base;
+  const get=async(route,headers={})=>{const response=await fetch(origin+route,{headers,redirect:'manual'});return {response,bytes:Buffer.from(await response.arrayBuffer())};};
+  // Discovery from the entrance an agent actually fetches: head links in the page and an HTTP Link header, no cookie, no fragment needed.
+  for(const entrance of ['/join','/']){
+    const {response,bytes}=await get(entrance);assert.equal(response.status,200,entrance);
+    const link=response.headers.get('link');assert.match(link,/<\/agent\.md>; rel="help"; type="text\/markdown"/);assert.match(link,/<\/agent\.json>; rel="describedby"; type="application\/json"/);
+    assert.equal(response.headers.get('set-cookie'),null,'a GET of /join sets nothing');
+    const html=bytes.toString('utf8');assert.match(html,/<link rel="help" type="text\/markdown" href="agent\.md"/);assert.match(html,/For AI agents: <a href="agent\.md">/);
+    for(const hidden of ['Protected Paper',edit.token,edit.code,r.made.id,r.dir])assert.ok(!html.includes(hidden),'the entrance names no Paper and no secret');
+  }
+  // The two documents: public, correct types, the running version.
+  const json=await get('/agent.json'),md=await get('/agent.md'),manifest=JSON.parse(json.bytes);
+  assert.equal(json.response.status,200);assert.match(json.response.headers.get('content-type'),/^application\/json/);assert.match(md.response.headers.get('content-type'),/^text\/markdown/);
+  assert.equal(json.response.headers.get('x-content-type-options'),'nosniff');
+  assert.equal(manifest.version,VERSION);assert.equal(manifest.plugin.requiredVersion,VERSION);assert.equal(manifest.schema,'openpaperdesign.agent-bootstrap/1');assert.ok(md.bytes.toString('utf8').includes(`**${VERSION}**`));
+  const head=await fetch(origin+'/agent.md',{method:'HEAD'});assert.equal(head.status,200);assert.equal(head.headers.get('content-length'),String(md.bytes.length));
+  // The contract it states is the real one: the paper_join schema, and exactly the guest tools a view and an edit invitation get.
+  const join=TOOLS.find(tool=>tool.name==='paper_join');assert.deepEqual(manifest.plugin.tool.inputSchema,join.inputSchema);assert.equal(manifest.plugin.tool.name,'paper_join');assert.equal(manifest.plugin.tool.description,join.description);
+  const tools=async grant=>{const response=await fetch(grant.mcpUrl,{method:'POST',headers:{Authorization:'Bearer '+grant.token,'X-Paper-Code':grant.code,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})});return (await response.json()).result.tools.map(tool=>tool.name);};
+  assert.deepEqual(manifest.guestTools.view,await tools(view));assert.deepEqual(manifest.guestTools.edit,await tools(edit));
+  const text=md.bytes.toString('utf8');for(const name of manifest.guestTools.edit)assert.ok(text.includes('`'+name+'`'),name+' is in the guide');
+  assert.ok(text.includes('paper_join { url:')&&text.includes('code:'));
+  assert.deepEqual(manifest.manualMcp.headers,['Authorization','X-Paper-Code','X-Paper-Client','Content-Type','Accept']);assert.equal(manifest.manualMcp.installsSkills,false);
+  // The official source and install commands are the repository's own, from its README.
+  const readme=await fs.readFile(path.join(RUNTIME_DIR,'../README.md'),'utf8');
+  for(const command of [...manifest.plugin.install.codexCli,...manifest.plugin.install.claudeCode]){assert.ok(readme.includes(command),command);assert.ok(text.includes(command),command);}
+  assert.equal(manifest.product.repository,'https://github.com/gustavonline/openpaperdesign');assert.equal(manifest.plugin.install.source,manifest.product.installGuide);
+  // Identical bytes whatever is sent: no credential, garbage, real credentials, query strings, referrers, other cookies. Nothing is reflected or personalised.
+  const variants=[{},{Cookie:'paper_000000000000=garbage'},{Authorization:'Bearer '+'x'.repeat(43)},{Authorization:'Bearer '+edit.token,'X-Paper-Code':edit.code},{'X-Paper-Code':'ZZZZ-ZZZZ'},{Referer:origin+'/?paper='+r.made.id},{'X-Paper-Client':'<script>alert(1)</script>'},{Accept:'text/html'},{Cookie:`__Host-paper_${edit.id}=nope; paper_${view.id}=nope`}];
+  for(const headers of variants){for(const [route,base] of [['/agent.json',json.bytes],['/agent.md',md.bytes],['/agent.json?paper='+r.made.id+'&invite='+edit.id+'&t='+edit.token,json.bytes],['/agent.md?code='+edit.code+'&q=%3Cb%3E',md.bytes]]){
+    const got=await get(route,headers);assert.equal(got.response.status,200,route);assert.deepEqual(got.bytes,base,`${route} is the same for ${JSON.stringify(Object.keys(headers))}`);
+  }}
+  // Neither document nor the entrance holds any Paper data or secret: no key-shaped string, token, code, id, title, path or invitation text.
+  for(const bytes of [json.bytes,md.bytes]){
+    const doc=bytes.toString('utf8');assert.doesNotMatch(doc,/[A-Za-z0-9_-]{43}/,'no key-shaped string');
+    for(const hidden of [edit.token,view.token,edit.code,view.code,edit.code.replace('-',''),r.made.id,r.other.id,edit.id,'Protected Paper','Other Paper',r.dir,'/Users/','Application Support','CONTEXT.md contents','127.0.0.1:'])assert.ok(!doc.includes(hidden),`public docs never contain ${hidden}`);
+  }
+  // Protected resources are unchanged: still refused without a valid grant, and the documents open nothing.
+  for(const route of [`/api/paper?paper=${r.made.id}`,'/api/access',`/api/updates?paper=${r.made.id}`,`/Paper/${r.made.id}/paper.json`,`/Paper/${r.made.id}/DESIGN.md`,`/?paper=${r.made.id}`,'/api/sharing','/api/status']){const got=await get(route);assert.ok([401,403,404].includes(got.response.status),`${route} ${got.response.status}`);assert.ok(!got.bytes.toString('utf8').includes('Protected Paper'));}
+  const mcp=await fetch(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})});assert.equal(mcp.status,401);
+  // The documents are in the shipped runtime inventory, so both listeners and the package serve them.
+  const {EDITOR_FILES}=await import('../server/runtime.mjs');assert.ok(EDITOR_FILES.includes('agent.json')&&EDITOR_FILES.includes('agent.md'));
+  assert.deepEqual(json.bytes,await fs.readFile(path.join(RUNTIME_DIR,'agent.json')));assert.deepEqual(md.bytes,await fs.readFile(path.join(RUNTIME_DIR,'agent.md')));
+  // Revoking the invitation does not change what is public, and the grant behind it stays gone.
+  await r.sharing.stop(r.made.id,edit.id);assert.deepEqual((await get('/agent.json')).bytes,json.bytes);assert.equal((await fetch(edit.mcpUrl,{method:'POST',headers:{Authorization:'Bearer '+edit.token,'X-Paper-Code':edit.code,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})})).status,401);
 });

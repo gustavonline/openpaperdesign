@@ -48,3 +48,13 @@ export const knownEnd = reason => reason === 'expired' || reason === 'revoked' ?
 // The banner shown when access ends: its text, and a key that changes with the reason so a later, more specific reason
 // (neutral "ended" -> expired or stopped) replaces the text rather than being skipped as the same status.
 export const endedStatus = reason => ({ key: 'access-revoked:' + (knownEnd(reason) || 'ended'), text: endedCopy(reason) + ' Download your unsaved work before closing.' });
+// Where a successful unlock may send the browser: this origin's editor for one Paper and one invitation, as a plain path, and
+// nothing else (no other origin, scheme, path, extra parameter or fragment).
+export function editorDestination(href, origin){
+  const bad=()=>new Error('The invited Paper address is invalid.');
+  if(typeof href!=='string'||href.length>300)throw bad();
+  let url;try{url=new URL(href,origin);}catch{throw bad();}
+  const keys=[...url.searchParams.keys()].sort().join(),paper=url.searchParams.getAll('paper'),invite=url.searchParams.getAll('invite');
+  if(url.origin!==origin||url.pathname!=='/'||url.hash||url.username||url.password||keys!=='invite,paper'||paper.length!==1||invite.length!==1||!/^[a-zA-Z0-9_-]{1,80}$/.test(paper[0])||!/^[a-f0-9]{12}$/.test(invite[0]))throw bad();
+  return url.pathname+url.search;
+}

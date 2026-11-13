@@ -53,7 +53,7 @@ async function checkVersions(version, tag) {
     if (await exists(file)) expect(`${file} metadata.version`, /^\s+version:\s*"([^"]+)"/m.exec(await read(file))?.[1]);
   }
   // Runtime files that carry their own copy of the version.
-  for (const file of ['runtime/home.js', 'runtime/native-host.js', 'runtime/native.js']) {
+  for (const file of ['runtime/home.js', 'runtime/native-host.js', 'runtime/native.js', 'runtime/agent.json']) {
     const text = await read(file);
     if (!text.includes(`"${version}"`) && !text.includes(`'${version}'`)) fail(`${file} does not contain ${version}; run npm run build:ui`);
     for (const other of new Set(text.match(/\b\d+\.\d+\.\d+-(?:preview|alpha|beta|rc)\.\d+\b/g) ?? [])) if (other !== version) fail(`${file} still mentions ${other}`);

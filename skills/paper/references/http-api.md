@@ -38,6 +38,7 @@ After adding an image set `paper.assets[result.asset] = result.path`; use that a
 | `/api/presence?paper=<id>` | GET, POST | Temporary room snapshot or browser update: pageId/nodeId/cursor/drag/status, with X-Paper-Client. Server assigns identity. `leave:true` departs. At most 2 KB; finite coordinates. |
 | `/api/status` | GET | Runtime, workspace, storage root, instance, canStop and active sharing count. |
 | `/api/server/stop` | POST | Same-origin owner only; `{instance}` must match the current server. Closes listeners/invitations and keeps saved files. Stdio remains available for reopening. |
+| `/agent.json`, `/agent.md` | GET, HEAD | Static public bootstrap for an agent handed an invitation, served by the sharing and owner listeners from the runtime inventory (`application/json`, `text/markdown`). Identical for every request and credential; no Paper data, key, code, path or reflection. Advertised from `/join` by `<link rel>`, an HTTP `Link` header and a footer line. Version and the `paper_join` schema match the running plugin. |
 | `/api/access?paper=<id>` | GET | Owner access; browser also uses this route on share listener. |
 | `/api/home` | GET, POST | Owner-only Home actions listed above. Projects are explicit saved pointers, never a machine scan. Sharing inspection and file actions do not auto-start stopped servers. |
 | `/api/papers` | GET, POST | List, or create with optional name/width/height JSON. |
