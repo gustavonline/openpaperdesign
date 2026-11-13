@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=05ce3ecc0d82"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=167ec0a4be33"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -48,7 +48,7 @@
   <div id="tab-canvas" class="tab" role="tabpanel" aria-labelledby="tab-canvas-btn">
     <div id="sidebar-sections">
       <section id="pages-section" class="sidebar-section" data-sidebar-section="pages">
-        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="pages-toggle" aria-expanded="true" aria-controls="pages-panel"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Pages</button></h2>
+        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="pages-toggle" aria-expanded="true" aria-controls="pages-panel"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Pages</button><button type="button" class="ibtn" id="new-page" aria-label="New page" title="New page"><svg class="icon"><use href="#i-plus"/></svg></button></h2>
         <div id="pages-panel" class="sidebar-body"><label class="search"><span class="sr-only">Find a page</span><svg class="icon"><use href="#i-search"/></svg><input id="page-search" class="field" type="search" placeholder="Find a page" autocomplete="off"></label><div id="pages" role="group" aria-label="Pages in this Paper"></div></div>
       </section>
       <div class="sidebar-splitter" data-sidebar-splitter="pages" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize · Arrow keys to adjust · Home/End for limits"></div>
@@ -73,10 +73,13 @@
     <div class="sidebar-footer"><button type="button" id="sidebar-reset" title="Restore default section sizes and open sections">Reset panel layout</button></div>
   </div>
   <div id="tab-design" class="tab" role="tabpanel" aria-labelledby="tab-design-btn" hidden>
-    <section class="in-use"><details open id="design-tokens"><summary class="sidebar-heading"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Tokens</summary><div class="tokens-body">
+    <section class="in-use"><details open id="design-tokens"><summary class="sidebar-heading"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Observed in this Paper</summary><div class="tokens-body">
+      <p class="note" id="design-observed-note">Counted from the Pages as they are now, and recounted whenever they change. This only describes the artwork: it never edits the design guide below.</p>
+      <h3>Pages</h3><div id="design-coverage" class="list"></div>
       <h3>Text styles</h3><div id="text-styles" class="list"></div>
       <h3>Colours</h3><div id="colours" class="list"></div>
       <p class="note" id="image-note" hidden>Colours inside images stay in those images and aren’t listed.</p>
+      <h3>Compared with the design guide</h3><div id="design-compare" class="design-compare"></div>
     </div></details></section>
     <section class="design-doc">
       <details id="design-guide"><summary><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg><span>Design guide</span><a id="design-open" href="DESIGN.md" target="_blank" rel="noopener" title="Open the governing DESIGN.md">DESIGN.md</a></summary><div id="design-doc" class="prose"></div></details>
@@ -182,7 +185,12 @@
   <button type="button" role="menuitem" id="copy-paper-link" hidden>Copy link</button>
   <hr class="owner-only">
   <div class="menu-label" id="export-target"></div>
-  <button type="button" role="menuitem" data-export="png">PNG image<kbd id="export-size"></kbd></button>
+  <button type="button" role="menuitem" data-export="png">PNG image<kbd>transparent</kbd></button>
+  <button type="button" role="menuitem" data-export="jpeg">JPEG image<kbd>white background</kbd></button>
+  <div class="menu-label" id="export-size" aria-live="polite"></div>
+  <button type="button" role="menuitemradio" data-export-scale="1" aria-checked="true">1×</button>
+  <button type="button" role="menuitemradio" data-export-scale="2" aria-checked="false">2×</button>
+  <button type="button" role="menuitemradio" data-export-scale="3" aria-checked="false">3×</button>
   <button type="button" role="menuitem" data-export="html">HTML file<kbd>fonts + images inside</kbd></button>
   <hr>
   <button type="button" role="menuitem" data-export="json">Paper file<kbd>.json · all pages</kbd></button>
@@ -208,6 +216,11 @@
 </dialog>
 <!-- Save status: its own small live note beside the right corner bar; silent until something changes. -->
 <div id="status" data-canvas-chrome class="save-status" role="status" aria-live="polite" hidden></div>
+<div id="page-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Page actions" hidden>
+  <div class="menu-label" id="page-menu-note" hidden></div>
+  <button type="button" role="menuitem" data-page-action="rename">Rename<kbd>F2</kbd></button>
+  <button type="button" role="menuitem" data-page-action="delete">Delete page…</button>
+</div>
 <div id="zoom-menu" data-canvas-chrome class="float menu" role="menu" hidden>
   <button type="button" role="menuitem" data-zoom="fit">Zoom to fit<kbd>⇧1</kbd></button>
   <button type="button" role="menuitem" data-zoom="selection">Zoom to selection<kbd>⇧2</kbd></button>
@@ -229,5 +242,5 @@
 <div id="toast" data-canvas-chrome role="status" hidden></div>
 <dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is saved with this Paper.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="paper-inspection-root"></div>
-<script type="module" src="app.js?v=88eb7e0b56b5"></script>
+<script type="module" src="app.js?v=2ec0f57c2665"></script>
 </body></html>

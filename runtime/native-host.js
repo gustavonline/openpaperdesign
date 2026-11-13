@@ -21,9 +21,10 @@ async function openGuest(guest){const origin=new URL(guest.origin);if(!/^[a-f0-9
 async function joinGuest(url,{signal,code}={}){if(signal?.aborted)throw signal.reason;const result=await tool('paper_join',{url,...(code?{code}:{})});if(signal?.aborted)throw signal.reason;if(!result.guest)throw new Error('The invitation could not be opened.');await openGuest(result.guest);void rpc('ui/update-model-context',{content:[{type:'text',text:`The user opened this shared Paper in OpenPaperDesign: ${new URL(findInvitationLink(url)||url).href}. Call paper_join with that invitation before using the artwork tools${code?'; it needs the access code the user already entered, so ask them for it rather than guessing':''}. Owner files and accounts are unavailable through the invitation.`}]}).catch(()=>{});}
 async function download(blob,name){
   try{
-    if(downloadMode){const params=downloadMode==='blob'?{blob,name}:{contents:[{uri:`file:///${encodeURIComponent(name)}`,mimeType:blob.type||'application/octet-stream',blob:base64(new Uint8Array(await blob.arrayBuffer()))}]};await rpc('ui/download-file',params);return;}
+    if(downloadMode){const params=downloadMode==='blob'?{blob,name}:{contents:[{uri:`file:///${encodeURIComponent(name)}`,mimeType:blob.type||'application/octet-stream',blob:base64(new Uint8Array(await blob.arrayBuffer()))}]};const result=await rpc('ui/download-file',params);if(result?.isError)throw new Error('The host app did not accept the download.');return true;}
     const object=URL.createObjectURL(blob),link=document.createElement('a');link.href=object;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(object),30000);
-  }catch(error){status(error.message,()=>document.getElementById('paper-native-status')?.remove(),'Back to Paper');}
+  return true;
+  }catch(error){status(error.message,()=>document.getElementById('paper-native-status')?.remove(),'Back to Paper');return false;}
 }
 async function navigate(value){
   if(navigating){queued=value;return;}navigating=true;let leaveFailed=false;

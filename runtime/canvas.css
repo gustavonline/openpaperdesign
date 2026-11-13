@@ -146,7 +146,8 @@ body.paper-inspection-docked #rail .ibtn:focus-visible{outline:1px solid var(--m
 #tab-design section+section{border-top:1px solid var(--line);padding-top:8px}
 .list-row{display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:5px}
 .list-row .label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
-.list-row .count{color:var(--text-2);font-size:11px;font-variant-numeric:tabular-nums}
+.list-row .count{color:var(--text-2);font-size:11px;font-variant-numeric:tabular-nums}.list-row .pages{color:var(--text-2);font-size:11px;white-space:nowrap}.list-row.current .label{font-weight:600}.list-row.current::before{content:'';width:3px;height:14px;border-radius:2px;background:var(--accent);margin-left:-6px}
+.design-compare{display:grid;gap:8px;padding:0 6px;font-size:12px;line-height:1.45}.design-compare .note{margin:0}.design-compare .chips{display:flex;flex-wrap:wrap;gap:4px}.design-compare .chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px 0 4px;border-radius:11px;background:var(--field);font-size:11px;font-variant-numeric:tabular-nums}.design-compare .chip i{width:12px;height:12px;border-radius:3px;box-shadow:inset 0 0 0 1px var(--edge-strong)}
 .list-row .aa{width:16px;color:var(--text-2);font-size:11px}
 .swatch{width:16px;height:16px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--edge-strong);flex:0 0 16px}
 .colours-more{margin:6px}
@@ -182,7 +183,8 @@ body.paper-inspection-docked #rail .ibtn:focus-visible{outline:1px solid var(--m
 .sidebar-body{flex:1;min-height:0;padding:0 8px 8px;display:flex;flex-direction:column;overflow:hidden}
 .sidebar-body[hidden]{display:none}
 #pages{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:1px;scrollbar-width:thin}
-#pages .page-row{flex:none}
+#pages .page-row{flex:none}#pages-section h2{position:relative}#new-page{position:absolute;right:8px;top:4px;width:24px;height:24px}#new-page[hidden]{display:none}
+.page-rename{cursor:text}.page-rename input{flex:1;min-width:0;height:22px;padding:0 6px;font:inherit;font-size:12px}#page-menu .menu-label{max-width:260px;white-space:normal;line-height:1.4}
 .sidebar-splitter{height:8px;flex:none;position:relative;cursor:row-resize;touch-action:none;outline:none}
 .sidebar-splitter::after{content:"";position:absolute;width:100%;height:1px;top:3px;left:0;background:var(--line)}
 .sidebar-splitter:hover::after,.sidebar-splitter:focus-visible::after{background:var(--accent);height:2px}

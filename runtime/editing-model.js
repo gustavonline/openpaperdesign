@@ -333,3 +333,155 @@ export function plannedOriginal({captured, scene, node}) {
   if (found.name !== (captured?.name ?? null)) throw new OriginalError('changed', WORDS.changed);
   return {name: found.name, mime: found.mime, saveAs: saveNameFor(scene, node, found.name, found.mime)};
 }
+
+// ---- Rendered export (Share → PNG / JPEG image). The image is what the canvas draws for the chosen layers, cropped to exactly their rendered
+// bounds: not the stored original of an image layer (that is Save image…), and never the editor's own chrome.
+export const EXPORT_SCALES = [1, 2, 3], EXPORT_MAX_SIDE = 8192, EXPORT_MAX_PIXELS = 16e6;
+// The smallest whole-pixel box that holds every rect, or null when there is nothing to draw.
+export function unionBox(rects) {
+  const list = rects.filter(r => r && Number.isFinite(r.x + r.y + r.w + r.h) && r.w > 0 && r.h > 0);
+  if (!list.length) return null;
+  const x = Math.floor(Math.min(...list.map(r => r.x))), y = Math.floor(Math.min(...list.map(r => r.y)));
+  return {x, y, w: Math.max(1, Math.ceil(Math.max(...list.map(r => r.x + r.w))) - x), h: Math.max(1, Math.ceil(Math.max(...list.map(r => r.y + r.h))) - y)};
+}
+// Output pixels for a box at 1×, 2× or 3×. Past 8192 px a side or 16 megapixels the scale comes down so the file stays one the browser can
+// encode and other apps can open; `reduced` says so, and the result is never silently a different size than reported.
+export function exportPixels(box, scale = 1) {
+  const w = Math.max(1, Math.round(box.w)), h = Math.max(1, Math.round(box.h)), wanted = EXPORT_SCALES.includes(scale) ? scale : 1;
+  const fitted = Math.min(wanted, EXPORT_MAX_SIDE / Math.max(w, h), Math.sqrt(EXPORT_MAX_PIXELS / (w * h)));
+  return {width: Math.max(1, Math.floor(w * fitted)), height: Math.max(1, Math.floor(h * fitted)), scale: fitted, requested: wanted, reduced: fitted < wanted};
+}
+export const exportFileName = (base, {kind, scale = 1}) => `${base || 'export'}${scale > 1 ? `@${scale}x` : ''}.${kind === 'jpeg' ? 'jpg' : 'png'}`;
+// Hides everything in a clone of a rendered root except the chosen layers (and what is inside them). A layer that only holds a chosen one keeps its
+// place and size but draws nothing of its own, so a child exported from inside a coloured frame does not bring the frame's colour along.
+// `keep` are elements of `root`. Returns how many elements were hidden.
+export function prepareSelectionClone(root, keep) {
+  let hidden = 0;
+  for (const el of [root, ...root.querySelectorAll('*')]) {
+    if (keep.some(k => k === el || k.contains(el))) continue;
+    if (keep.some(k => el.contains(k))) { Object.assign(el.style, {background: 'none', backgroundColor: 'transparent', boxShadow: 'none', borderColor: 'transparent', outline: 'none'}); continue; }
+    el.style.visibility = 'hidden'; hidden++;
+  }
+  return hidden;
+}
+// A JPEG cannot carry the PNG notice chunk, so the licence notices go into a standard comment segment right after the start of the image.
+// Notices that do not fit are refused rather than dropped.
+export function jpegWithNotice(bytes, text) {
+  const body = new TextEncoder().encode(text);
+  if (body.length > 65533) throw new OriginalError('notices', 'The image licence notices are too long to keep inside a JPEG. Export a PNG instead.');
+  if (!(bytes[0] === 0xff && bytes[1] === 0xd8)) throw new OriginalError('failed', 'The JPEG could not be prepared.');
+  const segment = new Uint8Array(4 + body.length); segment[0] = 0xff; segment[1] = 0xfe; segment[2] = (body.length + 2) >> 8; segment[3] = (body.length + 2) & 255; segment.set(body, 4);
+  const out = new Uint8Array(bytes.length + segment.length); out.set(bytes.subarray(0, 2), 0); out.set(segment, 2); out.set(bytes.subarray(2), 2 + segment.length); return out;
+}
+const IMAGE_TYPES = {png: {mime: 'image/png', description: 'PNG image', extensions: ['.png']}, jpeg: {mime: 'image/jpeg', description: 'JPEG image', extensions: ['.jpg', '.jpeg']}};
+// One export, delivered one of two honest ways. With a real chooser the person picks the place first (the chooser opens before any rendering) and the
+// result is `saved` only after the file is written and closed; cancelling renders and saves nothing. Without one (no chooser in this browser, or the
+// Paper runs inside a host app) the image is rendered and handed to `deliver`, and the result says only that it was REQUESTED: a download cannot
+// report where, or whether, the file landed.
+export async function exportImage({kind, file, canChoose, picker, render, deliver}) {
+  const type = IMAGE_TYPES[kind]; if (!type) throw new OriginalError('failed', 'Choose PNG or JPEG.');
+  if (canChoose) {
+    const result = await saveWithChooser({picker, name: file, mime: type.mime, description: type.description, extensions: type.extensions, produce: render});
+    return result.saved ? {state: 'saved', name: result.name} : {state: 'cancelled'};
+  }
+  const blob = await render();
+  if (!(blob instanceof Blob) || !blob.size) throw new OriginalError('failed', 'There was nothing to export.');
+  await deliver(blob, file);
+  return {state: 'requested', name: file};
+}
+
+// ---- Pages: new, rename, delete, by a person. A page is JSON an agent can already write; these are the same records made by hand. They are one history
+// step each (undo restores the page's content and its place among the others), never touch another page, the assets, the feedback or the revision rules
+// (a delete is an ordinary change to the whole Paper that is saved like any other), and are not the Paper Trash: a deleted page is gone once the history
+// is. Renaming a page is not renaming the Paper.
+export const PAGE_LIMIT = 100, PAGE_NAME_MAX = 80;
+export function cleanPageName(text) {
+  const name = String(text ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!name) return {ok: false, reason: 'A page needs a name.'};
+  if (name.length > PAGE_NAME_MAX) return {ok: false, reason: `Page names can have up to ${PAGE_NAME_MAX} characters.`};
+  return {ok: true, name};
+}
+// "Page 2", "Page 3": the first number after the count that no page already uses.
+export function nextPageName(pages) {
+  const used = new Set(pages.map(page => page.name));
+  for (let n = pages.length + 1; ; n++) if (!used.has(`Page ${n}`)) return `Page ${n}`;
+}
+// A new page starts like the first page of a new Paper: one white artboard of the common desktop size, ready to draw on.
+export function blankPage({id, name, width = 1440, height = 900}) {
+  return {id, name, next_id: 2, root: [1], nodes: [{id: 1, name: 'Artboard 1', type: 'frame', clip: true, rect: {x: 0, y: 0, w: width, h: height}, style: {fills: [{type: 'solid', color: '#ffffff'}], stroke: null, stroke_width: 1, corner_radius: 0, opacity: 1}, visible: true, locked: false, children: []}]};
+}
+// Why a page cannot be added, renamed or deleted, or null. `canEdit` is the viewer's real permission, not a hidden button.
+export function pageProblem(scene, action, {canEdit, id} = {}) {
+  if (!canEdit) return 'This Paper is view-only, so pages can’t be changed.';
+  const page = id === undefined ? null : scene.pages.find(p => p.id === id);
+  if (action !== 'add' && !page) return 'That page is no longer in this Paper.';
+  if (action === 'add' && scene.pages.length >= PAGE_LIMIT) return `A Paper can have up to ${PAGE_LIMIT} pages.`;
+  if (action === 'delete') {
+    if (scene.pages.length <= 1) return 'A Paper needs at least one page, so the last page can’t be deleted.';
+    const locked = page.nodes.filter(node => node.locked).length;
+    if (locked) return `This page has ${locked} locked ${locked === 1 ? 'layer' : 'layers'}. Unlock ${locked === 1 ? 'it' : 'them'} first, then delete the page.`;
+  }
+  return null;
+}
+export const pageLayerCount = page => page.nodes.length;
+// The page to show after one is deleted: the one that took its place, else the one before it.
+export const neighbourAfterDelete = (pages, index) => pages[index] || pages[index - 1] || null;
+// The three changes, on the Paper itself, each returning what undo needs. `pruneFor` lets a Paper's other page-linked data (the preview model) follow.
+export function addPageTo(scene, page, index = scene.pages.length) { scene.pages.splice(index, 0, page); return {kind: 'pages', op: 'add', page: JSON.parse(JSON.stringify(page)), index}; }
+export function renamePageIn(scene, id, name) { const page = scene.pages.find(p => p.id === id), before = page.name; page.name = name; return {kind: 'pages', op: 'rename', id, before, after: name}; }
+export function deletePageFrom(scene, id, pruneFor = () => null) {
+  const index = scene.pages.findIndex(p => p.id === id), [page] = scene.pages.splice(index, 1), preview = scene.preview === undefined ? undefined : JSON.parse(JSON.stringify(scene.preview));
+  const after = pruneFor(scene, id); if (after !== null && after !== undefined) scene.preview = after;
+  return {kind: 'pages', op: 'delete', page: JSON.parse(JSON.stringify(page)), index, previewBefore: preview, previewAfter: scene.preview === undefined ? undefined : JSON.parse(JSON.stringify(scene.preview))};
+}
+// Undo or redo of one of those records.
+export function applyPageAction(scene, action, reverse) {
+  const present = action.page && scene.pages.some(p => p.id === action.page.id);
+  if (action.op === 'rename') { scene.pages.find(p => p.id === action.id).name = reverse ? action.before : action.after; return {focus: action.id}; }
+  const insert = (action.op === 'add') !== reverse;
+  if (insert) {
+    if (present) return {focus: action.page.id};
+    scene.pages.splice(Math.min(action.index, scene.pages.length), 0, JSON.parse(JSON.stringify(action.page)));
+    if (action.op === 'delete') { if (action.previewBefore === undefined) delete scene.preview; else scene.preview = JSON.parse(JSON.stringify(action.previewBefore)); }
+    return {focus: action.page.id};
+  }
+  const index = scene.pages.findIndex(p => p.id === action.page.id); if (index < 0) return {focus: null};
+  scene.pages.splice(index, 1);
+  if (action.op === 'delete') { if (action.previewAfter === undefined) delete scene.preview; else scene.preview = JSON.parse(JSON.stringify(action.previewAfter)); }
+  return {focus: neighbourAfterDelete(scene.pages, index)?.id ?? null};
+}
+
+// ---- Design inventory: what the Pages actually use, observed, and kept apart from the DESIGN.md a person curates. Nothing here writes DESIGN.md, derives
+// tokens, or calls a model. It counts what is on the Pages (every Page, so a pattern or a divergence is visible), says how many Pages each style is on, how
+// each Page covers them, and, only where the guide states explicit values that can be compared exactly, which colours in use the guide does not list and
+// which listed colours no layer uses. It is recomputed from the Paper whenever the Paper or its Pages change, so it never holds a stale copy.
+const isVectorNode = node => node.type === 'stroke' || node.type === 'connector';
+export const normaliseHex = hex => { const lower = String(hex).toLowerCase(); return lower.length === 4 ? '#' + [...lower.slice(1)].map(c => c + c).join('') : lower; };
+// The explicit hex colours a guide states (#rgb or #rrggbb). Names, rgb()/hsl() and typography are not compared: only values that can be matched exactly.
+export function guideColours(text) {
+  const found = new Set();
+  if (typeof text === 'string') for (const match of text.slice(0, 400000).matchAll(/(?<![\w&#])#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})(?![\w])/g)) found.add(normaliseHex(match[0]));
+  return found;
+}
+export function designInventory(scene, {guide = null, currentPageId = null} = {}) {
+  const pages = scene.pages || [], styles = new Map(), colours = new Map(), coverage = [];
+  const use = (map, key, pageId) => { const entry = map.get(key) || {layers: 0, pages: new Set()}; entry.layers++; entry.pages.add(pageId); map.set(key, entry); };
+  let images = 0;
+  for (const page of pages) {
+    const pageStyles = new Set(), pageColours = new Set(); let pageImages = 0;
+    for (const node of page.nodes) {
+      if (node.type === 'text') { const t = node.text_style || {}, key = `${node.font_size || 14}|${t.bold ? 1 : 0}|${t.italic ? 1 : 0}`; use(styles, key, page.id); pageStyles.add(key); }
+      const fills = node.style?.fills || [], covered = fills.some(f => f.type === 'image' && f.mode !== 'fit' && scene.assets?.[f.asset]);
+      if (fills.some(f => f.type === 'image')) { images++; pageImages++; }
+      if (!covered) for (const f of fills) if (f.type === 'solid' && f.color) { const c = f.color.toLowerCase(); use(colours, c, page.id); pageColours.add(c); }
+      if (isVectorNode(node) && node.style?.stroke) { const c = node.style.stroke.toLowerCase(); use(colours, c, page.id); pageColours.add(c); }
+    }
+    coverage.push({id: page.id, name: page.name, layers: page.nodes.length, textStyles: pageStyles.size, colours: pageColours.size, images: pageImages, current: page.id === currentPageId});
+  }
+  const styleRows = [...styles].map(([key, e]) => { const [size, bold, italic] = key.split('|'); return {label: `Inter ${Number(size)} · ${bold === '1' ? 'Bold' : 'Regular'}${italic === '1' ? ' Italic' : ''}`, size: Number(size), layers: e.layers, pages: e.pages.size, onCurrent: e.pages.has(currentPageId)}; }).sort((a, b) => b.size - a.size || b.layers - a.layers);
+  const colourRows = [...colours].sort((a, b) => b[1].layers - a[1].layers || (a[0] < b[0] ? -1 : 1)).map(([color, e]) => ({color, layers: e.layers, pages: e.pages.size, onCurrent: e.pages.has(currentPageId), pageNames: pages.filter(p => e.pages.has(p.id)).map(p => p.name)}));
+  // Comparable only when the guide states hex colours at all.
+  const listed = guide ? guideColours(guide) : new Set(), supported = listed.size > 0;
+  const compare = {supported, listed: listed.size, notInGuide: supported ? colourRows.filter(row => /^#[0-9a-f]{6}$/.test(row.color) && !listed.has(row.color)).map(row => row.color) : [], unusedInGuide: supported ? [...listed].filter(color => !colours.has(color)).sort() : []};
+  return {pageCount: pages.length, styles: styleRows, colours: colourRows, coverage, images, compare};
+}
