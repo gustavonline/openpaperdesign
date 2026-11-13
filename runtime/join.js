@@ -63,13 +63,14 @@ $('agent-open').addEventListener('click', () => {
   $('agent-secret').textContent = accepted.code ? 'this invitation link and its access code' : 'this invitation link';
   $('agent-version').textContent = accepted.version ? `Its version must match the owner's (${accepted.version}); a different version is refused, and the browser still works.` : '';
   $('join-fallback').hidden = true; $('join-fallback').value = ''; say('Optional: connect your own agent. The browser needs none of this.'); show('guide');
+  $('agent-title').focus();
 });
 $('copy-join').addEventListener('click', async () => {
   const text = requestText(), fallback = $('join-fallback'); fallback.hidden = true; fallback.value = '';
   try { await navigator.clipboard.writeText(text); say('Join request copied. Paste it into your own agent.'); }
   catch { fallback.value = text; fallback.hidden = false; fallback.focus(); fallback.select(); say('Clipboard access was blocked. Copy the selected text. This field is read-only.', true); }
 });
-$('agent-back').addEventListener('click', () => { $('join-fallback').hidden = true; $('join-fallback').value = ''; say(roleLine()); show('done'); });
+$('agent-back').addEventListener('click', () => { $('join-fallback').hidden = true; $('join-fallback').value = ''; say(roleLine()); show('done'); $('agent-open').focus(); });
 $('code-form').addEventListener('submit', event => {
   event.preventDefault(); if (composing || busy) return;
   const code = readCode($('code').value);

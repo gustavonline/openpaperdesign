@@ -10,11 +10,11 @@ function element(id){
   const listeners=new Map();
   return {id,hidden:false,value:'',textContent:'',dataset:{},disabled:false,href:'',focused:0,
     addEventListener(type,fn){listeners.set(type,[...listeners.get(type)||[],fn]);},
-    focus(){this.focused++;},select(){this.selected=true;},
+    focus(){this.focused++;globalThis.__active=this.id;},select(){this.selected=true;},
     fire(type,event={}){const e={preventDefault(){e.prevented=true;},...event};for(const fn of listeners.get(type)||[])fn(e);return e;}};
 }
 async function page({hash='',search='',first}={}){
-  const ids=['status','code-form','link-form','choices','code','invite','unlock','link-submit','name','browser','codex','claude','agent-guide','agent-open','agent-back','copy-join','join-fallback','agent-secret','agent-version'],els=Object.fromEntries(ids.map(id=>[id,element(id)])),calls=[];
+  const ids=['status','code-form','link-form','choices','code','invite','unlock','link-submit','name','browser','codex','claude','agent-guide','agent-open','agent-back','copy-join','join-fallback','agent-secret','agent-version','agent-title'],els=Object.fromEntries(ids.map(id=>[id,element(id)])),calls=[];
   const replies=first?[first]:[];
   Object.assign(globalThis,{
     document:{getElementById:id=>els[id]},
@@ -99,12 +99,18 @@ test('the Danish invitation message pasted in the browser supplies key and code,
   assert.deepEqual(r.calls[0].body,{token:KEY});assert.doesNotMatch(decodeURIComponent(r.els.codex.href),/access code/);
 });
 
+test('the guide heading can take focus programmatically',async()=>{
+  const html=await fs.readFile(new URL('../runtime/join.html',import.meta.url),'utf8');
+  assert.match(html,/<h2 id="agent-title" tabindex="-1">/);
+});
+
 test('the optional agent guide keeps the invitation, gives a secret-free app link and copies the join request only on request',async()=>{
   const p=await page({hash:'#'+KEY,first:{status:401,body:{reason:'needs-code',error:'x'}}});await p.settle();
   p.els.code.value='k7qm 4p2x';p.replies.push({status:200,body:{href:'/?paper=abc&invite=0123456789ab',role:'edit',name:'Brand board',version:'0.7.0-preview.25'}});p.els['code-form'].fire('submit');await p.settle();
   // Browser is the one primary action, with its real role link; the guide is closed and nothing was copied or opened.
   assert.equal(p.els.choices.hidden,false);assert.equal(p.els['agent-guide'].hidden,true);assert.equal(p.els.browser.href,'http://127.0.0.1:9/?paper=abc&invite=0123456789ab');assert.deepEqual(p.clip.writes,[]);assert.equal(p.calls.length,2);
   p.els['agent-open'].fire('click');
+  assert.equal(globalThis.__active,'agent-title','entering the guide moves focus to its heading, since the activated button is now hidden');
   assert.equal(p.els['agent-guide'].hidden,false);assert.equal(p.els.choices.hidden,true);assert.match(p.els['agent-version'].textContent,/0\.7\.0-preview\.25/);assert.match(p.els['agent-secret'].textContent,/access code/);assert.deepEqual(p.clip.writes,[],'opening the guide copies nothing');
   assert.ok(p.els.codex.href.startsWith('codex://threads/new?prompt=')&&p.els.claude.href.startsWith('claude://code/new?q='));
   // Copy: the request holds this invitation and the entered code, and only the clipboard sees it.
@@ -115,7 +121,7 @@ test('the optional agent guide keeps the invitation, gives a secret-free app lin
   p.clip.deny=true;p.els['copy-join'].fire('click');await p.settle();
   assert.equal(p.els['join-fallback'].hidden,false);assert.equal(p.els['join-fallback'].value,expected);assert.equal(p.els['join-fallback'].selected,true);assert.match(p.els.status.textContent,/Clipboard access was blocked/);assert.doesNotMatch(p.els.status.textContent,/copied\./i);
   // Back returns to the same invitation without asking again, and the fallback text is dropped.
-  p.els['agent-back'].fire('click');assert.equal(p.els.choices.hidden,false);assert.equal(p.els['agent-guide'].hidden,true);assert.equal(p.els['join-fallback'].value,'');assert.match(p.els.status.textContent,/You can edit/);assert.equal(p.calls.length,2,'no request for opening, copying or going back');
+  p.els['agent-back'].fire('click');assert.equal(globalThis.__active,'agent-open','Back returns focus to the optional agent button that opened the guide');assert.equal(p.els.choices.hidden,false);assert.equal(p.els['agent-guide'].hidden,true);assert.equal(p.els['join-fallback'].value,'');assert.match(p.els.status.textContent,/You can edit/);assert.equal(p.calls.length,2,'no request for opening, copying or going back');
   // The official install guide is a static public address that leaves this page's tab, referrer and invitation untouched.
   const html=await fs.readFile(new URL('../runtime/join.html',import.meta.url),'utf8');
   const install=html.match(/<a href="([^"]+)" target="_blank" rel="noopener noreferrer">Official install guide<\/a>/);assert.equal(install?.[1],'https://github.com/gustavonline/openpaperdesign#install');
