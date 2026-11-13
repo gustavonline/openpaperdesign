@@ -80,3 +80,18 @@ test('an ended invitation clears the key and says so; the owner’s reason is sh
   const neutral=await page({search:'?ended=ended'});assert.match(neutral.els.status.textContent,/This invitation ended\./);assert.doesNotMatch(neutral.els.status.textContent,/owner stopped|expired/);
   const forged=await page({search:'?ended=%3Cb%3E'});assert.match(forged.els.status.textContent,/This invitation ended\./,'an unknown value is neutral, never echoed');
 });
+
+test('the Danish invitation message pasted in the browser supplies key and code, ignoring words like Derefter and december',async()=>{
+  const message=`Se mit Paper:\n\nhttp://127.0.0.1:9/join#${KEY}\n\nAdgangskode:\nabcd 2345\n\nDerefter åbner du linket i din browser, og indtaster koden. Du kan redigere. Du behøver intet plugin.\nLinket udløber mandag den 14. december 2026 kl. 14.30 CET.`;
+  const p=await page();p.els.invite.value=message;
+  p.replies.push({status:200,body:{href:'/?paper=abc&invite=0123456789ab',role:'edit',name:'Board'}});p.els['link-form'].fire('submit');await p.settle();
+  assert.deepEqual(p.calls[0].body,{token:KEY,code:'ABCD-2345'},'the labelled code on the next line, not "Derefter" or "december"');
+  assert.equal(p.els.choices.hidden,false);
+  // Pasted into the code field, the message gives only the code and sends nothing.
+  const q=await page({hash:'#'+KEY,first:{status:401,body:{reason:'needs-code',error:'x'}}});await q.settle();
+  q.els.code.fire('paste',{clipboardData:{getData:()=>message}});assert.equal(q.els.code.value,'ABCD-2345');assert.equal(q.calls.length,1);
+  // An unprotected message gives no code at all, so no stray word is sent as one.
+  const open=`Se mit Paper:\n\nhttp://127.0.0.1:9/join#${KEY}\n\nÅbn linket i din browser. Derefter kan du se Paper, men ikke redigere. Du behøver intet plugin.\nLinket udløber torsdag den 24. december 2026 kl. 23.00 CET.`;
+  const r=await page();r.els.invite.value=open;r.replies.push({status:200,body:{href:'/?paper=abc&invite=0123456789ab',role:'view',name:'Board'}});r.els['link-form'].fire('submit');await r.settle();
+  assert.deepEqual(r.calls[0].body,{token:KEY});assert.doesNotMatch(decodeURIComponent(r.els.codex.href),/access code/);
+});

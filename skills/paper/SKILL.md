@@ -2,7 +2,7 @@
 name: paper
 description: Find, open, create, save, share and export OpenPaperDesign Papers, including personal Papers outside the project and cloud snapshots in Notion. Use for Home, Paper files, Notion save/open, workspace setup and server controls.
 metadata:
-  version: "0.7.0-preview.23"
+  version: "0.7.0-preview.24"
 ---
 
 # Paper
@@ -48,7 +48,7 @@ Share exports selected artwork to PNG or HTML, the layer records to JSON, or the
 
 For Notion use the existing Share/Home UI or `paper_notion`: status, connect, pages, save, open and disconnect. Read the [Notion workflow](references/notion.md) for authentication, destination selection and cloud conflicts. The UI operates directly; it does not ask the person to prompt an agent for each save. Cloud open creates a local copy. A successful explicit save links its page and enables background file snapshots while the workspace server runs; pause/resume is in the Notion dialog. Status alone never starts saving. Prefer an existing matching Paper/page before creating a duplicate. The person controls account consent and publishing. Never copy connection credentials into a Paper or notes.
 
-Read [sharing](references/sharing.md) before configuring invitations, another agent or external hosting. Share offers Can view / Can edit, an expiry (1 hour, 1 day, 7 days or Never) and Code protection; Copy invitation gives a short message with the link and code. Share → Internet uses optional cloudflared for a temporary HTTPS link, with no account or separate backend. Start public sharing only when the person requests it; never forward the owner server. Install the native CLI only when authorized; ordinary local use does not need it. Clean views receive live saves; conflicting edits are retained for reconciliation. A saved Notion snapshot and interactive preview do not turn Notion into the live editing server.
+Read [sharing](references/sharing.md) before configuring invitations, another agent or external hosting. Share offers Can view / Can edit, an expiry (1 hour, 1 day, 7 days or Never) and Code protection; Copy invitation gives a short plain-text Danish message with the link and code on separate lines, the role and the exact end time. Share → Internet uses optional cloudflared for a temporary HTTPS link, with no account or separate backend. Start public sharing only when the person requests it; never forward the owner server. Install the native CLI only when authorized; ordinary local use does not need it. Clean views receive live saves; conflicting edits are retained for reconciliation. A saved Notion snapshot and interactive preview do not turn Notion into the live editing server.
 
 Home → Shared lists active invitations across known libraries. `paper_home {action:"sharing"}` returns their metadata (including whether a code is required and `expiresAt`, `null` for Never) without keys or codes. Use `action:"stop-sharing"` with `workspaceId`, `paperId`, current server `instance` and optionally `invitationId` to remove one link or all links for that Paper. Labels describe links, not verified people.
 

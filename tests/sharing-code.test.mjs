@@ -50,9 +50,12 @@ test('the access code is read one way everywhere: case, spacing, dashes, full-wi
   for(const typed of ['k7qm-4p2x',' K7QM 4P2X ','K7QM4P2X','k7qm‑4p2x','Ｋ７ＱＭ－４Ｐ２Ｘ','K7​QM-4P2X','K7QM 4P2X','k7qm– 4p2x\n'])assert.equal(normalizeCode(typed),want,JSON.stringify(typed));
   assert.equal(readCode('k7qm 4p2x'),'K7QM-4P2X');assert.equal(formatCode(want),'K7QM-4P2X');
   for(const bad of ['K7QO4P2X','K7QM4P2','K7QM4P2XX','','0000-0000','K7QM-4P2X-1',null,undefined,42,{}])assert.equal(readCode(bad),'',String(bad));
-  const key='A'.repeat(43),message=invitationMessage({name:'Brand "board"',role:'edit',url:`https://example.trycloudflare.com/join#${key}`,code:'K7QM4P2X',expiresAt:null});
-  assert.match(message,/Link: https:\/\/example\.trycloudflare\.com\/join#A{43}\nCode: K7QM-4P2X\n/);
+  const key='A'.repeat(43),message=invitationMessage({role:'edit',url:`https://example.trycloudflare.com/join#${key}`,code:'K7QM4P2X',expiresAt:null});
+  assert.match(message,/^Se mit Paper:\n\nhttps:\/\/example\.trycloudflare\.com\/join#A{43}\n\nAdgangskode:\nK7QM-4P2X\n\n/);
   assert.deepEqual(extractInvitation(message),{token:key,code:'K7QM-4P2X'});
+  // The earlier English message keeps working, with the code on the same or the next line.
+  assert.deepEqual(extractInvitation(`You’re invited to edit “Board”.\nLink: https://x.test/join#${key}\nCode: K7QM-4P2X\nEnds tomorrow`),{token:key,code:'K7QM-4P2X'});
+  assert.deepEqual(extractInvitation(`https://x.test/join#${key}\nCode:\nk7qm 4p2x`),{token:key,code:'K7QM-4P2X'});
   assert.deepEqual(extractInvitation(`see https://x.test/join#${key}) it is k7qm 4p2x`),{token:key,code:'K7QM-4P2X'});
   assert.deepEqual(extractInvitation(`https://x.test/join#${key}`),{token:key,code:''});
   assert.deepEqual(extractInvitation(key),{token:key,code:''});
@@ -168,7 +171,10 @@ test('MCP bearer access needs the code on protected invitations and stays unchan
   await assert.rejects(joinInvitation(link),/needs its access code/);
   await assert.rejects(joinInvitation(link,'ZZZZ-ZZZZ'),/did not work/);
   await assert.rejects(joinInvitation(link,'nope'),/8 letters and numbers/);
-  const message=invitationMessage({name:'Protected Paper',role:'edit',url:link,code:protectedEdit.code,expiresAt:protectedEdit.expiresAt});
+  const message=invitationMessage({role:'edit',url:link,code:protectedEdit.code,expiresAt:protectedEdit.expiresAt});
+  // Other 8-letter words in the message (here "Derefter" and "december") are never mistaken for the code.
+  const noisy=message.replace('Åbn linket','Derefter kan du åbne december-udgaven. Åbn linket');assert.notEqual(noisy,message);
+  assert.equal((await joinInvitation(noisy)).descriptor.paperId,r.made.id);
   const joined=await joinInvitation(message);assert.equal(joined.descriptor.role,'edit');assert.equal(joined.matches(link),true);assert.equal(joined.matches(message),true);
   assert.equal((await joinInvitation(link,protectedEdit.code.toLowerCase())).descriptor.paperId,r.made.id);
   assert.equal(invitationURL(message).hash.slice(1),protectedEdit.token);
@@ -237,7 +243,7 @@ test('owner secrets: status and overview never carry the code or key; only the r
   const reuse=await r.sharing.create(r.made.id,'edit',false,false,{protect:true,expiry:'never'});assert.equal(reuse.createdId,g.id);
   const changed=await r.sharing.create(r.made.id,'edit',false,false,{protect:false,expiry:'never'});assert.notEqual(changed.createdId,g.id);
   assert.equal((await r.sharing.status(r.made.id)).invitations.some(i=>i.id===g.id),false,'the replaced invitation ended');
-  assert.equal(VERSION.includes('preview.23'),true);
+  assert.equal(VERSION.includes('preview.24'),true);
 });
 
 test('Home Shared lists protected and Never invitations without secrets, and the owner API validates the new options',async t=>{
@@ -275,4 +281,43 @@ test('an ended-access banner is replaced when a neutral end later learns its rea
   assert.match(app,/const ended = endedStatus\(accessEndedReason\);\s+showStatus\(ended\.key, \[ended\.text, button\('Download my copy'/);
   assert.match(app,/function showStatus\(key, parts, problem = false\) \{\s+if \(key !== statusKey\)/);
   assert.doesNotMatch(app,/showStatus\('access-revoked'/);
+});
+
+const KEY='A'.repeat(43),URL_='https://example.trycloudflare.com/join#'+KEY,ENDS=Date.parse('2026-11-14T13:30:00Z');
+const lines=(...parts)=>parts.join('\n');
+test('Copy invitation is a plain Danish text with the link and the code each alone on a line, for every kind of invitation',()=>{
+  const ask=options=>invitationMessage({url:URL_,timeZone:'Europe/Copenhagen',...options});
+  const end='Linket udløber lørdag den 14. november 2026 kl. 14.30 CET.',never='Linket har ingen udløbstid, men virker kun, mens min computer er tændt og online og kører Paper. Det er ikke permanent.';
+  assert.equal(ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS}),lines('Se mit Paper:','',URL_,'','Adgangskode:','K7QM-4P2X','','Åbn linket i din browser, og indtast koden. Du kan redigere. Du behøver intet plugin.',end));
+  assert.equal(ask({role:'view',code:'k7qm-4p2x',expiresAt:ENDS}),lines('Se mit Paper:','',URL_,'','Adgangskode:','K7QM-4P2X','','Åbn linket i din browser, og indtast koden. Du kan se Paper, men ikke redigere. Du behøver intet plugin.',end));
+  assert.equal(ask({role:'edit',code:'K7QM4P2X',expiresAt:null}),lines('Se mit Paper:','',URL_,'','Adgangskode:','K7QM-4P2X','','Åbn linket i din browser, og indtast koden. Du kan redigere. Du behøver intet plugin.',never));
+  // Without a code the whole code block is gone: no label, no empty line pair.
+  const open=ask({role:'view',code:'',expiresAt:ENDS});
+  assert.equal(open,lines('Se mit Paper:','',URL_,'','Åbn linket i din browser. Du kan se Paper, men ikke redigere. Du behøver intet plugin.',end));
+  assert.doesNotMatch(open,/Adgangskode|koden/);assert.equal(ask({role:'edit',expiresAt:null}).includes('Adgangskode'),false);
+  // Finite ends name date, time and zone in the invitation, whatever zone the owner or recipient is in.
+  assert.match(ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS,timeZone:'UTC'}),/udløber lørdag den 14\. november 2026 kl\. 13\.30 UTC\.$/);
+  assert.match(ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS,timeZone:'America/New_York'}),/udløber lørdag den 14\. november 2026 kl\. 08\.30 GMT-5\.$/);
+  // No quotes, Markdown or punctuation hugs the link or the code, and Never promises no hosting.
+  for(const message of [ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS}),ask({role:'view',code:'K7QM4P2X',expiresAt:null})]){
+    const own=message.split('\n');assert.ok(own.includes(URL_));assert.ok(own.includes('K7QM-4P2X'));assert.doesNotMatch(message,/[*_`<>“”"]|\]\(/);assert.doesNotMatch(message,/permanent hosting|for evigt|altid/i);assert.doesNotMatch(message,/[Pp]lugin skal|installer/);
+  }
+  assert.ok(ask({role:'edit',code:'K7QM4P2X',expiresAt:null}).includes('virker kun, mens min computer er tændt og online'));
+});
+
+test('the Danish message round-trips for the plugin and the browser, with other 8-letter words around it',()=>{
+  const key=KEY,make=(options,add='')=>invitationMessage({url:URL_,timeZone:'Europe/Copenhagen',...options}).replace('Åbn linket',add+'Åbn linket');
+  const noise='Derefter kan du åbne december-versionen på mandag. ';
+  for(const role of ['edit','view'])for(const expiresAt of [ENDS,null,Date.parse('2026-12-24T22:00:00Z')])for(const add of ['',noise]){
+    assert.deepEqual(extractInvitation(make({role,code:'K7QM4P2X',expiresAt},add)),{token:key,code:'K7QM-4P2X'},`${role} ${expiresAt} ${add}`);
+    assert.deepEqual(extractInvitation(make({role,code:'',expiresAt},add)),{token:key,code:''},'an unprotected message never yields a code from its own words');
+  }
+  // Danish label variants: same line, next line, lowercase, spaces and full-width characters.
+  for(const typed of ['Adgangskode:\nK7QM-4P2X','Adgangskode: K7QM-4P2X','ADGANGSKODE:\r\nk7qm 4p2x','adgangskode :  k7qm-4p2x','Adgangskode:\n\uff2b\uff17\uff31\uff2d\uff0d\uff14\uff30\uff12\uff38'])
+    assert.deepEqual(extractInvitation(`Se mit Paper:\n\n${URL_}\n\n${typed}\n\nDerefter åbn linket.`),{token:key,code:'K7QM-4P2X'},JSON.stringify(typed));
+  // Unlabelled words with no digit are never a code; a hand-typed code with digits still is.
+  assert.equal(extractInvitation(`${URL_} Derefter december`).code,'');
+  assert.equal(extractInvitation(`${URL_} koden er k7qm 4p2x`).code,'K7QM-4P2X');
+  // The link may sit alone on its line with the owner's other lines around it.
+  assert.equal(extractInvitation(`Hej!\n\n${URL_}\n\nAdgangskode:\nK7QM-4P2X`).token,key);
 });

@@ -6,14 +6,21 @@ Sharing is optional. Owner files, the browser and agents use the same revision-c
 
 Share → Share this Paper → **Access** (Can view / Can edit) → **Expires** (In 1 hour, In 1 day, In 7 days, Never) → **Code protection** (on by default) → Internet / Local network / This computer only → Create invitation. The dialog stays open and shows the invitation with **Copy invitation** (a short plain message containing the link and the code), **Copy link**, **Copy code**, Open with agent and **Revoke**. Local network opens on computers and phones connected to your Wi-Fi or local network. Internet creates a temporary Cloudflare HTTPS address. This computer only opens the scoped listener on loopback, for another browser profile on this machine. Create another invitation for independent access or a different permission. Revoking one invitation ends only that invitation; Stop sharing this Paper ends all its invitations. Copying or retrying preserves the invitation. Clean views leave on revocation or expiry; dirty views freeze with a downloadable draft and say whether the invitation expired or was stopped (a save refused under the writer lock reports the same `reason`; an unknown reason reads "This invitation ended.").
 
-An invitation message looks like this, and `paper_join` and the join page both accept the whole message:
+**Copy invitation** puts this plain text (no Markdown, no HTML) on the clipboard. It is Danish, and the recipient needs only a browser: the link and the code each sit alone on a line, so both can be clicked or copied from an email or chat. `paper_join` and the join page both accept the whole message.
 
 ```
-You’re invited to edit “Brand board” in OpenPaperDesign.
-Link: https://…/join#<key>
-Code: K7QM-4P2X
-Ends tomorrow 14:30
+Se mit Paper:
+
+https://…/join#<key>
+
+Adgangskode:
+K7QM-4P2X
+
+Åbn linket i din browser, og indtast koden. Du kan redigere. Du behøver intet plugin.
+Linket udløber lørdag den 14. november 2026 kl. 14.30 CET.
 ```
+
+An invitation without a code omits the whole `Adgangskode:` block and the "indtast koden" clause. A view invitation reads "Du kan se Paper, men ikke redigere." A finite end gives the weekday, date, time and the owner's time zone. **Never** reads "Linket har ingen udløbstid, men virker kun, mens min computer er tændt og online og kører Paper. Det er ikke permanent." Copy link and Copy code still copy only the link and only the code. Reading a message: the code is taken from the `Adgangskode:` (or the older English `Code:`) label, on the same or the next line; only without a label is a lone code-shaped word with a digit accepted, so words such as "december" or "Derefter" are never read as a code.
 
 Send the code separately from the link for extra safety.
 

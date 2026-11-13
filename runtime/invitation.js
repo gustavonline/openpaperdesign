@@ -22,11 +22,18 @@ export function describeExpiry(expiresAt, now = Date.now()){
   if(target.toDateString()===tomorrow.toDateString())return `Ends tomorrow ${clock(expiresAt)}`;
   return `Ends ${target.toLocaleDateString([], {weekday:'short',day:'numeric',month:'short'})} ${clock(expiresAt)}`;
 }
-// The short message the owner pastes into any chat. It carries both the link and, when protected, the code.
-export function invitationMessage({name, role, url, code, expiresAt}){
+// A finite end with its date, time and time zone, so a recipient in another zone or on another day reads it the same way.
+export function exactExpiry(expiresAt, timeZone){
+  return new Intl.DateTimeFormat('da-DK',{...(timeZone?{timeZone}:{}),weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false,timeZoneName:'short'}).format(expiresAt);
+}
+// The plain-text message the owner pastes into any email or chat. The link and the code are each alone on a line (no
+// quotes, brackets or trailing punctuation), so they can be clicked and copied; the browser is all the recipient needs.
+// Danish, as written for the owner's recipients. The code block is left out entirely when the invitation has no code.
+export function invitationMessage({role, url, code, expiresAt, timeZone}){
   const shown=code?readCode(code):'';
-  const title=String(name||'a Paper').replace(/[\r\n"]+/g,' ').slice(0,80);
-  return [`You’re invited to ${role==='edit'?'edit':'view'} “${title}” in OpenPaperDesign.`,`Link: ${url}`,...(shown?[`Code: ${shown}`]:[]),expiresAt===null?'Works while the owner’s OpenPaperDesign is running.':describeExpiry(expiresAt)].join('\n');
+  const open=`Åbn linket i din browser${shown?', og indtast koden':''}. ${role==='edit'?'Du kan redigere.':'Du kan se Paper, men ikke redigere.'} Du behøver intet plugin.`;
+  const ends=expiresAt===null?'Linket har ingen udløbstid, men virker kun, mens min computer er tændt og online og kører Paper. Det er ikke permanent.':Number.isFinite(expiresAt)?`Linket udløber ${exactExpiry(expiresAt,timeZone)}.`:'';
+  return ['Se mit Paper:','',url,'',...(shown?['Adgangskode:',shown,'']:[]),open,...(ends?[ends]:[])].join('\n');
 }
 // Why an invitation ended, in plain words. Only a reason the server gave is named; anything else stays neutral
 // (an older server, a dropped stream) rather than blaming the owner.

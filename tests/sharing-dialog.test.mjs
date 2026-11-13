@@ -2,6 +2,8 @@
 // Focus: a failed code reveal is shown, never retried by a render/refresh, and recovers on an explicit ask.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+// The invitation message names the owner's own time zone; fix it so the literal expectations below are exact.
+process.env.TZ='Europe/Copenhagen';
 
 class El {
   constructor(tag){Object.assign(this,{tagName:tag.toUpperCase(),children:[],listeners:new Map(),attrs:{},dataset:{},className:'',hidden:false,disabled:false,checked:false,value:'',own:'',open:false});}
@@ -32,13 +34,14 @@ const {setupSharing}=await import('../runtime/sharing.js');
 
 const secret={url:'http://127.0.0.1:9/join#'+'k'.repeat(43),mcpUrl:'http://127.0.0.1:9/mcp',token:'k'.repeat(43),code:'K7QM-4P2X'};
 const invitation={id:'0123456789ab',paperId:'p1',label:'Invitation 1',role:'edit',ready:true,preparing:false,protected:true,expiresAt:null,wrongRecent:0,retryAfter:0,locked:false};
+const NEVER='Linket har ingen udløbstid, men virker kun, mens min computer er tændt og online og kører Paper. Det er ikke permanent.';
 const settle=()=>new Promise(resolve=>setTimeout(resolve,5));
 function rig(){
   // `reveals` is scripted per attempt: 'http' (500), 'network' (rejects) or 'ok'.
   const calls={link:0,state:0},script=[],clip=[];
   let clipboard='ok';
   globalThis.fetch=async(url)=>{
-    if(String(url).startsWith('/api/sharing/link')){calls.link++;const next=script.shift()??'http';if(next==='network')throw new TypeError('fetch failed');return {ok:next==='ok',json:async()=>next==='ok'?{...invitation,...secret}:{error:'Owner link unavailable'}};}
+    if(String(url).startsWith('/api/sharing/link')){calls.link++;const next=script.shift()??'http';if(next==='network')throw new TypeError('fetch failed');const {code,...unprotected}=secret;return {ok:next==='ok',json:async()=>next==='ok'?{...invitation,...(invitation.protected?secret:unprotected)}:{error:'Owner link unavailable'}};}
     calls.state++;return {ok:true,json:async()=>({invitations:[invitation],internetAvailable:false,networkAvailable:false})};
   };
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{clipboard:{writeText:async text=>{if(clipboard==='reject')throw new Error('blocked');clip.push(text);}}}});
@@ -48,7 +51,7 @@ function rig(){
   const row=()=>els['share-links'].children[0],text=()=>row().textContent,buttons=()=>row().all().filter(n=>n.tagName==='BUTTON');
   const press=label=>buttons().find(b=>b.textContent.trim()===label).fire('click');
   const open=async()=>{opener.fire('click');await settle();};
-  return {calls,script,clip,ui,text,buttons,press,open,rejectClipboard(){clipboard='reject';}};
+  return {calls,script,clip,ui,text,buttons,press,open,rejectClipboard(){clipboard='reject';},messageFor:{protectedEditNever:['Se mit Paper:','',secret.url,'','Adgangskode:','K7QM-4P2X','','Åbn linket i din browser, og indtast koden. Du kan redigere. Du behøver intet plugin.',NEVER].join('\n')}};
 }
 
 for(const failure of ['http','network']){
@@ -93,13 +96,34 @@ test('Copy invitation after a failed reveal fetches on purpose, reports failure,
   assert.equal(r.calls.link,2);assert.deepEqual(r.clip,[]);
   assert.match(els['share-state'].textContent,/Owner link unavailable/);assert.doesNotMatch(els['share-state'].textContent,/copied/i);
   r.press('Copy invitation');await settle();
-  const message=r.clip.at(-1);assert.match(message,/edit/);assert.ok(message.includes(secret.url));assert.ok(message.includes('Code: K7QM-4P2X'));
+  assert.equal(r.clip.at(-1),['Se mit Paper:','',secret.url,'','Adgangskode:','K7QM-4P2X','','Åbn linket i din browser, og indtast koden. Du kan redigere. Du behøver intet plugin.',NEVER].join('\n'));
   assert.match(r.text(),/K7QM-4P2X/);assert.doesNotMatch(r.text(),/could not be loaded/);r.ui.destroy();
 });
 
 test('a rejected clipboard keeps the selected read-only manual-copy text and does not claim success',async()=>{
   const r=rig();r.script.push('ok','ok');await r.open();assert.match(r.text(),/K7QM-4P2X/);
   r.rejectClipboard();r.press('Copy invitation');await settle();
-  assert.equal(fallback.hidden,false);assert.ok(fallback.value.includes(secret.url)&&fallback.value.includes('K7QM-4P2X'));
+  assert.equal(fallback.hidden,false);assert.equal(fallback.value,r.messageFor.protectedEditNever,'the selected manual-copy text is the same invitation');
   assert.match(els['share-state'].textContent,/Clipboard access was blocked/);assert.doesNotMatch(els['share-state'].textContent,/copied\./i);r.ui.destroy();
+});
+
+test('the invitation clipboard text follows the real invitation, while Copy link and Copy code stay exactly the link and the code',async()=>{
+  const ends=Date.parse('2026-11-14T13:30:00Z'),original={...invitation};
+  try{
+    for(const [change,expected] of [
+      [{role:'view',protected:true,expiresAt:ends},['Se mit Paper:','',secret.url,'','Adgangskode:','K7QM-4P2X','','Åbn linket i din browser, og indtast koden. Du kan se Paper, men ikke redigere. Du behøver intet plugin.','Linket udløber lørdag den 14. november 2026 kl. 14.30 CET.']],
+      [{role:'edit',protected:false,expiresAt:ends},['Se mit Paper:','',secret.url,'','Åbn linket i din browser. Du kan redigere. Du behøver intet plugin.','Linket udløber lørdag den 14. november 2026 kl. 14.30 CET.']],
+      [{role:'view',protected:false,expiresAt:null},['Se mit Paper:','',secret.url,'','Åbn linket i din browser. Du kan se Paper, men ikke redigere. Du behøver intet plugin.',NEVER]],
+    ]){
+      Object.assign(invitation,original,change);
+      const r=rig();r.script.push('ok','ok','ok','ok');await r.open();
+      r.press('Copy invitation');await settle();
+      assert.equal(r.clip.at(-1),expected.join('\n'),JSON.stringify(change));
+      assert.equal(r.clip.at(-1).includes('Adgangskode'),change.protected,'no code block for an unprotected invitation');
+      r.press('Copy link');await settle();assert.equal(r.clip.at(-1),secret.url,'Copy link is the bare link');
+      if(change.protected){r.press('Copy code');await settle();assert.equal(r.clip.at(-1),'K7QM-4P2X','Copy code is the bare code');}
+      else assert.equal(r.buttons().some(b=>b.textContent==='Copy code'),false);
+      r.ui.destroy();
+    }
+  }finally{Object.assign(invitation,original);}
 });
