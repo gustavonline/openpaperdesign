@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
-import {imageKind, imageFillOf, originalOf, fetchOriginal, OriginalError} from '../runtime/editing-model.js';
+import {imageKind, imageFillOf, originalOf, fetchOriginal, fetchCapturedOriginal, captureOriginal, layerUnderPointer, editMenuState, OriginalError} from '../runtime/editing-model.js';
 
 const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('original-png-bytes-0123456789')]);
 const JPEG = Buffer.concat([Buffer.from([255, 216, 255, 224]), Buffer.from('original-jpeg-bytes-0123456789')]);
@@ -100,15 +100,96 @@ test('in a native view the cached display picture is never reused: the original 
   await scope.dispose({discard: true});
 });
 
-test('the editor wires the command to the element under the pointer and keeps it out of primitives\' menus', async () => {
+// The editor's own handler, run as written in runtime/app.js with its few free variables supplied.
+async function handler() {
+  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
+  const source = app.slice(app.indexOf('let originalTarget=null,originalFocus=null;'), app.indexOf('// Fills the shared edit menu'));
+  assert.ok(source.includes('async function downloadOriginal()'));
+  const calls = {downloads: [], messages: [], fetched: [], focused: []};
+  const make = new Function('nodes', 'initialScene', 'paperId', 'fetchCapturedOriginal', 'download', 'message', 'fetch', `let scene=initialScene;${source}\nreturn {downloadOriginal,open(target,back){originalTarget=target;originalFocus=back;},setScene(value){scene=value;}};`);
+  const nodes = new Map();
+  const fetcher = bytes => async url => { calls.fetched.push(url); return response(bytes, {type: 'image/png'}); };
+  return {calls, nodes, make: (initial, bytes = PNG) => make(nodes, initial, 'p1', fetchCapturedOriginal, (blob, name) => calls.downloads.push({blob, name}), text => calls.messages.push(text), fetcher(bytes))};
+}
+
+test('a menu opened on image A never downloads image B that replaced it under the same layer key', async () => {
+  const {calls, nodes, make} = await handler(), nameA = `${SHA}.png`, nameB = `${'b'.repeat(64)}.png`;
+  const sceneA = {assets: {img: `assets/${nameA}`}}, layer = image('img');
+  nodes.set('p:2', {node: layer});
+  const view = make(sceneA);
+  // Unchanged: the menu's own image is downloaded.
+  view.open({key: 'p:2', ...captureOriginal(sceneA, layer)}, null); await view.downloadOriginal();
+  assert.deepEqual(calls.fetched, [`/Paper/p1/assets/${nameA}`]); assert.equal(calls.downloads.at(-1).name, nameA);
+  // A live refresh replaces the scene (and the layer's image fill) while the menu is open.
+  const captured = {key: 'p:2', ...captureOriginal(sceneA, layer)};
+  const sceneB = {assets: {img: `assets/${nameB}`}}; nodes.set('p:2', {node: image('img')}); view.setScene(sceneB);
+  const before = calls.fetched.length, downloads = calls.downloads.length;
+  view.open(captured, null); await view.downloadOriginal();
+  assert.equal(calls.fetched.length, before, 'no request is made for the replacement'); assert.equal(calls.downloads.length, downloads, 'nothing is downloaded');
+  assert.match(calls.messages.at(-1), /changed while the menu was open, so nothing was downloaded/);
+  // The same happens when the fill is removed, the layer is gone, or the asset entry now points elsewhere under the same fill.
+  nodes.set('p:2', {node: solid('rect')}); view.open(captured, null); await view.downloadOriginal();
+  assert.match(calls.messages.at(-1), /changed while the menu was open/); nodes.delete('p:2'); view.open(captured, null); await view.downloadOriginal();
+  assert.match(calls.messages.at(-1), /Choose an image/); assert.equal(calls.downloads.length, downloads); assert.equal(calls.fetched.length, before);
+  // The target is single-use: a second Enter without reopening the menu does nothing.
+  const asked = calls.messages.length; await view.downloadOriginal(); assert.match(calls.messages.at(-1), /Choose an image/); assert.equal(calls.messages.length, asked + 1);
+});
+
+test('a stored image that was already missing when the menu opened still reports missing, and keyboard focus returns to its row', async () => {
+  const {calls, nodes, make} = await handler(), sceneNone = {assets: {}}, layer = image('img'); nodes.set('p:2', {node: layer});
+  const row = {focus: () => calls.focused.push('row')}, view = make(sceneNone);
+  view.open({key: 'p:2', ...captureOriginal(sceneNone, layer)}, row); await view.downloadOriginal();
+  assert.match(calls.messages.at(-1), /no stored original/); assert.deepEqual(calls.focused, ['row']); assert.equal(calls.downloads.length, 0); assert.equal(calls.fetched.length, 0);
+  // The focus goes back after a download too.
+  const scene2 = {assets: {img: `assets/${SHA}.png`}}; view.setScene(scene2); view.open({key: 'p:2', ...captureOriginal(scene2, layer)}, row); await view.downloadOriginal();
+  assert.equal(calls.downloads.length, 1); assert.deepEqual(calls.focused, ['row', 'row']);
+});
+
+// A hit stack as document.elementsFromPoint returns it: topmost first.
+const el = (name, {key, parent} = {}) => ({name, closest: selector => (selector === '[data-node-key]' && key ? {dataset: {nodeKey: key}} : parent?.closest?.(selector) ?? null)});
+test('Inspect\'s overlay receives the click, but the layer the person sees under it is the target', () => {
+  const overlay = el('overlay'), layer = el('img', {key: 'p:2'}), board = el('board', {key: 'p:1'}), world = el('world'), side = el('sidebar-row');
+  const inOverlay = element => element === overlay, inStage = element => [layer, board, world].includes(element);
+  assert.equal(layerUnderPointer([overlay, layer, board, world], {inOverlay, inStage}), 'p:2', 'through the overlay to the layer on top');
+  assert.equal(layerUnderPointer([overlay, board, world], {inOverlay, inStage}), 'p:1', 'a frame is the layer under the pointer when nothing sits on it');
+  assert.equal(layerUnderPointer([overlay, world], {inOverlay, inStage}), null, 'empty canvas');
+  assert.equal(layerUnderPointer([overlay, side, layer], {inOverlay, inStage}), null, 'a click on something outside the canvas is not a layer click');
+  assert.equal(layerUnderPointer([overlay], {inOverlay, inStage}), null); assert.equal(layerUnderPointer([], {inOverlay, inStage}), null);
+});
+
+test('the edit menu shows Download original alone in the image-only menu, never for a primitive, and view guests keep it enabled', async () => {
+  const html = await fs.readFile(new URL('../runtime/index.html', import.meta.url), 'utf8');
+  const menu = html.slice(html.indexOf('<div id="edit-menu"'), html.indexOf('</div>', html.indexOf('<div id="edit-menu"')));
+  const items = [...menu.matchAll(/<hr>|<button[^>]*>/g)].map(match => ({edit: /data-edit="([^"]+)"/.exec(match[0])?.[1]}));
+  assert.ok(items.some(item => item.edit === 'download-original') && items.some(item => item.edit === 'copy') && items.some(item => !item.edit), 'the real markup has the item, ordinary commands and separators');
+  assert.match(menu, /data-edit="download-original" hidden>Download original</, 'hidden unless an image is chosen');
+  const shown = state => items.filter((item, i) => !state[i].hidden).map(item => item.edit ?? '-');
+  // Image-only menu (overlay or Layers tree): the one command, no ordinary editing commands, no stray separators.
+  assert.deepEqual(shown(editMenuState(items, {canEdit: true, original: true, only: true})), ['download-original']);
+  assert.deepEqual(shown(editMenuState(items, {canEdit: false, original: true, only: true})), ['download-original']);
+  assert.equal(editMenuState(items, {canEdit: false, original: true, only: true}).find((state, i) => items[i].edit === 'download-original').disabled, false, 'view-only guests can use it');
+  // Primitive, in either menu: no Download original at all (and nothing at all in the image-only menu).
+  assert.ok(!shown(editMenuState(items, {canEdit: true, original: false, only: false})).includes('download-original'));
+  assert.ok(shown(editMenuState(items, {canEdit: true, original: false, only: false})).includes('copy'));
+  assert.deepEqual(shown(editMenuState(items, {canEdit: true, original: false, only: true})), []);
+  // The full menu with an image: everything, and a view-only guest's editing commands stay disabled while the three read-only ones and the download are enabled.
+  assert.equal(shown(editMenuState(items, {canEdit: true, original: true, only: false})).length, items.length);
+  const view = editMenuState(items, {canEdit: false, original: true, only: false});
+  assert.deepEqual(items.filter((item, i) => item.edit && !view[i].disabled).map(item => item.edit).sort(), ['copy', 'copy-style', 'download-original', 'link']);
+});
+
+test('the editor wires the command: stage menu, Inspect overlay, Layers tree, and nothing that forces the overlay or grants Edit', async () => {
   const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8'), html = await fs.readFile(new URL('../runtime/index.html', import.meta.url), 'utf8');
-  assert.match(html, /<button type="button" role="menuitem" data-edit="download-original" hidden>Download original<\/button>/, 'hidden until an image is under the pointer');
-  assert.match(app, /const under=e\.target\.closest\?\.\('\[data-node-key\]'\)\?\.dataset\.nodeKey;originalTarget=under&&nodes\.get\(under\)&&imageFillOf\(nodes\.get\(under\)\.node\)\?under:null;/);
-  assert.match(app, /\.hidden=!originalTarget/);
-  assert.match(app, /'link','download-original'\]\.includes\(item\.dataset\.edit\)/, 'view-only guests may use it');
+  assert.match(html, /<button type="button" role="menuitem" data-edit="download-original" hidden>Download original<\/button>/);
+  assert.match(app, /paintEditMenu\(e\.target\.closest\?\.\('\[data-node-key\]'\)\?\.dataset\.nodeKey\);/, 'Edit stage menu: the layer under the pointer');
+  assert.match(app, /overlayRoot\.addEventListener\('contextmenu'[\s\S]*?\}, true\);/, 'Inspect overlay, in the capture phase so it is seen first');
+  assert.match(app, /layerUnderPointer\(document\.elementsFromPoint\(e\.clientX, e\.clientY\)/);
+  assert.match(app, /e\.preventDefault\(\); showMenu\(\$\('#edit-menu'\)/, 'only an image takes over the right-click');
+  assert.match(app, /tree\.addEventListener\('contextmenu'[\s\S]*?keyboard \? \{ setAttribute\(\) \{\}, focus: \(\) => row\.focus\(\) \} : null/, 'Layers tree: mouse and keyboard, focus returns to the row');
   assert.match(app, /button:not\(:disabled\):not\(\[hidden\]\)/, 'a hidden item is never a keyboard stop');
   assert.match(app, /if\(action==='download-original'\)return downloadOriginal\(\);/);
-  const body = app.slice(app.indexOf('async function downloadOriginal()'), app.indexOf('function editCommand('));
-  assert.match(body, /nodes\.get\(originalTarget\)/); assert.doesNotMatch(body, /selected|assetUrl|paperAsset|dataUrl/, 'never the selection, the display cache or a data URL');
-  assert.match(body, /fetchImpl:\(url,options\)=>fetch\(url,options\)/);
+  const body = app.slice(app.indexOf('async function downloadOriginal()'), app.indexOf('// Fills the shared edit menu'));
+  assert.match(body, /fetchCapturedOriginal\(\{captured:target/); assert.doesNotMatch(body, /selected|assetUrl|paperAsset|dataUrl/, 'never the selection, the display cache or a data URL');
+  const overlay = app.slice(app.indexOf('const overlayRoot'), app.indexOf("tree.addEventListener('contextmenu'"));
+  assert.doesNotMatch(overlay, /pointerEvents|pointer-events|\.remove\(|\.hidden\s*=|canEdit\s*=|readOnly/, 'the overlay is neither removed nor bypassed and no edit right is granted');
 });

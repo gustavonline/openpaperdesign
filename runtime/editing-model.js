@@ -166,6 +166,7 @@ const WORDS = {
   'not-found': 'The original is no longer in this Paper, so nothing was downloaded.',
   'wrong-file': 'The stored file is not the expected image, so nothing was downloaded.',
   failed: 'The original could not be downloaded. Nothing was saved.',
+  changed: 'This image changed while the menu was open, so nothing was downloaded. Open the menu again.',
 };
 // Fetches the stored file again through the caller's own scoped fetch (cache:'no-store'), checks it and returns it with its real
 // name. `fetchImpl` is the view's fetch: in the browser the signed-in session, in the native app the same authorized transport as
@@ -186,3 +187,25 @@ export async function fetchOriginal({paperId, scene, node, fetchImpl, signal}) {
   if (!bytes.length || imageKind(bytes) !== found.mime) throw new OriginalError('wrong-file', WORDS['wrong-file']);
   return {blob: new Blob([bytes], {type: found.mime}), name: found.name, mime: found.mime};
 }
+
+// What the menu was opened on. Choosing the command checks that this layer still shows the same stored original: a live refresh can
+// replace its image while the menu is open, and then nothing is downloaded rather than a different picture.
+export const captureOriginal = (scene, node) => { const found = originalOf(scene, node); return {name: found.ok ? found.name : null}; };
+export async function fetchCapturedOriginal({captured, ...request}) {
+  const found = originalOf(request.scene, request.node);
+  if ((found.ok ? found.name : null) !== (captured?.name ?? null)) throw new OriginalError('changed', WORDS.changed);
+  return fetchOriginal(request);
+}
+// The layer a pointer is over, looking through Inspect's full-canvas overlay (which receives the click): the first element of the
+// hit stack that is not the overlay, if it is inside the canvas, and the layer it belongs to.
+export function layerUnderPointer(stack, {inOverlay, inStage}) {
+  const top = stack.find(element => !inOverlay(element));
+  return top && inStage(top) ? top.closest?.('[data-node-key]')?.dataset?.nodeKey || null : null;
+}
+// Which edit-menu items show and which are disabled. The full menu hides Download original unless an image is chosen; the image-only
+// menu (Inspect's overlay and the Layers tree, where the editing commands do not apply) shows that one item alone.
+const VIEW_ALLOWED = ['copy', 'copy-style', 'link', 'download-original'];
+export const editMenuState = (items, {canEdit, original, only}) => items.map(({edit}) => ({
+  hidden: edit === 'download-original' ? !original : !!only,
+  disabled: !!edit && !canEdit && !VIEW_ALLOWED.includes(edit),
+}));

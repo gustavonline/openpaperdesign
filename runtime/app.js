@@ -5,7 +5,7 @@ import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=37f4c823cf59';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchOriginal,imageFillOf} from './editing-model.js?v=4771d4d3edfa';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf} from './editing-model.js?v=002feaf51ac7';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -460,15 +460,26 @@ async function pasteSelection(){
     pageChange(targetPage,()=>pasteLayers(targetPage,payload,{samePage:local}));setTool('select');
   }catch(error){message(`Paste failed: ${error instanceof SyntaxError?'The clipboard does not contain Paper layers.':error.message}`);}
 }
-let originalTarget=null;
-// One image's stored original, fetched again now through this view's own scoped fetch, never from the display copy.
+let originalTarget=null,originalFocus=null;
+// One image's stored original, fetched again now through this view's own scoped fetch, never from the display copy. The command
+// belongs to the layer the menu was opened on; if that layer no longer shows the same stored image, nothing is downloaded.
 async function downloadOriginal(){
-  const entry=nodes.get(originalTarget);originalTarget=null;
+  const target=originalTarget,back=originalFocus;originalTarget=originalFocus=null;
   try{
+    const entry=nodes.get(target?.key);
     if(!entry)throw new Error('Choose an image to download its original.');
-    const original=await fetchOriginal({paperId,scene,node:entry.node,fetchImpl:(url,options)=>fetch(url,options)});
+    const original=await fetchCapturedOriginal({captured:target,paperId,scene,node:entry.node,fetchImpl:(url,options)=>fetch(url,options)});
     download(original.blob,original.name);message(`Downloading the original: ${original.name}`);
   }catch(error){if(error?.name!=='AbortError')message(error?.message||'The original could not be downloaded. Nothing was saved.');}
+  back?.focus?.();
+}
+// Fills the shared edit menu for a layer: the full menu in Edit, or only Download original where the editing commands do not apply.
+function paintEditMenu(key,only=false){
+  const entry=key&&nodes.get(key),image=entry&&imageFillOf(entry.node)?{key,...captureOriginal(scene,entry.node)}:null;
+  originalTarget=image;originalFocus=null;
+  const items=[...$('#edit-menu').children];
+  editMenuState(items.map(item=>({edit:item.dataset.edit})),{canEdit,original:!!image,only}).forEach((state,i)=>{items[i].hidden=state.hidden;if(items[i].dataset.edit)items[i].disabled=state.disabled;});
+  return !!image;
 }
 function editCommand(action){
   const entry=nodes.get(selected),page=entry?.page;
@@ -1323,12 +1334,30 @@ stage.addEventListener('contextmenu', e => {
   if (inspection || e.target.isContentEditable) return;
   e.preventDefault();
   const key=hitSymbol(e.target)||e.target.closest('[data-board-select]')?.dataset.boardSelect;
-  if(key){if(!selection.has(key))selectNode(key);for(const item of $('#edit-menu').querySelectorAll('[data-edit]'))item.disabled=!canEdit&&!['copy','copy-style','link','download-original'].includes(item.dataset.edit);
+  if(key){if(!selection.has(key))selectNode(key);
     // "Download original" belongs to the element actually under the pointer (or focused), whatever else is selected, and only when it is an image.
-    const under=e.target.closest?.('[data-node-key]')?.dataset.nodeKey;originalTarget=under&&nodes.get(under)&&imageFillOf(nodes.get(under).node)?under:null;$('#edit-menu [data-edit="download-original"]').hidden=!originalTarget;
+    paintEditMenu(e.target.closest?.('[data-node-key]')?.dataset.nodeKey);
     showMenu($('#edit-menu'),{at:()=>({x:e.clientX,y:e.clientY}),keyboard:e.clientX===0&&e.clientY===0});return;}
   const keyboard = e.clientX === 0 && e.clientY === 0, r = stage.getBoundingClientRect();
   paintCanvasMenu(); showMenu(canvasMenu, { at: () => keyboard ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: e.clientX, y: e.clientY }, keyboard });
+});
+// Inspect's overlay covers the canvas and receives the right-click, so the stage never sees it. Look through the overlay to the layer
+// the person sees; its own toolbar, panels and fields keep their menus, and a keyboard-opened menu uses the Layers tree below.
+const overlayRoot = $('#paper-inspection-root');
+overlayRoot.addEventListener('contextmenu', e => {
+  if ((e.clientX === 0 && e.clientY === 0) || e.target.closest?.('button,input,textarea,select,a,[role=menu],[role=dialog],[contenteditable=true],[data-paper-inspection-comment-ui],.paper-inspection-toolbar-motion')) return;
+  const key = layerUnderPointer(document.elementsFromPoint(e.clientX, e.clientY), { inOverlay: el => overlayRoot.contains(el), inStage: el => stage.contains(el) });
+  if (!key || !paintEditMenu(key, true)) return;
+  e.preventDefault(); showMenu($('#edit-menu'), { at: () => ({ x: e.clientX, y: e.clientY }) });
+}, true);
+// The Layers tree reaches the same command with the keyboard (Menu key or Shift+F10 on a focused row) as well as the mouse.
+tree.addEventListener('contextmenu', e => {
+  const row = e.target.closest?.('.tree-row');
+  if (!row?.dataset.key || !paintEditMenu(row.dataset.key, true)) return;
+  e.preventDefault();
+  const keyboard = e.clientX === 0 && e.clientY === 0, r = row.getBoundingClientRect();
+  if (keyboard) originalFocus = row;
+  showMenu($('#edit-menu'), { at: () => keyboard ? { x: r.left + 24, y: r.bottom } : { x: e.clientX, y: e.clientY }, keyboard, trigger: keyboard ? { setAttribute() {}, focus: () => row.focus() } : null });
 });
 canvasMenu.addEventListener('click', e => {
   const p = e.target.closest('[data-pattern]');
