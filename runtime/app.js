@@ -1,10 +1,11 @@
 import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
 import {setupPresence} from './presence.js?v=22e96dd947ab';
-import { setupSharing } from './sharing.js?v=6d255ae1b910';
+import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
+import { setupSharing } from './sharing.js?v=e76b2d4ca5f2';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText} from './editing-model.js?v=6f3b93cc6712';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame} from './editing-model.js?v=718e4bb39407';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -18,15 +19,19 @@ const query = new URLSearchParams(location.search), paperIds = query.getAll('pap
 const paperId = paperIds.length === 1 && PAPER_ID.test(paperIds[0]) ? paperIds[0] : null;
 const paperBase = `Paper/${encodeURIComponent(paperId ?? '')}/`;
 const scoped = key => `${key}:paper:${paperId}`;
-const paperQuery = `?paper=${encodeURIComponent(paperId ?? '')}`;
+// A browser guest names its invitation, so two invitations to one Paper never share a session.
+const invite = query.getAll('invite').length === 1 && /^[a-f0-9]{12}$/.test(query.get('invite')) ? query.get('invite') : null;
+const paperQuery = `?paper=${encodeURIComponent(paperId ?? '')}${invite ? `&invite=${invite}` : ''}`;
 const sceneUrl = `/api/paper${paperQuery}`, feedbackUrl = `/api/feedback${paperQuery}`;
 const access = await (async()=>{
-  try{const response=await fetch(`/api/access${paperQuery}`,{cache:'no-store',signal:AbortSignal.timeout(8000)});return response.ok?await response.json():{role:'view',shared:true,error:'This invitation is no longer available. Ask the owner for a new link.'};}
+  try{const response=await fetch(`/api/access${paperQuery}`,{cache:'no-store',signal:AbortSignal.timeout(8000)});if(response.ok)return await response.json();const data=await response.json().catch(()=>({}));return {role:'view',shared:true,error:['expired','revoked','ambiguous'].includes(data.reason)&&data.error?data.error:'This invitation is no longer available. Ask the owner for a new link.'};}
   catch{return {role:'view',shared:false,error:'The Paper server did not respond. Reload this page or reopen Home.'};}
 })();
-let canEdit = access.role === 'owner' || access.role === 'edit', accessRevoked = false;
+// Opened by a bookmark or an older link without its invitation: name it once so this tab keeps its own role.
+if (access.shared && access.invitationId && !invite && !inPaperSurface && !access.error) { const named = new URL(location.href); named.searchParams.set('invite', access.invitationId); location.replace(named.href); await new Promise(() => {}); }
+let canEdit = access.role === 'owner' || access.role === 'edit', accessRevoked = false, accessEndedReason = null, endAccess = () => {};
 body.classList.toggle('shared-paper', !!access.shared); body.classList.toggle('read-only', !canEdit);
-if (access.shared) { const badge = document.createElement('span'); badge.className = 'access-badge'; badge.textContent = canEdit ? 'Can edit' : 'View only'; $('#left-toggle').before(badge); }
+if (access.shared) { const badge = document.createElement('span'); badge.className = 'access-badge'; badge.textContent = canEdit ? 'Can edit' : 'View only'; if (access.expiresAt !== undefined) badge.title = describeExpiry(access.expiresAt); $('#left-toggle').before(badge); }
 if (access.shared) { for (const item of document.querySelectorAll(inPaperSurface?'[data-action="new"],.owner-only':'[data-action="home"],[data-action="new"],.owner-only')) item.hidden = true; }
 if(access.shared&&!inPaperSurface)$('#home').hidden=true;
 if(!canEdit)for(const item of document.querySelectorAll('[data-action="rename"],#undo,#redo'))item.hidden=true;
@@ -490,12 +495,14 @@ function placeStatus() {
   if (statusEl.hidden) return;
   // Just left of the right corner bar (or of the open right panel), centred on the 40px top row.
   const anchor = body.classList.contains('right-open') ? stage.getBoundingClientRect().right : $('#right-bar').getBoundingClientRect().left;
-  Object.assign(statusEl.style, { right: `${Math.round(innerWidth - anchor + 8)}px`, top: '8px', maxWidth: `${Math.max(160, Math.round(anchor - stage.getBoundingClientRect().left - 16))}px` });
-  // Never under a toolbar docked along the top row, or the floating Paper bar on a narrow window.
-  const s = statusEl.getBoundingClientRect(), hits = r => r && r.width && !(r.right < s.left || r.left > s.right || r.bottom < s.top || r.top > s.bottom);
+  // With the inspector open on a narrow window there is no readable room beside it, so the message may cover it.
+  const frame = statusFrame(anchor, stage.getBoundingClientRect().left, { width: innerWidth, height: innerHeight });
+  Object.assign(statusEl.style, { right: `${frame.right}px`, top: '8px', maxWidth: `${frame.maxWidth}px` });
+  // Never under a toolbar docked along the top row, or the floating Paper bar on a narrow window. Only a bar the status
+  // actually overlaps moves it (a toolbar docked at the bottom does not), and it always stays inside the window.
   const toolbar = document.querySelector('#paper-inspection-root .paper-inspection-toolbar-motion')?.getBoundingClientRect();
   const paperBar = body.classList.contains('left-open') ? null : $('#left-bar').getBoundingClientRect();
-  if (hits(toolbar) || hits(paperBar)) statusEl.style.top = `${Math.round(Math.max(toolbar?.bottom || 0, paperBar?.bottom || 0, 40) + 6)}px`;
+  statusEl.style.top = `${statusSpot(statusEl.getBoundingClientRect(), [toolbar, paperBar, $('#right-bar').getBoundingClientRect()].filter(Boolean), { height: innerHeight, width: innerWidth })}px`;
 }
 function showStatus(key, parts, problem = false) {
   if (key !== statusKey) { statusEl.replaceChildren(...parts); statusKey = key; }
@@ -504,7 +511,8 @@ function showStatus(key, parts, problem = false) {
 function updateSaveState() {
   if (accessRevoked) {
     clearTimeout(savedTimer); savedTimer = null;
-    showStatus('access-revoked', ['The owner stopped this link. Download your unsaved work before closing.', button('Download my copy', exportScene), ...(feedback.pendingBytes !== null ? [button('Download my notes', downloadFeedback)] : []), button('Close without saving', () => { leaving = true; location.replace('/join'); })], true);
+    const ended = endedStatus(accessEndedReason);
+    showStatus(ended.key, [ended.text, button('Download my copy', exportScene), ...(feedback.pendingBytes !== null ? [button('Download my notes', downloadFeedback)] : []), button('Close without saving', () => { leaving = true; location.replace(`/join?ended=${accessEndedReason || 'ended'}`); })], true);
     return;
   }
   const notesBusy = !!feedback.saving || feedback.pendingBytes !== null;
@@ -536,7 +544,7 @@ function saveScene() {
     try {
       const response = await fetch(sceneUrl, { method: 'PUT', headers: { ...clientHeaders, 'Content-Type': 'application/json', 'If-Match': revision }, body: bytes });
       if (response.status === 409) { conflict = true; throw new Error('changed elsewhere'); }
-      if (!response.ok) { let reason = `HTTP ${response.status}`; try { reason = (await response.json()).error || reason; } catch { /* Keep the status code. */ } throw new Error(reason); }
+      if (!response.ok) { let reason = `HTTP ${response.status}`, ended; try { const data = await response.json(); reason = data.error || reason; ended = data.reason; } catch { /* Keep the status code. */ } if (response.status === 401 && access.shared) endAccess(ended); throw new Error(reason); }
       revision = (await response.json()).revision; lastSaved = bytes; saveError = null; return true;
     } catch (error) { pending = true; if (!conflict) saveError = error.message || 'network error'; return false; }
     finally { saving = null; updateSaveState(); }
@@ -604,7 +612,7 @@ function flushFeedback() {
       }
       const response = await fetch(feedbackUrl, { method: 'PUT', headers: { ...clientHeaders, 'Content-Type': 'application/json', 'If-Match': feedback.revision }, body: bytes });
       if (response.status === 409) { feedback.conflict = true; return false; }
-      if (!response.ok) { let reason = `HTTP ${response.status}`; try { reason = (await response.json()).error || reason; } catch { /* Keep the status code. */ } throw new Error(reason); }
+      if (!response.ok) { let reason = `HTTP ${response.status}`, ended; try { const data = await response.json(); reason = data.error || reason; ended = data.reason; } catch { /* Keep the status code. */ } if (response.status === 401 && access.shared) endAccess(ended); throw new Error(reason); }
       feedback.revision = (await response.json()).revision; feedback.last = bytes; feedback.error = null;
       if (feedback.pendingBytes === bytes) { feedback.pendingBytes = null; keepBackup(null); }
       return true;
@@ -1565,9 +1573,13 @@ async function remoteFeedback(silent=false) {
 }
 function listenForChanges() {
   let events,timer,stopped=false,guideRevision,failures=0,polling=false;
-  function revoked(){
+  function revoked(reason){
+    // Only a reason the server gave is named; anything else (an older server, a dropped stream) is a neutral "ended".
+    const known=knownEnd(reason);
+    if(accessEndedReason){if(known&&accessEndedReason==='ended'){accessEndedReason=known;updateSaveState();}return;}
+    accessEndedReason=known||'ended';
     stopped=true;clearTimeout(timer);presenceUI?.stop();events?.close();
-    if (!(pending || saving || textEdit || liveEdit || gesture || feedback.saving || feedback.pendingBytes !== null)) { leaving = true; location.replace('/join'); return; }
+    if (!(pending || saving || textEdit || liveEdit || gesture || feedback.saving || feedback.pendingBytes !== null)) { leaving = true; location.replace(`/join?ended=${accessEndedReason}`); return; }
     // Access can end while a guest is drawing or typing. Keep that draft downloadable, with editing
     // frozen, rather than replacing it with the join screen. The server has already revoked all writes.
     commitFields(); stopTextEdit(); endRename(true); finishGesture();
@@ -1578,6 +1590,11 @@ function listenForChanges() {
     showTitle(); const badge = $('.access-badge'); if (badge) badge.textContent = 'Access ended';
     updateSaveState();
   }
+  endAccess = revoked;
+  if (access.shared && Number.isFinite(access.expiresAt) && access.expiresAt - Date.now() > 300000) {
+    const warning = setTimeout(() => { if (!accessRevoked) message('This invitation ends in 5 minutes. Changes save until then.'); }, Math.min(access.expiresAt - Date.now() - 300000, 2 ** 31 - 1));
+    onSurfaceDispose(() => clearTimeout(warning));
+  }
   // Quick Tunnels buffer SSE. One small, scoped revision/presence poll keeps internet
   // guests live without a new collaboration service or another transport dependency.
   if(access.poll){
@@ -1587,7 +1604,7 @@ function listenForChanges() {
         if(document.hidden)return;
         const seen=revision,seenNotes=feedback.revision,presenceToken=presenceUI?.snapshotToken();
         const response=await fetch(`/api/updates${paperQuery}`,{cache:'no-store',signal:AbortSignal.timeout(6000)});
-        if(stopped)return;if(response.status===401||response.status===403){revoked();return;}if(!response.ok)throw new Error('Connection unavailable');
+        if(stopped)return;if(response.status===401||response.status===403){revoked((await response.json().catch(()=>({}))).reason);return;}if(!response.ok)throw new Error('Connection unavailable');
         const data=await response.json();if(stopped)return;
         if(data.presence)presenceUI?.receive(data.presence,presenceToken);
         if(revision===seen&&data.revision!==seen&&quiet()&&await remotePaper(false,true)===false)throw new Error('Paper could not be refreshed');
@@ -1609,7 +1626,7 @@ function listenForChanges() {
   events.addEventListener('guide-changed',e=>{if(ours(e)){designText=null;renderDesign();}});
   for(const type of ['presence','presence-snapshot'])events.addEventListener(type,e=>{try{presenceUI?.receive(JSON.parse(e.data));}catch{}});
   events.addEventListener('error',()=>presenceUI?.disconnect());
-  events.addEventListener('access-revoked',revoked);
+  events.addEventListener('access-revoked',e=>{let reason;try{reason=JSON.parse(e.data).reason;}catch{/* Older servers send no reason. */}revoked(reason);});
   onSurfaceDispose(()=>{stopped=true;clearTimeout(timer);events.close();});
 }
 
@@ -1619,7 +1636,7 @@ async function start() {
   try { const v = JSON.parse(localStorage.getItem(CANVAS_KEY)); if (v) setCanvasView({ pattern: ['none', 'dots', 'grid'].includes(v.pattern) ? v.pattern : 'none', color: /^#[0-9a-f]{6}$/i.test(v.color || '') ? v.color : null,snap:v.snap===true,objects:v.objects!==false }); } catch { /* Plain canvas. */ }
   setLeftTab(panels?.tab, false);
   if (panels && typeof panels.left === 'boolean') setPanels(panels.left && !(narrow() && panels.right), panels.right, false); else setPanels(false, !narrow(), false);
-  if (paperId === null || [...query.keys()].some(key => key !== 'paper' && key !== 'notion') || query.getAll('notion').length>1 || (query.has('notion')&&!['save','open'].includes(query.get('notion')))) throw new Error(paperIds.length ? 'This Paper link isn’t valid.' : 'No Paper was chosen.');
+  if (paperId === null || [...query.keys()].some(key => key !== 'paper' && key !== 'notion' && !(key === 'invite' && invite)) || query.getAll('notion').length>1 || (query.has('notion')&&!['save','open'].includes(query.get('notion')))) throw new Error(paperIds.length ? 'This Paper link isn’t valid.' : 'No Paper was chosen.');
   $('#design-open').href = assetUrl('DESIGN.md');
   if(inPaperSurface){$('#design-open').removeAttribute('target');$('#design-open').download='DESIGN.md';$('#design-open').title='Download DESIGN.md';}
   const response = await fetch(sceneUrl, { cache: 'no-store',signal:AbortSignal.timeout(15000) });

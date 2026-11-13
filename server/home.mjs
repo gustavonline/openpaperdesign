@@ -13,9 +13,9 @@ export const HOME_URI=`ui://openpaperdesign/home/${VERSION}/${randomBytes(8).toS
 export const HOME_MIME='text/html;profile=mcp-app';
 export function isHomeResource(uri){
   if(typeof uri!=='string')return false;
-  const retained=uri.match(/^ui:\/\/openpaperdesign\/home\/(0\.7\.0-preview\.(?:12|13|14|15|16|17|18|19|20|21))\/[a-f0-9]{16}$/);
+  const retained=uri.match(/^ui:\/\/openpaperdesign\/home\/(0\.7\.0-preview\.(?:12|13|14|15|16|17|18|19|20|21|22))\/[a-f0-9]{16}$/);
   const base=`ui://openpaperdesign/home/${VERSION}/`;
-  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||!!retained||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
+  return uri.startsWith(base)&&/^[a-f0-9]{16}$/.test(uri.slice(base.length))||!!retained||['ui://openpaperdesign/home',...[4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23].map(n=>`ui://openpaperdesign/home/0.7.0-preview.${n}`)].includes(uri);
 }
 export function dataHome(){
   if(process.env.PAPER_HOME){if(!path.isAbsolute(process.env.PAPER_HOME))throw new Error('PAPER_HOME must be an absolute folder');return process.env.PAPER_HOME;}
@@ -79,7 +79,7 @@ async function sharingOverview(entry){
     if(!i||typeof i.paperId!=='string'||!ID.test(i.paperId)||typeof i.id!=='string'||!ID.test(i.id))continue;
     library??=await PaperLibrary.open(entry.root);
     if(!names.has(i.paperId))names.set(i.paperId,await library.read(i.paperId).then(r=>r.paper.name,()=>'Unavailable Paper'));
-    invitations.push({id:i.id,paperId:i.paperId,paperName:names.get(i.paperId),label:String(i.label||''),role:i.role==='edit'?'edit':'view',network:!!i.network,internet:!!i.internet,online:!!i.online,ready:!!i.ready,preparing:!!i.preparing,expiresAt:Number(i.expiresAt)||null});
+    invitations.push({id:i.id,paperId:i.paperId,paperName:names.get(i.paperId),label:String(i.label||''),role:i.role==='edit'?'edit':'view',network:!!i.network,internet:!!i.internet,online:!!i.online,ready:!!i.ready,preparing:!!i.preparing,expiresAt:i.expiresAt===null?null:Number.isFinite(i.expiresAt)?i.expiresAt:undefined,never:i.expiresAt===null,protected:!!i.protected,locked:!!i.locked,wrongRecent:Math.min(99,Math.max(0,Number(i.wrongRecent)||0)),retryAfter:Math.min(3600,Math.max(0,Number(i.retryAfter)||0))});
   }
   return {...server,invitations};
 }

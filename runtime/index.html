@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=7be61fed20cf"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=1c8112e33a2b"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -187,16 +187,17 @@
 <dialog id="sharing-dialog" data-canvas-chrome aria-labelledby="sharing-title">
   <header><h2 id="sharing-title">Share Paper</h2><button type="button" class="ibtn" data-close-sharing aria-label="Close sharing"><svg class="icon"><use href="#i-close"/></svg></button></header>
   <p id="share-state" role="status">Only you have access</p>
-  <p id="share-detail" class="note">Anyone with an invitation link can open this Paper. Keep this computer running while you share.</p>
-  <div id="share-links" aria-label="Invitation links"></div>
-  <button type="button" id="share-new" class="share-quiet" hidden>Add link</button>
+  <div id="share-links" aria-label="Invitations"></div>
+  <button type="button" id="share-new" class="share-quiet" hidden>New invitation</button>
   <form id="share-create">
-    <label class="share-name">Link name <span class="note">optional</span><input id="share-name" class="field" maxlength="80" placeholder="Paper name" autocomplete="off"></label>
-    <div class="share-permission"><span>Anyone with this link</span><select id="share-role" class="field" aria-label="Invitation access"><option value="view">Can view</option><option value="edit">Can edit</option></select></div>
-    <fieldset class="share-reach"><legend>Share over</legend><label><input type="radio" name="share-reach" value="online" checked> Internet</label><label><input type="radio" name="share-reach" value="network"> Local network</label></fieldset>
-    <div class="share-actions"><button type="submit" id="share-primary">Create link</button><button type="button" id="share-create-cancel" hidden>Cancel</button></div>
+    <div class="share-permission"><label for="share-role">Access</label><select id="share-role" class="field"><option value="view">Can view</option><option value="edit">Can edit</option></select></div>
+    <div class="share-permission"><label for="share-expiry">Expires</label><select id="share-expiry" class="field"><option value="1h">In 1 hour</option><option value="1d" selected>In 1 day</option><option value="7d">In 7 days</option><option value="never">Never</option></select></div>
+    <p id="share-expiry-note" class="note" hidden>No end time. It works only while OpenPaperDesign is running and awake on this computer.</p>
+    <label class="share-check"><input type="checkbox" id="share-protect" checked><span>Code protection<small>Guests need both the link and an access code.</small></span></label>
+    <fieldset class="share-reach"><legend>Share over</legend><label><input type="radio" name="share-reach" value="online" checked> Internet</label><label><input type="radio" name="share-reach" value="network"> Local network</label><label><input type="radio" name="share-reach" value="local"> This computer only</label></fieldset>
+    <div class="share-actions"><button type="submit" id="share-primary">Create invitation</button><button type="button" id="share-create-cancel" hidden>Cancel</button></div>
   </form>
-  <section id="share-agent-panel" hidden aria-label="Connect your agent"><h3>Open with your agent</h3><p>The recipient can open this invitation with the Paper plugin in Codex or Claude Code.</p><div class="share-actions"><a id="share-codex" class="share-link">Open in Codex</a><a id="share-claude" class="share-link">Open in Claude Code</a><button id="share-invite-copy" type="button">Copy invitation</button></div><details><summary>Manual MCP connection</summary><p>For other MCP clients. Keep the access key private.</p><button type="button" id="share-agent">Copy connection</button></details></section>
+  <section id="share-agent-panel" hidden aria-label="Open with an agent"><h3>Open with an agent</h3><p>The recipient can open this invitation with the Paper plugin in Codex or Claude Code. The access code is included in the message.</p><div class="share-actions"><a id="share-codex" class="share-link">Open in Codex</a><a id="share-claude" class="share-link">Open in Claude Code</a></div><details><summary>Manual MCP connection</summary><p>For other MCP clients. Keep the access key and code private.</p><button type="button" id="share-agent">Copy connection</button></details></section>
   <textarea class="field share-copy-fallback" aria-label="Copy this text" readonly hidden></textarea>
   <button type="button" id="share-stop" class="share-stop" hidden>Stop sharing this Paper</button>
 </dialog>
@@ -223,5 +224,5 @@
 <div id="toast" data-canvas-chrome role="status" hidden></div>
 <dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is saved with this Paper.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="paper-inspection-root"></div>
-<script type="module" src="app.js?v=01081115d3db"></script>
+<script type="module" src="app.js?v=f6209b84613c"></script>
 </body></html>

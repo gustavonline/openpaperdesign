@@ -106,3 +106,27 @@ export function textTarget(map,ids){
   }
   return null;
 }
+
+// Where the save/recovery status sits on the top row. Only bars it actually overlaps move it, and only far enough to clear
+// them; a long conflict or access-ended message with its recovery buttons always stays inside the viewport.
+// `box` is the status rect at the top row, `bars` the floating bars (null when absent), `view` the window size.
+export function statusSpot(box, bars, view, {top: start = 8, gap = 6, edge = 8} = {}) {
+  const height = box.bottom - box.top, left = box.left, right = box.right;
+  const overlaps = (bar, top) => bar && bar.right > bar.left && bar.bottom > bar.top && !(bar.right < left || bar.left > right || bar.bottom < top || bar.top > top + height);
+  let top = start;
+  for (let pass = 0; pass < bars.length + 1; pass++) {
+    const hit = bars.filter(bar => overlaps(bar, top));
+    if (!hit.length) break;
+    top = Math.max(...hit.map(bar => bar.bottom)) + gap;
+  }
+  return Math.round(Math.max(start, Math.min(top, view.height - height - edge)));
+}
+
+// Horizontal frame of that status: beside the open inspector or right corner bar when there is room for a readable message,
+// otherwise the whole window width (over the inspector if need be) so no recovery action starts or ends off screen.
+// `anchor` is the x the status should end at; `stageLeft` the left edge of the canvas area.
+export function statusFrame(anchor, stageLeft, view, {edge = 8, readable = 320} = {}) {
+  const room = Math.round(anchor - Math.max(0, stageLeft) - 2 * edge);
+  if (room >= Math.min(readable, view.width - 2 * edge)) return {right: Math.round(view.width - anchor + edge), maxWidth: room};
+  return {right: edge, maxWidth: view.width - 2 * edge};
+}
