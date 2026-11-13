@@ -13,6 +13,8 @@ import {resolveVariant, initialStates, timelineEnd, waapiFrames, easingCss} from
 const VIEWPORTS = [['auto', 'Fit window'], ['1440', 'Desktop · 1440'], ['390', 'Mobile · 390']];
 const make = (tag, props = {}) => { const node = document.createElement(tag); for (const [key, value] of Object.entries(props)) { if (key === 'text') node.textContent = value; else if (key === 'class') node.className = value; else if (key === 'aria-label' || key === 'aria-live' || key === 'aria-pressed' || key === 'role' || key === 'title' || key === 'type') node.setAttribute(key, value); else node[key] = value; } return node; };
 const ms = value => `${Math.round(value)} ms`;
+// The longest time a person can ask for by number: an hour is far past anything an authored loop needs to be inspected at.
+export const MAX_TIME_MS = 3600000;
 const frames = globalThis;
 
 // host: {container, scene, preview, pageId, cloneRoot(pageId, rootId) -> element|null (design size, layers keep data-node-key), onClose()}
@@ -22,16 +24,20 @@ export function createPlayer(host) {
   const system = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   let reduced = !!system?.matches, userChose = false, viewport = 'auto', playing = false, resumeAfter = false, visible = true, frame = 0, notice = '', noticeTimer = null, shown = null;
   let timeline = [], timelineMs = 0, scrolled = [], nodeMap = new Map(), forcedRoot = null;
+  // One shared clock drives every timeline animation. A loop never ends, so the clock is allowed to run past the first cycle; `ends` is when each finite
+  // animation is over and `loops` are the ones that repeat forever.
+  const ends = new Map(), loops = new Set(), keyed = new Map();
 
   // ---- The toolbar and the one scroll container. Everything here is created by Play and removed by Play.
   const root = host.container; root.replaceChildren(); root.hidden = false; root.setAttribute('role', 'region'); root.setAttribute('aria-label', 'Play preview');
   const back = make('button', {type: 'button', class: 'play-back', text: 'Back to Edit'}), pageSelect = make('select', {class: 'field', 'aria-label': 'Page'}), viewSelect = make('select', {class: 'field', 'aria-label': 'Viewport width'});
   const replay = make('button', {type: 'button', class: 'ibtn', 'aria-label': 'Replay from the start', title: 'Replay', text: '⟲'}), toggle = make('button', {type: 'button', class: 'play-toggle', text: 'Play'});
   const scrub = make('input', {type: 'range', class: 'play-scrub', min: '0', max: '1', step: '1', value: '0', 'aria-label': 'Time in milliseconds'}), readout = make('output', {class: 'play-time'});
+  const msInput = make('input', {type: 'number', class: 'field play-ms', min: '0', max: String(MAX_TIME_MS), step: '1', value: '0', title: 'Type a time in milliseconds and press Enter', 'aria-label': 'Set time in milliseconds (exact)'});
   const motion = make('button', {type: 'button', class: 'play-motion', 'aria-pressed': 'false', title: 'Show states without moving', text: 'Reduce motion'}), status = make('span', {class: 'play-status', role: 'status', 'aria-live': 'polite'});
   for (const [value, label] of VIEWPORTS) viewSelect.append(make('option', {value, text: label}));
   const bar = make('div', {class: 'play-bar', role: 'toolbar', 'aria-label': 'Play controls'});
-  bar.append(back, pageSelect, viewSelect, replay, toggle, scrub, readout, motion, status);
+  bar.append(back, pageSelect, viewSelect, replay, toggle, scrub, msInput, readout, motion, status);
   const scroller = make('div', {class: 'play-viewport', tabIndex: 0, role: 'region', 'aria-label': 'Preview, scrolls'}), scaler = make('div', {class: 'play-scaler'});
   scroller.append(scaler); root.append(bar, scroller);
 
@@ -46,7 +52,7 @@ export function createPlayer(host) {
 
   // ---- Building one variant
   function teardown() {
-    for (const entry of entries) entry.cancel(); entries.length = 0; timeline = []; scrolled = [];
+    for (const entry of entries) entry.cancel(); entries.length = 0; timeline = []; scrolled = []; ends.clear(); loops.clear(); keyed.clear();
     for (const undo of cleanups.splice(0)) undo();
     frames.cancelAnimationFrame?.(frame); frame = 0;
     for (const img of scaler.querySelectorAll?.('img') || []) img.removeAttribute('src');
@@ -59,9 +65,13 @@ export function createPlayer(host) {
     on(replay, 'click', () => { seek(0); resume(); });
     on(toggle, 'click', () => { if (playing) pause(); else resume(); });
     on(scrub, 'input', () => { const at = Number(scrub.value); pause(); seek(at); });
+    // The exact entry: Enter, leaving the field or the browser's own change commit it; anything that is not a plain whole or decimal number in range is refused.
+    bindKey(msInput, event => { if (event.key !== 'Enter') return false; event.preventDefault(); event.stopPropagation(); commitTime(); return true; });
+    on(msInput, 'change', () => commitTime());
+    on(msInput, 'blur', () => { if (msInput.value !== String(Math.round(time()))) commitTime(); });
     on(motion, 'click', () => { userChose = true; setReduced(!reduced); });
     // Escape closes; every other key stays inside Play, so the editor's own shortcuts never see it.
-    on(root, 'keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); host.onClose(); } else event.stopPropagation(); });
+    on(root, 'keydown', event => { key(event); });
     if (system?.addEventListener) { const change = () => { if (!userChose) setReduced(system.matches); }; system.addEventListener('change', change); cleanups.push(() => system.removeEventListener('change', change)); }
     const away = () => { if (document.hidden) { resumeAfter ||= playing; pause(true); } else if (resumeAfter) { resumeAfter = false; resume(); } };
     document.addEventListener('visibilitychange', away); cleanups.push(() => document.removeEventListener('visibilitychange', away));
@@ -106,7 +116,7 @@ export function createPlayer(host) {
     describe(); scroller.scrollTop = 0; updateScroll();
     if (keepTime !== null) seek(keepTime);
     applyMotionMode();
-    if (!reduced && autoplay) { setPlaying(true); for (const a of timeline) a.play(); } else { setPlaying(false); readTime(); }
+    if (!reduced && autoplay) { playTimeline(); setPlaying(true); } else { setPlaying(false); readTime(); }
   }
 
   // ---- Text states: a layer shows the text of the state it is in, else its own.
@@ -126,7 +136,7 @@ export function createPlayer(host) {
       const type = record.trigger.type, end = (record.delayMs || 0) + record.durationMs * (record.iterations === 'infinite' ? 1 : (record.iterations || 1));
       const snap = atEnd => { animation.pause(); animation.currentTime = atEnd ? end : 0; };
       const source = () => nodeMap.get(record.trigger.source ?? record.node) || target;
-      if (type === 'load') { timeline.push(animation); entry.rest = () => snap(record.iterations !== 'infinite'); }
+      if (type === 'load') { timeline.push(animation); ends.set(animation, end); if (record.iterations === 'infinite') loops.add(animation); entry.rest = () => snap(record.iterations !== 'infinite'); }
       else if (type === 'scroll-in') {
         entry.revealed = false; entry.rest = () => snap(entry.revealed);
         const reveal = () => { if (entry.revealed) return; entry.revealed = true; if (reduced) snap(true); else { animation.playbackRate = 1; animation.play(); } };
@@ -158,7 +168,7 @@ export function createPlayer(host) {
       target.tabIndex = 0; target.setAttribute('role', 'button'); target.setAttribute('aria-label', node?.name || 'Interactive layer'); target.style.cursor = 'pointer';
       const run = () => { for (const action of record.actions) { if (stopped) return; perform(action); } };
       on(target, 'click', event => { event.stopPropagation?.(); run(); });
-      on(target, 'keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); run(); } });
+      bindKey(target, event => { if (event.key !== 'Enter' && event.key !== ' ') return false; event.preventDefault(); event.stopPropagation(); run(); return true; });
     }
   }
   function perform(action) {
@@ -172,25 +182,58 @@ export function createPlayer(host) {
     applyTexts(); for (const entry of entries) entry.sync?.(true);
   }
 
-  // ---- The timeline: Play, pause, replay and a numeric seek, all on the same animations, so a given time always shows the same frame.
+  // ---- The timeline: Play, pause, replay and a numeric seek, all on one shared clock, so the time shown is the time of the frame on screen.
+  // While playing the clock is the browser's own. Pausing freezes every animation at that clock rounded to a whole millisecond, and seeking to a whole
+  // millisecond holds every animation there, so seeking the time that is shown reproduces the paused frame exactly, loops and all. Loops keep running
+  // past the first cycle, so the time may be larger than the timeline's length; nothing is clamped to it or restarted when playing resumes.
   function setPlaying(value) {
     playing = value; toggle.textContent = value ? 'Pause' : 'Play'; toggle.setAttribute('aria-pressed', String(value));
     if (value) { if (!frame) tick(); } else { frames.cancelAnimationFrame?.(frame); frame = 0; readTime(); }
   }
-  const time = () => timeline.length ? Number(timeline[0].currentTime) || 0 : 0;
-  function readTime() { const t = time(); scrub.value = String(Math.min(Number(scrub.max), Math.round(t))); readout.textContent = timelineMs ? `${ms(Math.min(t, timelineMs))} / ${ms(timelineMs)}` : ''; }
+  // The clock is read from a loop when there is one (it never finishes), else from the animation that ends last.
+  const master = () => timeline.find(a => loops.has(a)) || timeline.reduce((best, a) => !best || ends.get(a) > ends.get(best) ? a : best, null);
+  const time = () => { const m = master(); return m ? Number(m.currentTime) || 0 : 0; };
+  const ended = () => timeline.length > 0 && timeline.every(a => !loops.has(a) && Number(a.currentTime) >= ends.get(a));
+  const hold = at => { for (const a of timeline) { a.pause(); a.currentTime = at; } };
+  function readTime() {
+    const t = time(), whole = Math.round(t);
+    scrub.value = String(Math.min(Number(scrub.max), whole));
+    if (globalThis.document?.activeElement !== msInput) msInput.value = String(whole);
+    readout.textContent = !timelineMs ? '' : t > timelineMs ? `${whole} ms · loops run past ${Math.round(timelineMs)} ms` : `${whole} ms / ${Math.round(timelineMs)} ms`;
+  }
   function tick() {
     frame = 0;
     if (stopped || !playing || document.hidden || !visible) return;
-    readTime(); if (timeline.length && timeline.every(a => a.playState === 'finished')) { setPlaying(false); return; }
+    readTime(); if (ended()) { setPlaying(false); return; }
     frame = frames.requestAnimationFrame(tick);
   }
-  function seek(at) { const t = Math.max(0, Math.min(timelineMs, at)); for (const a of timeline) { a.pause(); a.currentTime = t; } scrub.value = String(Math.round(t)); readTime(); }
-  function pause(quiet = false) { for (const a of timeline) a.pause(); if (playing || !quiet) setPlaying(false); }
+  // Holds every timeline animation at one whole millisecond. With loops the limit is the numeric maximum; with finite animations only, the end of the timeline.
+  function seek(at) {
+    const cap = loops.size ? MAX_TIME_MS : timelineMs, t = Math.round(Math.max(0, Math.min(cap, Number.isFinite(at) ? at : 0)));
+    hold(t); readTime(); return t;
+  }
+  function pause(quiet = false) { if (timeline.length) hold(Math.round(time())); if (playing || !quiet) setPlaying(false); else readTime(); }
+  // Plays what still has something to play. A finite animation that is already over stays where it is: the browser would rewind it to its start, which would replay its entrance.
+  function playTimeline() { for (const a of timeline) if (loops.has(a) || (Number(a.currentTime) || 0) < ends.get(a)) a.play(); }
   function resume() {
     if (reduced) { say('Motion is reduced. Turn off Reduce motion to play it.'); applyMotionMode(); return; }
-    if (timeline.length && timeline.every(a => a.playState === 'finished')) seek(0);
-    for (const a of timeline) a.play(); setPlaying(true);
+    if (ended()) seek(0);
+    playTimeline(); setPlaying(true);
+  }
+  // The exact entry. Only a plain non-negative number up to MAX_TIME_MS is a time; anything else is refused and the field goes back to the time that is shown.
+  function commitTime() {
+    const raw = String(msInput.value).trim(), n = Number(raw);
+    if (!/^\d+(\.\d+)?$/.test(raw) || !Number.isFinite(n) || n > MAX_TIME_MS) { say(`Enter a time from 0 to ${MAX_TIME_MS} ms.`); msInput.value = String(Math.round(time())); return false; }
+    pause(); const t = seek(n); msInput.value = String(t);
+    if (t !== Math.round(n)) say(`The timeline ends at ${t} ms.`);
+    return true;
+  }
+  // Keys inside Play. The editor's capture-phase guard hands every key to key(), so Play's own handlers still work while no other part of the page sees it.
+  function bindKey(el, handler) { keyed.set(el, handler); on(el, 'keydown', event => { handler(event); }); }
+  function key(event) {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); host.onClose(); return true; }
+    for (let n = event.target; n && n !== root; n = n.parentNode) { const handler = keyed.get(n); if (handler?.(event)) return true; }
+    event.stopPropagation(); return false;
   }
   function applyMotionMode() {
     motion.setAttribute('aria-pressed', String(reduced)); root.classList.toggle('play-reduced', reduced); root.dataset.playReduced = String(reduced);
@@ -223,9 +266,9 @@ export function createPlayer(host) {
   }
   build();
   return {
-    update, destroy, go, seek, pause, resume, setState, setReduced,
+    update, destroy, go, seek, pause, resume, setState, setReduced, key,
     setViewport(value) { viewport = value; build(); },
-    get snapshot() { return {pageId, shown: shown && {...shown}, time: time(), playing, reduced, states: Object.fromEntries(states), scrollTop: scroller.scrollTop, timelineMs, animations: entries.length}; },
+    get snapshot() { return {pageId, shown: shown && {...shown}, time: time(), loops: loops.size > 0, playing, reduced, states: Object.fromEntries(states), scrollTop: scroller.scrollTop, timelineMs, animations: entries.length}; },
     focus() { back.focus?.(); },
   };
 }

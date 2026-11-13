@@ -3,6 +3,7 @@
 // happens when Play is hidden, offscreen, updated or closed, and that nothing is left behind. Real browser rendering is not claimed here.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {promises as fs} from 'node:fs';
 import {createPlayer} from '../runtime/play.js';
 import {syntheticLanding, addMotion} from './fixtures/motion-landing.mjs';
 
@@ -25,7 +26,7 @@ class El {
   animate(frames, options) { const a = {frames, options, currentTime: null, playbackRate: 1, running: false, cancelled: false, plays: 0, target: this,
     get end() { return options.iterations === Infinity ? Infinity : options.delay + options.duration * options.iterations; },
     get playState() { return a.running ? 'running' : (a.playbackRate > 0 && a.currentTime >= a.end ? 'finished' : 'paused'); },
-    pause() { a.running = false; }, play() { a.plays++; a.running = true; }, cancel() { a.cancelled = true; a.running = false; }}; this.env.animations.push(a); return a; }
+    pause() { a.running = false; }, play() { a.plays++; if (a.playbackRate > 0 && a.currentTime >= a.end) a.currentTime = 0; /* the browser's own auto-rewind of a finished animation */ a.running = true; }, cancel() { a.cancelled = true; a.running = false; }}; this.env.animations.push(a); return a; }
 }
 const ORIGINAL = {document: globalThis.document, window: globalThis.window, IntersectionObserver: globalThis.IntersectionObserver, requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame};
 function environment(t, {width = 1440, reduced = false} = {}) {
@@ -51,7 +52,7 @@ function mount(t, {scene = addMotion(syntheticLanding()), width = 1440, reduced 
   const env = environment(t, {width, reduced}), container = new El('div', env), closed = [];
   const cloneRoot = (pid, rootId) => { const page = scene.pages.find(p => p.id === pid), node = page.nodes.find(n => n.id === rootId); const build = (n, isRoot) => { const el = new El('div', env); if (!isRoot) el.dataset.nodeKey = `${pid}:${n.id}`; el.dataset.board = 'editor-only'; if (n.type === 'text') el._text = n.text; for (const c of n.children || []) el.append(build(page.nodes.find(x => x.id === c), false)); el.node = n; return el; }; return build(node, true); };
   const raw = createPlayer({container, scene, preview: scene.preview, pageId: pageId || scene.pages[0].id, cloneRoot, onClose: () => closed.push(1)});
-  const player = Object.create(null); for (const name of ['update', 'destroy', 'go', 'seek', 'pause', 'resume', 'setState', 'setReduced', 'setViewport']) player[name] = (...args) => { env.use(); return raw[name](...args); }; Object.defineProperty(player, 'snapshot', {get: () => raw.snapshot});
+  const player = Object.create(null); for (const name of ['update', 'destroy', 'go', 'seek', 'pause', 'resume', 'setState', 'setReduced', 'setViewport', 'key']) player[name] = (...args) => { env.use(); return raw[name](...args); }; Object.defineProperty(player, 'snapshot', {get: () => raw.snapshot});
   t.after(() => player.destroy());
   const attached = el => { for (let n = el; n; n = n.parentNode) if (n === container) return true; return false; };
   const byNode = id => env.elements.find(e => e.dataset.playNode === String(id) && attached(e)), named = (name, page = scene.pages[0]) => page.nodes.find(n => n.name === name).id;
@@ -91,7 +92,7 @@ test('load animations are the browser’s own, paused at their first frame until
   env.advance(400); assert.equal(headline.currentTime, 400); m.player.pause(); env.advance(1000); assert.equal(headline.currentTime, 400, 'paused means paused');
   for (const ms of [0, 250, 1000, 250, 0]) { m.player.seek(ms); for (const a of env.animations.filter(a => !a.cancelled && a.target.dataset.playNode && a.options.iterations !== 1 || a === headline)) { if (!a.frames.some(f => f.offset !== undefined)) continue; } assert.equal(headline.currentTime, ms, `at ${ms} ms`); assert.equal(headline.running, false); }
   m.player.seek(250); const first = env.animations.filter(a => !a.cancelled).map(a => a.currentTime); m.player.seek(900); m.player.seek(250); assert.deepEqual(env.animations.filter(a => !a.cancelled).map(a => a.currentTime), first, 'the same time is the same frame every time');
-  m.player.seek(99999); assert.equal(headline.currentTime, m.player.snapshot.timelineMs, 'a seek past the end stops at the end');
+  m.player.seek(99999); assert.equal(headline.currentTime, 99999, 'with loops running, the time asked for is the time held (the finished entrance simply shows its last frame)'); assert.equal(m.player.snapshot.time, 99999);
   const scrub = env.elements.find(e => e.className === 'play-scrub'); assert.equal(scrub.max, String(Math.round(m.player.snapshot.timelineMs))); m.player.seek(0); scrub.value = '300'; scrub.fire('input'); assert.equal(headline.currentTime, 300, 'the scrubber seeks in milliseconds'); assert.equal(m.player.snapshot.playing, false, 'dragging it pauses');
   m.button('Play').fire('click'); assert.equal(m.player.snapshot.playing, true); m.button('Pause').fire('click'); assert.equal(m.player.snapshot.playing, false);
   const replay = env.elements.find(e => e.attrs['aria-label'] === 'Replay from the start'); env.advance(0); m.player.seek(700); replay.fire('click'); assert.equal(headline.currentTime, 0); assert.equal(m.player.snapshot.playing, true);
@@ -191,4 +192,113 @@ test('the Paper’s strings only ever become text; Escape closes Play; other key
   const stopped = []; m.container.fire('keydown', {key: 'a', stopPropagation() { stopped.push('a'); }}); assert.deepEqual(stopped, ['a'], 'ordinary keys never reach the editor'); m.container.fire('keydown', {key: 'Escape', stopPropagation() { stopped.push('esc'); }}); assert.deepEqual(m.closed, [1]); m.button('Back to Edit').fire('click'); assert.equal(m.closed.length, 2);
   const plain = syntheticLanding(), p = mount(t, {scene: plain}); assert.equal(p.container.dataset.playRoot, String(p.named('Landing · desktop'))); assert.equal(p.live().length, 0); assert.equal(p.player.snapshot.timelineMs, 0); assert.ok(p.container.children.length === 2, 'a toolbar and a scroll container');
   const empty = {...syntheticLanding(), pages: [{id: 'blank0000000001', name: 'Blank', next_id: 1, root: [], nodes: []}]}; const e = mount(t, {scene: empty}); assert.match(e.env.elements.find(x => x.className === 'play-status').textContent, /nothing to play/);
+});
+
+// ---- The clock with loops (the lead's actual Firefox defect): the displayed time and the frame on screen must be the same time.
+const msField = m => m.env.elements.find(e => e.attrs['aria-label'] === 'Set time in milliseconds (exact)');
+const loopsOf = m => m.live().filter(a => a.options.iterations === Infinity);
+const entrances = m => ['D eyebrow', 'D hero headline', 'D hero description', 'D primary CTA'].map(name => m.animationsFor(m.named(name)).find(a => a.frames[0].opacity === '0'));
+const frameOf = a => JSON.stringify([a.currentTime, a.running]);
+
+test('the time shown while loops run past the timeline is the real clock: paused, it is a whole millisecond that every animation shares', t => {
+  const m = mount(t), orb = loopsOf(m)[0], headline = m.animationsFor(m.named('D hero headline'))[0];
+  assert.ok(loopsOf(m).length >= 2 && m.player.snapshot.loops); assert.equal(m.player.snapshot.timelineMs, 7000, 'a loop counts as one cycle');
+  m.env.advance(7394.04); const readout = m.find('play-time', 'output'); m.env.runFrame();
+  assert.match(readout.textContent, /^7394 ms · loops run past 7000 ms$/, 'not clamped to 7000');
+  m.player.pause();
+  assert.equal(orb.currentTime, 7394, 'frozen at a whole millisecond'); assert.equal(m.player.snapshot.time, 7394); assert.equal(msField(m).value, '7394'); assert.match(readout.textContent, /^7394 ms/);
+  assert.ok(loopsOf(m).every(a => a.currentTime === 7394), 'every loop shares the clock'); assert.equal(headline.currentTime, 7394, 'an entrance that finished long ago holds the same clock and shows its last frame');
+  // Seeking the time that is shown reproduces the frozen frame exactly, for every animation, running state included.
+  const before = m.live().map(frameOf); m.player.seek(m.player.snapshot.time); assert.deepEqual(m.live().map(frameOf), before, 'seeking the displayed time is the same frame');
+  m.player.seek(0); m.player.seek(7394); assert.deepEqual(m.live().map(frameOf), before, 'Home then the same time is the same frame');
+});
+
+test('End then Play then Pause keeps the entrance as it was and the loops running from where they were: the reported 350 ms case', t => {
+  const m = mount(t), {env} = m, orb = loopsOf(m)[0], headline = m.animationsFor(m.named('D hero headline'))[0];
+  m.player.pause(); m.player.seek(7000); assert.equal(orb.currentTime, 7000); assert.equal(headline.currentTime, 7000);
+  const entrancePlays = entrances(m).map(a => a.plays), loopPlays = loopsOf(m).map(a => a.plays); assert.equal(entrancePlays.length, 4); assert.ok(entrances(m).every(Boolean));
+  m.button('Play').fire('click'); assert.equal(m.player.snapshot.playing, true);
+  assert.deepEqual(entrances(m).map(a => a.plays), entrancePlays, 'an entrance that is over is not replayed (the browser would have rewound it)'); assert.ok(entrances(m).every(a => a.currentTime >= a.end), 'and it still shows its last frame');
+  assert.deepEqual(loopsOf(m).map(a => a.plays), loopPlays.map(n => n + 1), 'the loops play on from where they were');
+  env.advance(350); assert.equal(orb.currentTime, 7350, 'the loop moved 350 ms from 7000');
+  m.button('Pause').fire('click'); assert.equal(m.player.snapshot.playing, false); assert.equal(orb.currentTime, 7350); assert.match(m.find('play-time', 'output').textContent, /^7350 ms/);
+  const frozen = m.live().map(frameOf); m.player.seek(0); m.player.seek(7000); assert.equal(orb.currentTime, 7000); m.player.seek(7350); assert.deepEqual(m.live().map(frameOf), frozen, 'the displayed time reproduces the paused frame');
+  // A long run reports the same honest time.
+  m.button('Play').fire('click'); env.advance(636580.78); m.button('Pause').fire('click'); const long = Math.round(7350 + 636580.78);
+  assert.equal(orb.currentTime, long); assert.equal(m.player.snapshot.time, long); const frame = m.live().map(frameOf); m.player.seek(long); assert.deepEqual(m.live().map(frameOf), frame);
+  assert.equal(env.frames.size, 0, 'no frame loop while paused');
+});
+
+test('every loop phase is reproduced by number, not just the first one: delays, alternating directions and different cycle lengths', t => {
+  const scene = addMotion(syntheticLanding()), pid = scene.pages[0].id, id = scene.pages[0].nodes.find(n => n.name === 'D eyebrow').id;
+  scene.preview.animations.push({id: 'swing', page: pid, node: id, trigger: {type: 'load'}, keyframes: [{rotate: 0}, {rotate: 20}], durationMs: 1300, delayMs: 250, iterations: 'infinite', direction: 'alternate', easing: 'ease-in-out'}, {id: 'pulse', page: pid, node: id, trigger: {type: 'load'}, keyframes: [{scale: 1}, {scale: 1.1}], durationMs: 777, iterations: 'infinite'});
+  const m = mount(t, {scene}), {env} = m; env.advance(12345.6); m.player.pause();
+  const snap = m.live().map(frameOf), clock = m.player.snapshot.time; assert.equal(clock, 12346); assert.ok(loopsOf(m).length >= 4);
+  for (const probe of [0, 5000, 7000, 99999]) { m.player.seek(probe); assert.ok(loopsOf(m).every(a => a.currentTime === probe), `all ${loopsOf(m).length} loops at ${probe}`); }
+  m.player.seek(clock); assert.deepEqual(m.live().map(frameOf), snap, 'every loop phase, delayed and alternating ones included, is back exactly');
+});
+
+test('the exact time entry validates, is bounded, and works by Enter, change and leaving the field; invalid text never seeks', t => {
+  const m = mount(t), field = msField(m), orb = loopsOf(m)[0], status = () => m.find('play-status').textContent;
+  assert.equal(field.attrs.type, 'number'); assert.equal(field.min, '0'); assert.equal(field.max, '3600000'); assert.equal(field.step, '1'); assert.equal(field.attrs['aria-label'], 'Set time in milliseconds (exact)'); assert.ok(field.attrs.title.includes('Enter'), 'an accessible hint');
+  assert.equal(m.find('play-scrub').attrs['aria-label'], 'Time in milliseconds', 'the slider keeps its own label');
+  // Change commits: pauses, holds every animation at that millisecond.
+  field.value = '12345'; field.fire('change'); assert.equal(m.player.snapshot.playing, false); assert.equal(orb.currentTime, 12345); assert.equal(m.player.snapshot.time, 12345); assert.equal(field.value, '12345');
+  // Enter commits, through the editor's guard path (Play.key) as well as on the field itself.
+  field.value = '2500'; let prevented = 0; m.player.key({key: 'Enter', target: field, preventDefault() { prevented++; }, stopPropagation() {}}); assert.equal(orb.currentTime, 2500); assert.equal(prevented, 1);
+  field.value = '1800'; field.fire('keydown', {key: 'Enter'}); assert.equal(orb.currentTime, 1800); field.value = '900'; field.fire('keydown', {key: 'a'}); assert.equal(orb.currentTime, 1800, 'other keys do nothing');
+  // Leaving the field with an edited value commits it; leaving it untouched does not seek.
+  field.value = '4321'; field.fire('blur'); assert.equal(orb.currentTime, 4321); const plays = orb.plays; field.fire('blur'); assert.equal(orb.currentTime, 4321); assert.equal(orb.plays, plays);
+  // Decimals round to a whole millisecond; the maximum is allowed.
+  field.value = '7394.6'; field.fire('change'); assert.equal(orb.currentTime, 7395); field.value = '3600000'; field.fire('change'); assert.equal(orb.currentTime, 3600000); field.value = '0'; field.fire('change'); assert.equal(orb.currentTime, 0);
+  // Anything else is refused with a sentence, the frame does not move, and the field returns to the time that is shown.
+  field.value = '1234'; field.fire('change');
+  for (const bad of ['', ' ', 'abc', '-5', '1e3', '12 34', '3600001', '99999999999999999999', 'Infinity', 'NaN', '0x10', '+5', '5,5']) { field.value = bad; field.fire('change'); assert.equal(orb.currentTime, 1234, `“${bad}” is refused`); assert.equal(field.value, '1234'); assert.match(status(), /Enter a time from 0 to 3600000 ms\./); }
+  // With no loops the time stops at the end of the timeline, and it says so.
+  const scene = addMotion(syntheticLanding()); scene.preview.animations = scene.preview.animations.filter(a => a.iterations !== 'infinite');
+  const finite = mount(t, {scene}), box = msField(finite); box.value = '99999'; box.fire('change');
+  assert.equal(finite.player.snapshot.time, finite.player.snapshot.timelineMs); assert.equal(box.value, String(finite.player.snapshot.timelineMs)); assert.match(finite.find('play-status').textContent, /The timeline ends at \d+ ms\./);
+});
+
+test('Replay restarts every phase from zero and plays; the loops then keep running past the first cycle', t => {
+  const m = mount(t), {env} = m, orb = loopsOf(m)[0]; env.advance(9000); m.player.pause(); assert.equal(orb.currentTime, 9000);
+  const replay = env.elements.find(e => e.attrs['aria-label'] === 'Replay from the start'); replay.fire('click');
+  assert.equal(m.player.snapshot.playing, true); assert.equal(orb.currentTime, 0); assert.equal(orb.running, true);
+  env.advance(8000); assert.equal(orb.currentTime, 8000, 'the loop is still running past the first cycle'); assert.equal(orb.running, true, 'and does not stop at 7000 ms');
+  m.player.pause(); assert.equal(orb.currentTime, 8000);
+});
+
+test('a new revision keeps the clock the person was looking at: the same time, the same frame, no replayed entrances; and it never writes into the Paper', t => {
+  const scene = addMotion(syntheticLanding()), before = JSON.stringify(scene), m = mount(t, {scene}), {env} = m; env.advance(9000); m.player.pause(); const time = m.player.snapshot.time;
+  const next = addMotion(syntheticLanding()); next.pages[0].nodes.find(n => n.name === 'D hero headline').text = 'Changed copy'; const nextBefore = JSON.stringify(next);
+  m.player.update(next, next.preview); assert.equal(m.player.snapshot.time, time, 'the displayed time survives the rebuild'); assert.equal(m.player.snapshot.playing, false); assert.ok(loopsOf(m).every(a => a.currentTime === time), 'the new loops are at the same phase');
+  assert.ok(m.live().every(a => a.running === false));
+  // Playing, a rebuild plays on from there; entrances that are over are not replayed.
+  m.button('Play').fire('click'); env.advance(500); const clock = m.player.snapshot.time; assert.equal(clock, time + 500);
+  const again = addMotion(syntheticLanding()); m.player.update(again, again.preview);
+  assert.equal(m.player.snapshot.playing, true); assert.equal(m.player.snapshot.time, clock); assert.ok(entrances(m).every(a => a.plays === 0 && a.currentTime >= a.end), 'no entrance is replayed by the rebuild'); assert.ok(loopsOf(m).every(a => a.running));
+  assert.equal(JSON.stringify(scene), before, 'the Paper Play was given is unchanged'); assert.equal(JSON.stringify(next), nextBefore);
+  // The new Paper loses its loops: the time is held at the end of what is left, honestly.
+  const calm = addMotion(syntheticLanding()); calm.preview.animations = calm.preview.animations.filter(a => a.iterations !== 'infinite'); m.player.pause(); m.player.update(calm, calm.preview);
+  assert.equal(m.player.snapshot.time, m.player.snapshot.timelineMs); assert.equal(m.player.snapshot.loops, false);
+});
+
+test('hidden, offscreen and reduced motion: pausing keeps a whole-millisecond clock, nothing runs, and resuming continues from it', t => {
+  const m = mount(t), {env} = m, orb = loopsOf(m)[0]; env.advance(8123.4); env.hide(true);
+  assert.equal(m.player.snapshot.playing, false); assert.equal(orb.currentTime, 8123); assert.equal(env.frames.size, 0); env.advance(5000); assert.equal(orb.currentTime, 8123);
+  env.hide(false); assert.equal(m.player.snapshot.playing, true); assert.equal(orb.currentTime, 8123, 'continues from the same time'); env.advance(100); assert.equal(orb.currentTime, 8223);
+  m.player.setReduced(true); assert.equal(m.player.snapshot.playing, false); assert.equal(env.animations.filter(a => a.running).length, 0, 'reduced: nothing runs'); assert.equal(env.frames.size, 0);
+  const field = msField(m); field.value = '5000'; field.fire('change'); assert.equal(loopsOf(m)[0].currentTime, 5000, 'a number can still be inspected under reduced motion'); assert.equal(m.player.snapshot.playing, false);
+});
+
+test('the key guard hands Play its own keys and keeps everything else out: Escape closes, Enter/Space reach layers and the time field, the rest stays inside', async t => {
+  const m = mount(t), together = m.byNode(m.named('D Together toggle')), title = m.byNode(m.named('D state title')), field = msField(m), events = [];
+  const press = (target, key) => { const e = {key, target, preventDefault() { events.push('prevent:' + key); }, stopPropagation() { events.push('stop:' + key); }}; return m.player.key(e); };
+  assert.equal(press(together, 'Enter'), true); assert.equal(title.textContent, 'Better, together.'); assert.ok(events.includes('prevent:Enter')); press(m.byNode(m.named('D Solo toggle')), ' '); assert.equal(title.textContent, 'A clear starting point.');
+  events.length = 0; assert.equal(press(together, 'a'), false); assert.deepEqual(events, ['stop:a'], 'an ordinary key is neither handled nor allowed out');
+  field.value = '3000'; assert.equal(press(field, 'Enter'), true); assert.equal(loopsOf(m)[0].currentTime, 3000);
+  events.length = 0; press(field, 'ArrowUp'); assert.ok(!events.includes('prevent:ArrowUp'), 'arrow keys keep their default effect in the field');
+  press(together, 'Escape'); assert.deepEqual(m.closed, [1]);
+  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
+  assert.match(app, /window\.addEventListener\('keydown', e => \{ if \(!playOpen\) return; if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); closePlay\(\); \} else player\?\.key\(e\); e\.stopImmediatePropagation\(\); \}, true\);/, 'the guard calls Play first and then blocks every other listener, native toolbar included');
 });

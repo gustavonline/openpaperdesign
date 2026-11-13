@@ -21,7 +21,7 @@ test('Play is its own full-window preview: it never touches the camera, selectio
   // The clone carries no editor state, and the editor's keys are not live while Play is open.
   assert.match(slice(app, 'function playClone(', 'function openPlay()'), /removeAttribute\('contenteditable'\)[\s\S]*attr\.name !== 'data-node-key'/);
   assert.ok(slice(app, 'function onKey(e) {', 'const mod =').includes('if (playOpen) return;'), 'the shortcut handler stands down'); assert.equal((app.match(/playOpen \|\| !inspector/g) || []).length, 2, 'and so do both capture handlers');
-  assert.match(app, /window\.addEventListener\('keydown', e => \{ if \(!playOpen\) return; if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); closePlay\(\); \} e\.stopImmediatePropagation\(\); \}, true\);/, 'no other listener, native toolbar included, sees a key while Play is open');
+  assert.match(app, /window\.addEventListener\('keydown', e => \{ if \(!playOpen\) return; if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); closePlay\(\); \} else player\?\.key\(e\); e\.stopImmediatePropagation\(\); \}, true\);/, 'Play gets its own keys first, then no other listener, native toolbar included, sees a key while Play is open');
   // Same revision, revoke and teardown all reach Play.
   assert.match(app, /updateHistory\(\); refreshPlay\(\);/, 'a new revision updates Play'); assert.match(app, /function revoked\(reason\)\{\s*closePlay\(\); playButton\.disabled = true;/, 'an ended invitation closes Play at once and disables it'); assert.match(app, /onSurfaceDispose\(\(\) => \{ player\?\.destroy\(\); player = null; playOpen = false; \}\)/);
   assert.match(app, /import \{ createPlayer \} from '\.\/play\.js\?v=[a-f0-9]+';/); assert.match(app, /from '\.\/preview-model\.js\?v=[a-f0-9]+'/);

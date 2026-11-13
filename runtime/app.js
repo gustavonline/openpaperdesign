@@ -3,7 +3,7 @@ import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLea
 import {setupPresence} from './presence.js?v=ad47b40267f6';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
-import { createPlayer } from './play.js?v=e2d5b20465b4';
+import { createPlayer } from './play.js?v=ed519a8a6c64';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
@@ -1299,8 +1299,9 @@ function closePlay() {
 // The same authorized revision arrives while Play is open: Play rebuilds from it, keeping Page, scroll place, still-valid states and time.
 function refreshPlay() { if (!player) return; const { preview, problem } = playablePreview(); player.update(scene, preview); if (problem) message(`${problem} Playing without motion.`); }
 // While Play is open no other part of the page sees a key: not the editor, and not the native toolbar's own shortcuts either (this runs before they are
-// installed). Escape closes Play; every other key keeps its ordinary effect inside Play, because only propagation is stopped, never the default action.
-window.addEventListener('keydown', e => { if (!playOpen) return; if (e.key === 'Escape') { e.preventDefault(); closePlay(); } e.stopImmediatePropagation(); }, true);
+// installed). Escape closes Play. Play's own controls still work: the guard hands the key to Play (Enter in the time field, Enter or Space on an
+// interactive layer) and then stops it, and every other key keeps its ordinary default effect (typing, arrows, Tab), because only propagation is stopped.
+window.addEventListener('keydown', e => { if (!playOpen) return; if (e.key === 'Escape') { e.preventDefault(); closePlay(); } else player?.key(e); e.stopImmediatePropagation(); }, true);
 playButton.addEventListener('click', () => { if (playOpen) closePlay(); else openPlay(); });
 onSurfaceDispose(() => { player?.destroy(); player = null; playOpen = false; });
 
