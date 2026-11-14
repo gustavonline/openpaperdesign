@@ -5,7 +5,10 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomBytes, createHash, timingSafeEqual} from 'node:crypto';
 import {PaperError, ID, MAX_PAPER_BYTES, imageBytes} from './library.mjs';
-import {json, readBody, staticFile} from './http.mjs';
+import {attachResource, readResource, downloadHeaders} from './handoff.mjs';
+import {TIMING} from './transfer.mjs';
+import {HANDOFF_LIMITS, handoffSummary} from '../runtime/handoff-model.js';
+import {json, readBody, bodyDeadline, staticFile} from './http.mjs';
 import {complete, protocolError} from './mcp.mjs';
 import {hasCloudflared,quickTunnel} from './tunnel.mjs';
 import {CODE_ALPHABET,CODE_LENGTH,normalizeCode,validCode,formatCode} from '../runtime/access-code.js';
@@ -27,8 +30,11 @@ const networkAddress=()=>Object.entries(os.networkInterfaces()).filter(([name])=
 
 // One optional, scoped listener in the owner's process. Owner routes are never mounted here.
 // Keys and sessions live only in memory: stopping the process revokes every invitation.
-export function createSharing({library,editor,presence,publicUrl,port=0,now=Date.now,tunnelFactory=quickTunnel,probeFetch=fetch}) {
-  const listeners=new Map(),starting=new Map(),lifetime=new AbortController();let timer,tunnelStopTimer,closed=false;
+export function createSharing({library,editor,presence,publicUrl,port=0,now=Date.now,tunnelFactory=quickTunnel,probeFetch=fetch,startupMs=120000,pollMs=200}) {
+  // Internet sharing starts a tunnel, which takes real time. Each invitation that has to wait for it is an attempt with its own identity, deadline and
+  // abort, so a cancelled, timed-out or late start never leaves an invitation, a listener or a tunnel behind. The listener start itself is shared
+  // per mode and is aborted only when nobody is waiting for it any more.
+  const listeners=new Map(),starts=new Map(),attempts=new Map(),failures=new Map(),lifetime=new AbortController();let timer,tunnelStopTimer,closed=false;
   if(publicUrl){const u=new URL(publicUrl);if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash||u.pathname!=='/')throw new PaperError(400,'Share URL must be an HTTPS origin');publicUrl=u.origin;}
   const grants=new Map(),byHash=new Map(),sessions=new Map(),streams=new Set(),ended=new Map();
   const modeOf=grant=>grant.internet?'internet':grant.network?'network':'local';
@@ -37,7 +43,9 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
   const valid=grant=>grant&&grants.get(grant.id)===grant&&live(grant);
   const forPaper=id=>[...grants.values()].filter(g=>g.paperId===id&&valid(g));
   const END={expired:'This invitation expired. Ask the owner for a new link.',revoked:'The owner stopped this invitation. Ask for a new link.'};
-  const gone=()=>new PaperError(401,'This invitation has expired or was stopped. Ask the owner for a new link.');
+  const gone=()=>new PaperError(401,'This invitation is not available: it may have expired or been stopped, or the key may be incomplete or wrong. Ask the owner for a new link, and check you have the whole link.');
+  // A request that presented no key at all says nothing about the invitation: it is not expired or stopped, it simply was not given its key.
+  const noKey=()=>new PaperError(401,'No invitation key was sent with this request, so no invitation was checked. The key is the part of the invitation link after #, and a code may also be needed. How to connect (browser, plugin, or a manual client): /agent.md.',{reason:'no-key'});
   // A wrong code is counted per invitation, across every guest. While the budget is spent every
   // attempt is refused, so a right guess is not an oracle. Checking and counting never await.
   function checkCode(grant,supplied){
@@ -74,13 +82,14 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
         if(reason)throw new PaperError(401,END[reason],{reason});
       }
     }
+    if(!auth&&(bearerOnly||cookieJar(req,listener).size===0))throw noKey();
     throw gone();
   }
   // The reason survives into the lock rechecks: a grant that expired while its save waited says expired, not stopped.
   function writable(grant){if(!valid(grant)){const reason=grant.ended||(live(grant)?'revoked':'expired');throw new PaperError(401,END[reason],{reason});}if(grant.role!=='edit')throw new PaperError(403,'This invitation is view-only');}
   function budget(grant){writable(grant);const recent=grant.writes.filter(t=>t>now()-60000);if(recent.length>=30)throw new PaperError(429,'Too many saves. Wait a minute, then retry.');recent.push(now());grant.writes=recent;}
   const clientFor=(grant,req)=>{const prefix=`g-${grant.id}-`,id=CLIENT(req);return prefix+(id.startsWith(prefix)?id.slice(prefix.length):id).slice(0,50);};
-  function scoped(grant,url){const ids=url.searchParams.getAll('paper'),invites=url.searchParams.getAll('invite');if(ids.length!==1||ids[0]!==grant.paperId||[...url.searchParams.keys()].some(k=>k!=='paper'&&k!=='invite')||invites.length>1||invites.length&&invites[0]!==grant.id)throw new PaperError(403,'This invitation opens one Paper only');}
+  function scoped(grant,url,extra=[]){const ids=url.searchParams.getAll('paper'),invites=url.searchParams.getAll('invite');if(ids.length!==1||ids[0]!==grant.paperId||[...url.searchParams.keys()].some(k=>k!=='paper'&&k!=='invite'&&!extra.includes(k))||extra.some(k=>url.searchParams.getAll(k).length>1)||invites.length>1||invites.length&&invites[0]!==grant.id)throw new PaperError(403,'This invitation opens one Paper only');}
   // Sessions of an ended invitation are remembered (hash only) so a guest is told whether it expired or was stopped.
   function revoke(id,reason=null){const grant=grants.get(id);if(!grant)return;reason??=live(grant)?'revoked':'expired';grant.ended=reason;grants.delete(id);byHash.delete(digest(grant.token));
     presence?.removeScope(grant.id);
@@ -97,7 +106,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
     const protocol=req.headers['mcp-protocol-version'],invalid=protocolError(request,protocol);if(invalid)return json(res,400,{jsonrpc:'2.0',id:request.id??null,error:invalid});
     if(request.id===undefined){res.writeHead(202);res.end();return;}
     const schema=(name,description,properties={},required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false}});
-    const tools=[schema('paper_read','Read this invited Paper and its revisions. includePaper returns the full editable JSON.',{includePaper:{type:'boolean'}})];
+    const tools=[schema('paper_read','Read this invited Paper and its revisions. includePaper returns the full editable JSON; fullDesign returns DESIGN.md untruncated. A handoff summary is included when the author attached one.',{includePaper:{type:'boolean'},fullDesign:{type:'boolean'}})];
     tools.push(schema('paper_read_feedback','Read this Paper’s saved feedback and its independent revision.'));
     if(grant.role==='edit')tools.push(
       schema('paper_save','Save this Paper with its read revision; conflicts are refused.',{paper:{type:'object'},revision:{type:'string'}},['paper','revision']),
@@ -118,7 +127,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
         let value;
         if(name==='paper_activity'){if(typeof args.status!=='string')throw new PaperError(400,'Supply a status');value={agent:presence.activity(grant.paperId,grant.id,who,{status:args.status,pageId:args.pageId??null,nodeId:args.nodeId??null,rect:args.rect??null})};}
         else
-        if(name==='paper_read'){const data=await library.read(grant.paperId),allNotes=await library.notes(grant.paperId),notes={'DESIGN.md':allNotes['DESIGN.md']};value={paperId:grant.paperId,name:data.paper.name,revision:data.revision,role:grant.role,notes:Object.fromEntries(Object.entries(notes).map(([k,v])=>[k,{...v,text:v.text.slice(0,8000),truncated:v.text.length>8000}])),...(args.includePaper?{paper:data.paper}:{pages:data.paper.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length}))})};}
+        if(name==='paper_read'){const data=await library.read(grant.paperId),allNotes=await library.notes(grant.paperId),notes={'DESIGN.md':allNotes['DESIGN.md']};value={paperId:grant.paperId,name:data.paper.name,revision:data.revision,role:grant.role,...(data.paper.handoff?{handoff:handoffSummary(data.paper.handoff)}:{}),notes:Object.fromEntries(Object.entries(notes).map(([k,v])=>[k,args.fullDesign?{...v,truncated:false}:{...v,text:v.text.slice(0,8000),truncated:v.text.length>8000}])),...(args.includePaper?{paper:data.paper}:{pages:data.paper.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length}))})};}
         else if(name==='paper_read_feedback')value=await library.read(grant.paperId,'feedback');
         else if(name==='paper_add_asset'){budget(grant);value=await library.addAsset(grant.paperId,imageBytes(args.base64),()=>writable(grant));}
         else {budget(grant);const feedback=name==='paper_save_feedback',bytes=Buffer.from(JSON.stringify(feedback?args.workspace:args.paper));if(bytes.length>GUEST_BYTES)throw new PaperError(413,'Shared Papers must fit within 5 MB');value=await library.save(grant.paperId,bytes,args.revision,feedback?'feedback':'paper',peer?.id||`g-${grant.id}-agent`,()=>writable(grant));}
@@ -138,7 +147,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
       if(req.headers.origin&&req.headers.origin!==requestOrigin)throw new PaperError(403,'Invalid origin');
       if(pathname==='/api/health'&&req.method==='GET')return json(res,200,{paperShare:listener.health});
       if(pathname==='/mcp')return await mcp(req,res,url,listener);
-      if(pathname==='/join'||(pathname==='/'&&!url.search))return editor.serve(req,res,'join.html');
+      if(pathname==='/join'||(pathname==='/'&&!url.search)){res.setHeader('Link','</agent.md>; rel="help"; type="text/markdown", </agent.json>; rel="describedby"; type="application/json"');return editor.serve(req,res,'join.html');}
       if(pathname==='/api/join'&&req.method==='POST'){
         if(req.headers.origin!==requestOrigin)throw new PaperError(403,'Open the invitation in its browser origin');
         const args=JSON.parse(await readBody(req,1024)),token=args?.token;
@@ -153,7 +162,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
         // Never has no application timer, so its cookie is a browser-session cookie rather than a long fixed date.
         const age=grant.expiresAt===null?'':`; Max-Age=${Math.max(0,Math.floor((grant.expiresAt-now())/1000))}`;
         res.setHeader('Set-Cookie',`${cookieName}=${session}; HttpOnly; SameSite=Strict; Path=/${age}${listener.online?'; Secure':''}`);
-        return json(res,200,{href:`/?paper=${grant.paperId}&invite=${grant.id}`,role:grant.role,name:(await library.read(grant.paperId)).paper.name,expiresAt:grant.expiresAt});
+        return json(res,200,{href:`/?paper=${grant.paperId}&invite=${grant.id}`,role:grant.role,name:(await library.read(grant.paperId)).paper.name,expiresAt:grant.expiresAt,version:VERSION});
       }
       if((req.method==='GET'||req.method==='HEAD')&&RUNTIME_FILES.has(pathname.slice(1)))return editor.serve(req,res,pathname.slice(1));
       const grant=authenticate(req,url,listener);
@@ -186,6 +195,12 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
         scoped(grant,url);if(req.headers.origin!==requestOrigin)throw new PaperError(403,'Use the Paper editor to upload');budget(grant);
         return json(res,201,await library.addAsset(grant.paperId,await readBody(req,GUEST_BYTES),()=>writable(grant)));
       }
+      // Handoff source archives. Download: any live invitation of this Paper, only an archive its current manifest names, never an inline or page type. Attach: edit only.
+      if(pathname==='/api/handoff'){
+        scoped(grant,url,['resource','name']);
+        if(req.method==='GET'){const {resource,bytes}=await readResource(library,grant.paperId,url.searchParams.get('resource'));if(!valid(grant))throw gone();res.writeHead(200,downloadHeaders(resource,bytes));res.end(bytes);return;}
+        if(req.method==='POST'){if(req.headers.origin!==requestOrigin)throw new PaperError(403,'Use the Paper editor or the plugin to attach a source archive');budget(grant);return json(res,201,await attachResource(library,grant.paperId,await readBody(req,HANDOFF_LIMITS.resourceBytes,{deadlineMs:bodyDeadline(HANDOFF_LIMITS.resourceBytes)}),{name:url.searchParams.get('name')||''},()=>writable(grant)));}
+      }
       if(!['GET','HEAD'].includes(req.method))throw new PaperError(403,'Owner controls are unavailable through an invitation');
       if(pathname.startsWith('/Paper/')){
         const [, ,id,...parts]=pathname.split('/'),relative=parts.join('/');if(id!==grant.paperId)throw new PaperError(403,'This invitation opens one Paper only');
@@ -196,30 +211,68 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
       throw new PaperError(404,'Not found');
     }catch(error){if(res.headersSent){res.destroy();return;}const status=error.status||(error.code==='ENOENT'?404:error instanceof SyntaxError||error instanceof URIError?400:500);if(status===401)res.setHeader('WWW-Authenticate','Bearer realm="Paper invitation"');if(error.details?.retryAfter)res.setHeader('Retry-After',String(error.details.retryAfter));json(res,status,{error:status===500?'The operation failed; saved files were kept':error.code==='ENOENT'?'Not found':error.message,...(status===500?{}:error.details)});}
   }
-  async function start(network,internet){
+  function ensureStart(network,internet){
     if(closed)throw new PaperError(410,'Sharing has stopped');
-    const mode=modeOf({network,internet});if(listeners.has(mode))return;if(starting.has(mode))return starting.get(mode);
+    const mode=modeOf({network,internet}),existing=listeners.get(mode);if(existing)return {mode,controller:null,waiters:new Set(),task:Promise.resolve(existing)};
+    let record=starts.get(mode);if(record)return record;
     const address=network?networkAddress():null;if(network&&!address)throw new PaperError(409,'No local network address found. Connect to Wi-Fi or Ethernet, then try again.');
     if(network&&publicUrl)throw new PaperError(400,'This server already uses an online sharing address');
-    const task=(async()=>{
-      const listener={network,mode,health:randomBytes(12).toString('hex'),ready:!internet,online:!!publicUrl||internet,probeAbort:new AbortController()},pending=http.createServer((req,res)=>handle(req,res,listener));pending.headersTimeout=15000;pending.requestTimeout=30000;pending.keepAliveTimeout=5000;
-      await new Promise((resolve,reject)=>{pending.once('error',reject);pending.listen(network||internet?0:port,network?'0.0.0.0':'127.0.0.1',resolve);});
-      listener.server=pending;listener.localOrigin=`http://127.0.0.1:${pending.address().port}`;listener.origin=network?`http://${address}:${pending.address().port}`:publicUrl||listener.localOrigin;
+    const controller=new AbortController();record={mode,controller,waiters:new Set(),task:null};
+    record.task=startListener(network,internet,address,AbortSignal.any([lifetime.signal,controller.signal])).finally(()=>{if(starts.get(mode)===record)starts.delete(mode);});
+    record.task.catch(()=>{});starts.set(mode,record);return record;
+  }
+  async function start(network,internet){await ensureStart(network,internet).task;}
+  async function startListener(network,internet,address,signal){
+    const mode=modeOf({network,internet});
+    const listener={network,mode,health:randomBytes(12).toString('hex'),ready:!internet,probed:false,online:!!publicUrl||internet,probeAbort:new AbortController()},pending=http.createServer((req,res)=>handle(req,res,listener));pending.headersTimeout=15000;pending.requestTimeout=TIMING.ceiling;pending.keepAliveTimeout=5000;
+    await new Promise((resolve,reject)=>{pending.once('error',reject);pending.listen(network||internet?0:port,network?'0.0.0.0':'127.0.0.1',resolve);});
+    listener.server=pending;listener.localOrigin=`http://127.0.0.1:${pending.address().port}`;listener.origin=network?`http://${address}:${pending.address().port}`:publicUrl||listener.localOrigin;
+    try{
       if(internet){
-        try{
-          listener.tunnel=await tunnelFactory(listener.localOrigin,{signal:lifetime.signal,onExit(){listener.probeAbort.abort();if(listeners.get(mode)!==listener)return;for(const [id,g] of grants)if(g.internet)revoke(id);listeners.delete(mode);pending.close();}});listener.origin=listener.tunnel.url;
-          if(!listener.tunnel.alive)throw new PaperError(503,'The internet connection closed. Try again.');
-        }
-        catch(error){await listener.tunnel?.close();await new Promise(resolve=>pending.close(resolve));throw error;}
+        listener.tunnel=await tunnelFactory(listener.localOrigin,{signal,onExit(){listener.probeAbort.abort();if(listeners.get(mode)!==listener)return;for(const [id,g] of grants)if(g.internet)revoke(id);listeners.delete(mode);pending.close();}});listener.origin=listener.tunnel.url;
+        if(!listener.tunnel.alive)throw new PaperError(503,'The internet connection closed. Try again.');
       }
-      listeners.set(mode,listener);
-      if(internet)checkReachable(listener);
-      if(!timer){timer=setInterval(()=>{let expired=false;for(const [id,g] of grants)if(!live(g)){revoke(id,'expired');expired=true;}for(const s of streams)s.res.write(': heartbeat\n\n');if(expired)pruneLater();const online=listeners.get('internet');if(online&&Date.now()-(online.checkedAt||0)>60000&&[...grants.values()].some(g=>g.internet&&valid(g)))checkReachable(online,true);},10000);timer.unref();}
-    })();starting.set(mode,task);try{await task;}finally{starting.delete(mode);}
+      // A start that finished after it was cancelled (or after sharing stopped) is closed here, not kept.
+      if(signal.aborted)throw new PaperError(410,'Sharing start was cancelled');
+    }
+    catch(error){await listener.tunnel?.close();await new Promise(resolve=>pending.close(resolve));throw error;}
+    listeners.set(mode,listener);
+    if(internet)checkReachable(listener);
+    if(!timer){timer=setInterval(()=>{let expired=false;for(const [id,g] of grants)if(!live(g)){revoke(id,'expired');expired=true;}for(const s of streams)s.res.write(': heartbeat\n\n');if(expired)pruneLater();const online=listeners.get('internet');if(online&&Date.now()-(online.checkedAt||0)>60000&&[...grants.values()].some(g=>g.internet&&valid(g)&&!attempts.has(g.id)))checkReachable(online,true);},10000);timer.unref();}
+    return listener;
+  }
+  // The life of one internet invitation that has to wait: starting (tunnel), preparing (link being checked), ready; or it ends: failed, timed out or
+  // cancelled. Ending always revokes its invitation and lets go of the shared start (which is aborted if no one else waits).
+  function end(attempt,error,cancelled=false){
+    if(!attempts.has(attempt.id))return;attempts.delete(attempt.id);clearTimeout(attempt.timer);attempt.state=cancelled?'cancelled':'failed';
+    revoke(attempt.id,'revoked');attempt.record?.waiters.delete(attempt.id);
+    if(attempt.record&&!attempt.record.waiters.size&&starts.get(attempt.mode)===attempt.record){starts.delete(attempt.mode);attempt.record.controller?.abort();}
+    pruneLater();
+    if(!cancelled){failures.set(attempt.id,{id:attempt.id,paperId:attempt.paperId,label:attempt.label,role:attempt.role,network:false,internet:true,expiry:attempt.expiry,protect:attempt.protect,error:error instanceof PaperError?error.message:'Sharing could not start. Nothing was shared.',at:now()});
+      const mine=[...failures.values()].filter(f=>f.paperId===attempt.paperId);for(const f of mine.slice(0,Math.max(0,mine.length-4)))failures.delete(f.id);}
+  }
+  function track(attempt){
+    attempt.timer=setTimeout(()=>end(attempt,new PaperError(504,'Sharing took too long to start. Nothing was shared.')),startupMs);attempt.timer.unref?.();
+    void(async()=>{
+      try{
+        const record=ensureStart(false,true);record.waiters.add(attempt.id);attempt.record=record;
+        const listener=await record.task;if(!attempts.has(attempt.id))return;
+        attempt.state='preparing';if(!listener.ready)checkReachable(listener);
+        while(attempts.has(attempt.id)){
+          if(listeners.get('internet')!==listener)throw new PaperError(503,'The internet connection closed. Try again.');
+          if(listener.ready){
+            clearTimeout(attempt.timer);attempts.delete(attempt.id);attempt.record.waiters.delete(attempt.id);attempt.state='ready';
+            for(const old of attempt.replaces){const other=attempts.get(old);if(other)end(other,null,true);else revoke(old);}pruneLater();return;
+          }
+          if(listener.probed&&!listener.probing)throw new PaperError(504,'The link did not become reachable. Nothing was shared.');
+          await new Promise(resolve=>{const id=setTimeout(resolve,pollMs);id.unref?.();});
+        }
+      }catch(error){end(attempt,error);}
+    })();
   }
   function checkReachable(listener,force=false){
     if(listener.probing||listener.ready&&!force||closed)return;
-    listener.probing=true;listener.waiting=!listener.ready;listener.checkedAt=Date.now();const deadline=Date.now()+90000;let failure='not-ready';
+    listener.probing=true;listener.probed=false;listener.waiting=!listener.ready;listener.checkedAt=Date.now();const deadline=Date.now()+90000;let failure='not-ready';
     void(async()=>{
       while(!closed&&!listener.probeAbort.signal.aborted&&Date.now()<deadline&&listener.tunnel.alive){
         try{
@@ -230,7 +283,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
         listener.ready=false;listener.waiting=true;
         if(!listener.probeAbort.signal.aborted)await new Promise(resolve=>{const id=setTimeout(resolve,1500);id.unref?.();});
       }
-    })().finally(()=>{listener.probing=false;listener.waiting=false;listener.checkedAt=Date.now();if(!listener.ready&&!closed&&!listener.probeAbort.signal.aborted)process.stderr.write(`Paper sharing: secure link is still connecting (${String(failure).replace(/[^a-zA-Z0-9 _-]/g,'').slice(0,60)}). Retry keeps the existing tunnel.\n`);});
+    })().finally(()=>{listener.probing=false;listener.probed=true;listener.waiting=false;listener.checkedAt=Date.now();if(!listener.ready&&!closed&&!listener.probeAbort.signal.aborted)process.stderr.write(`Paper sharing: secure link is still connecting (${String(failure).replace(/[^a-zA-Z0-9 _-]/g,'').slice(0,60)}). Retry keeps the existing tunnel.\n`);});
   }
   function pruneLater(){clearTimeout(tunnelStopTimer);tunnelStopTimer=setTimeout(()=>{void pruneTunnel().catch(()=>{});},5000);tunnelStopTimer.unref();}
   async function pruneTunnel(){
@@ -242,11 +295,12 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
     for(const [key,g]of grants)if(g.paperId===id&&!live(g)){revoke(key,'expired');pruneLater();}
     const invitations=forPaper(id).map(info);
     const current=invitations[0];
-    return {active:!!current,online:!!publicUrl||!!current?.online,configuredOnline:!!publicUrl,internetAvailable:!!publicUrl||await hasCloudflared(),localOnly:!publicUrl&&!current?.network&&!current?.internet,network:!!current?.network,internet:!!current?.internet,networkAvailable:!publicUrl&&!!address,sessionOnly:true,invitations,...(current||{})};
+    for(const [key,f] of failures)if(now()-f.at>600000)failures.delete(key);
+    return {failures:[...failures.values()].filter(f=>f.paperId===id).map(({paperId,at,...f})=>f),active:!!current,online:!!publicUrl||!!current?.online,configuredOnline:!!publicUrl,internetAvailable:!!publicUrl||await hasCloudflared(),localOnly:!publicUrl&&!current?.network&&!current?.internet,network:!!current?.network,internet:!!current?.internet,networkAvailable:!publicUrl&&!!address,sessionOnly:true,invitations,...(current||{})};
   }
   function info(g){
-    const l=listeners.get(modeOf(g)),t=now(),recent=g.wrong.filter(x=>x>t-WRONG_WINDOW);
-    return {id:g.id,paperId:g.paperId,label:g.label,role:g.role,network:g.network,online:!!publicUrl||g.internet,internet:g.internet,ready:!!l?.ready,preparing:!!l?.waiting,expiry:g.expiry,expiresAt:g.expiresAt,protected:g.protect,locked:g.locked,wrongRecent:recent.length,retryAfter:recent.length>=WRONG_LIMIT?Math.max(1,Math.ceil((recent[0]+WRONG_WINDOW-t)/1000)):0};
+    const l=listeners.get(modeOf(g)),t=now(),recent=g.wrong.filter(x=>x>t-WRONG_WINDOW),a=attempts.get(g.id),state=a?a.state:l?.ready?'ready':'preparing';
+    return {id:g.id,paperId:g.paperId,label:g.label,role:g.role,network:g.network,online:!!publicUrl||g.internet,internet:g.internet,state,starting:state==='starting',ready:state==='ready'&&!!l?.ready,preparing:state==='preparing',expiry:g.expiry,expiresAt:g.expiresAt,protected:g.protect,locked:g.locked,wrongRecent:recent.length,retryAfter:recent.length>=WRONG_LIMIT?Math.max(1,Math.ceil((recent[0]+WRONG_WINDOW-t)/1000)):0};
   }
   // Owner-only. The only place the capability and the code are returned together.
   function reveal(g){return {...info(g),url:`${origin(g)}/join#${g.token}`,mcpUrl:`${origin(g)}/mcp`,token:g.token,...(g.protect?{code:formatCode(g.code)}:{}),listener:listeners.get(modeOf(g))?.localOrigin};}
@@ -254,21 +308,38 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
     notify,
     status,
     overview(){return {invitations:[...grants.values()].filter(valid).map(info)};},
-    async link(id,invitationId){await library.folder(id);const grant=forPaper(id).find(g=>g.id===invitationId);if(!grant)throw new PaperError(404,'Invitation not found');if(!listeners.get(modeOf(grant))?.ready)throw new PaperError(409,'The secure link is still connecting.');return reveal(grant);},
+    async link(id,invitationId){await library.folder(id);const grant=forPaper(id).find(g=>g.id===invitationId);if(!grant)throw new PaperError(404,'Invitation not found');if(attempts.has(grant.id))throw new PaperError(409,'The secure link is still starting. Try again in a moment.');if(!listeners.get(modeOf(grant))?.ready)throw new PaperError(409,'The secure link is still connecting.');return reveal(grant);},
     async retry(id,invitationId){await library.folder(id);const grant=forPaper(id).find(g=>g.id===invitationId);if(!grant)throw new PaperError(404,'Invitation not found');const listener=listeners.get(modeOf(grant));if(grant.internet&&listener)checkReachable(listener);return status(id);},
     get count(){return new Set([...grants.values()].filter(valid).map(g=>g.paperId)).size;},
     async create(id,role,network=false,internet=false,{newLink=false,label='',expiry='7d',protect=false}={}){
       if(!['view','edit'].includes(role)||typeof network!=='boolean'||typeof internet!=='boolean'||network&&internet)throw new PaperError(400,'Choose view/edit access and one sharing location');
       if(typeof newLink!=='boolean'||typeof label!=='string'||label.length>80)throw new PaperError(400,'Choose a link name of up to 80 characters');
       if(!Object.hasOwn(EXPIRY,expiry)||typeof protect!=='boolean')throw new PaperError(400,'Choose 1 hour, 1 day, 7 days or Never, and whether to require a code');
-      internet=internet&&!publicUrl;await library.folder(id);await start(network,internet);if(closed)throw new PaperError(410,'Sharing has stopped');
-      const current=forPaper(id)[0],listener=listeners.get(modeOf({network,internet}));if(internet&&!listener.ready)checkReachable(listener);
+      internet=internet&&!publicUrl;await library.folder(id);
+      const mode=modeOf({network,internet}),pendingStart=internet&&!listeners.get('internet')?.ready;
+      // A repeat click while an identical invitation is still starting is that same attempt, not another invitation or tunnel.
+      {const same=[...attempts.values()].find(a=>a.paperId===id&&a.role===role&&a.expiry===expiry&&a.protect===protect);if(same)return {...await status(id),...info(grants.get(same.id)),createdId:same.id,attemptId:same.id,pending:true};}
+      if(!pendingStart){await start(network,internet);if(closed)throw new PaperError(410,'Sharing has stopped');}
+      const current=forPaper(id)[0],listener=listeners.get(mode);if(internet&&listener&&!listener.ready)checkReachable(listener);
       if(!newLink&&current&&current.role===role&&current.expiry===expiry&&current.protect===protect&&modeOf(current)===modeOf({network,internet}))return {...await status(id),...reveal(current),createdId:current.id};
       if(forPaper(id).length>=16||grants.size>=256)throw new PaperError(429,'Remove an old invitation before creating another');
-      if(!newLink)for(const g of forPaper(id))revoke(g.id);
-      const grant={id:randomBytes(6).toString('hex'),paperId:id,label:label.trim().replace(/[\u0000-\u001f\u007f]/g,'')||`Invitation ${forPaper(id).length+1}`,role,network,internet,token:key(),expiry,expiresAt:EXPIRY[expiry]===null?null:now()+EXPIRY[expiry],protect,code:protect?accessCode():'',wrong:[],wrongTotal:0,locked:false,writes:[]};grants.set(grant.id,grant);byHash.set(digest(grant.token),grant);if(!internet)pruneLater();return {...await status(id),...reveal(grant),createdId:grant.id};
+      const replaces=newLink?[]:forPaper(id).map(g=>g.id);
+      if(!pendingStart)for(const old of replaces)revoke(old);
+      const grant={id:randomBytes(6).toString('hex'),paperId:id,label:label.trim().replace(/[\u0000-\u001f\u007f]/g,'')||`Invitation ${forPaper(id).length+1}`,role,network,internet,token:key(),expiry,expiresAt:EXPIRY[expiry]===null?null:now()+EXPIRY[expiry],protect,code:protect?accessCode():'',wrong:[],wrongTotal:0,locked:false,writes:[]};grants.set(grant.id,grant);byHash.set(digest(grant.token),grant);if(!internet)pruneLater();
+      if(pendingStart){
+        // Nothing about the link is revealed until it works: no address, key or code, only that it is starting.
+        const attempt={id:grant.id,paperId:id,mode,role,expiry,protect,label:grant.label,replaces,state:'starting',timer:null,record:null};attempts.set(attempt.id,attempt);for(const [key,f] of failures)if(f.paperId===id&&f.role===role&&f.expiry===expiry&&f.protect===protect)failures.delete(key);track(attempt);
+        return {...await status(id),...info(grant),createdId:grant.id,attemptId:grant.id,pending:true};
+      }
+      return {...await status(id),...reveal(grant),createdId:grant.id};
     },
-    async stop(id,invitationId){await library.folder(id);if(invitationId!==undefined&&!forPaper(id).some(g=>g.id===invitationId))throw new PaperError(404,'Invitation not found');for(const g of forPaper(id))if(!invitationId||g.id===invitationId)revoke(g.id);pruneLater();return status(id);},
-    async close(){closed=true;lifetime.abort();await Promise.allSettled([...starting.values()]);clearInterval(timer);clearTimeout(tunnelStopTimer);for(const id of grants.keys())revoke(id);sessions.clear();await Promise.all([...listeners.values()].map(async l=>{await l.tunnel?.close();await new Promise(resolve=>l.server.close(resolve));}));listeners.clear();},
+    async stop(id,invitationId){
+      await library.folder(id);const failed=failures.get(invitationId);
+      if(invitationId!==undefined&&!forPaper(id).some(g=>g.id===invitationId)&&failed?.paperId!==id)throw new PaperError(404,'Invitation not found');
+      for(const [key,f] of failures)if(f.paperId===id&&(!invitationId||key===invitationId))failures.delete(key);
+      for(const g of forPaper(id))if(!invitationId||g.id===invitationId){const attempt=attempts.get(g.id);if(attempt)end(attempt,null,true);else revoke(g.id);}
+      pruneLater();return status(id);
+    },
+    async close(){closed=true;lifetime.abort();for(const a of attempts.values())clearTimeout(a.timer);attempts.clear();failures.clear();await Promise.race([Promise.allSettled([...starts.values()].map(r=>r.task)),new Promise(resolve=>{const id=setTimeout(resolve,2000);id.unref?.();})]);clearInterval(timer);clearTimeout(tunnelStopTimer);for(const id of grants.keys())revoke(id);sessions.clear();await Promise.all([...listeners.values()].map(async l=>{await l.tunnel?.close();await new Promise(resolve=>l.server.close(resolve));}));listeners.clear();},
   };
 }

@@ -2,7 +2,7 @@
 name: paper-copy
 description: Write or refine the text inside a Paper design or diagram so it fits the artifact, audience and task. Use for headings, labels, UI messages and visual explanations; preserve approved copy and distinguish proposals from facts. Not a general article-writing or text-editor workflow.
 metadata:
-  version: "0.7.0-preview.23"
+  version: "0.7.0-preview.28"
 ---
 
 # Copy for the artifact
@@ -40,8 +40,12 @@ Pass the selected text back to the calling workflow for composition. Keep meanin
 
 Read the rendered artifact at its intended viewing size. Check whether the goal and sequence are clear without the author explaining them. Remove repeated or decorative text before shrinking it; adjust the layout when necessary instead of making required labels unreadable. Check wrapping, hierarchy, clipped labels, and useful actions or legends. Typography size alone is not a reason to rewrite approved wording.
 
-Verify that each retained claim comes from the brief or is marked as a proposal/placeholder, and that no necessary meaning or recovery step disappeared. For a revision, compare the original and result; keep the original when an alternative was requested. Save/reopen through the calling workflow and report only material editorial questions in the handoff. A copy review by itself does not authorize changing the artwork.
+Verify that each retained claim comes from the brief or is marked as a proposal/placeholder, and that no necessary meaning or recovery step disappeared. For a revision, compare the original and result; keep the original when an alternative was requested. Save through the calling workflow and verify by reading the Paper back and inspecting the canvas that is already open (the workflow's open-once rule decides when a reopen is warranted); report only material editorial questions in the handoff. A copy review by itself does not authorize changing the artwork.
 
 ## Method sources
 
 Adapted for Paper from Impeccable's interface-copy guidance, with artifact selection, owner wording and native-layer review specific to this plugin. See [source notes](references/sources.md) for the pinned candidate, comparison and attribution; they are maintenance context, not extra skills to load on every design.
+
+## Working with others
+
+When more than one person or agent works on a Paper, or you are asked for advice rather than edits, follow the one shared method in [collaboration.md](references/collaboration.md) (method 1; the identical text ships with the Paper, Design, Diagram and Copy skills and is served publicly at `/collaboration.md`). It covers consultation, pair design, bounded fan-out, sequential takeover and implementation handoff; reading the Paper, `DESIGN.md` and feedback first; agreeing layer ids and roles; small revision-checked saves; independent visual review; and, after a 409, re-reading and re-applying your own change. `DESIGN.md` is the owner's: propose changes as feedback. The editable Paper, its motion played in place on the canvas and generated implementation code are three different things. Use the host, models and approvals your user already has.

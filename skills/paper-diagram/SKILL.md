@@ -2,7 +2,7 @@
 name: paper-diagram
 description: Create, revise or review editable architecture, process, data and infrastructure diagrams in Paper. Use for C4, UML-style structure, BPMN-style workflows, ER models, Kubernetes topology, flowcharts and source-backed system explanations.
 metadata:
-  version: "0.7.0-preview.23"
+  version: "0.7.0-preview.28"
 ---
 
 # Diagram in Paper
@@ -39,6 +39,10 @@ Keep a focused view rather than shrinking a large graph into unreadable text. Se
 
 Trace the source facts through every node and edge: direction, type, responsibility, boundary, cardinality/condition and labels where relevant. Trace a real path through the process/system to catch plausible-looking but wrong relationships. Describe inferred or omitted detail.
 
-Inspect the rendered canvas for overlap, obscured arrows, text wrapping, ambiguous line crossings and readable labels. For an attached-connector change, check move/resize, delete/undo and save/reopen. Confirm the label remains a text layer. Verify the requested PNG/HTML/Paper output; an image or structural validator alone does not prove notation correctness or visual quality.
+Inspect the rendered canvas for overlap, obscured arrows, text wrapping, ambiguous line crossings and readable labels. For an attached-connector change, check move/resize, delete/undo and save/read back (one deliberate reload when persistence itself is under test). Confirm the label remains a text layer. Verify the requested PNG/HTML/Paper output; an image or structural validator alone does not prove notation correctness or visual quality.
 
 Save through the revision-checked Paper path. Record a short explanation, source basis and useful open questions with the Paper. For review-only work, return findings without editing. If native visual access is unavailable, report MCP/source checks separately from native visual acceptance; do not silently move the Paper into a browser.
+
+## Working with others
+
+When more than one person or agent works on a Paper, or you are asked for advice rather than edits, follow the one shared method in [collaboration.md](references/collaboration.md) (method 1; the identical text ships with the Paper, Design, Diagram and Copy skills and is served publicly at `/collaboration.md`). It covers consultation, pair design, bounded fan-out, sequential takeover and implementation handoff; reading the Paper, `DESIGN.md` and feedback first; agreeing layer ids and roles; small revision-checked saves; independent visual review; and, after a 409, re-reading and re-applying your own change. `DESIGN.md` is the owner's: propose changes as feedback. The editable Paper, its motion played in place on the canvas and generated implementation code are three different things. Use the host, models and approvals your user already has.

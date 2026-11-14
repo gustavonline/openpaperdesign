@@ -3,6 +3,9 @@ import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import os from 'node:os';
 import { connectionErrors, resolveConnections, isArtboard, PAPER_FORMAT, isPaperFormat } from '../runtime/diagram-model.js';
+import { previewProblem } from '../runtime/preview-model.js';
+import { handoffProblem } from '../runtime/handoff-model.js';
+import { verifyStored, markUnreferenced } from './handoff.mjs';
 
 export const MAX_PAPER_BYTES = 20 * 1024 * 1024;
 export const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -17,7 +20,9 @@ export class PaperError extends Error {
 }
 const fail = (condition, message) => { if (!condition) throw new PaperError(400, message); };
 const finite = value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1e6;
-export function validatePaper(paper) {
+// `read` is for Papers already on disk or arriving from a peer: a preview model in a NEWER version is accepted as opaque there, so such a Paper still
+// opens and lists. Saving, importing and creating never accept it (nothing newer is silently dropped or rewritten).
+export function validatePaper(paper, { read = false } = {}) {
   fail(paper && isPaperFormat(paper.format) && paper.version === 1, 'Unsupported Paper format');
   fail(typeof paper.name === 'string' && paper.name.trim().length > 0 && paper.name.length <= 80, 'Paper name needs 1–80 characters');
   fail(Array.isArray(paper.pages) && paper.pages.length >= 1 && paper.pages.length <= 100, 'Invalid Pages');
@@ -51,6 +56,10 @@ export function validatePaper(paper) {
     const errors = connectionErrors(page); fail(!errors.length, errors[0]);
   }
   fail(paper.assets && typeof paper.assets === 'object' && !Array.isArray(paper.assets) && Object.values(paper.assets).every(asset => typeof asset === 'string' && /^assets\/[a-zA-Z0-9_.-]+$/.test(asset)), 'Invalid asset references');
+  // Optional: the name each imported image had, by asset key, so Save and Download can offer it. Old Papers have none and fall back to the stored name.
+  // Optional: the name an image layer was imported under, kept on its fill so identical bytes imported under two names keep both. Same rule as assetNames.
+  for (const page of paper.pages) for (const node of page.nodes) for (const fill of node.style?.fills || []) fail(!fill || fill.type !== 'image' || fill.name === undefined || (typeof fill.name === 'string' && fill.name.length > 0 && fill.name.length <= 120 && !/[\u0000-\u001f\u007f\\/]/.test(fill.name)), 'Invalid image names');
+  fail(paper.assetNames === undefined || (paper.assetNames && typeof paper.assetNames === 'object' && !Array.isArray(paper.assetNames) && Object.keys(paper.assetNames).length <= 2000 && Object.values(paper.assetNames).every(name => typeof name === 'string' && name.length > 0 && name.length <= 120 && !/[\u0000-\u001f\u007f\\/]/.test(name))), 'Invalid asset names');
   if (paper.symbols !== undefined) {
     fail(Array.isArray(paper.symbols) && paper.symbols.length <= 100, 'Scratchpad holds at most 100 symbols');
     for (const symbol of paper.symbols) {
@@ -59,6 +68,8 @@ export function validatePaper(paper) {
     }
     fail(new Set(paper.symbols.map(s=>s.id)).size === paper.symbols.length, 'Duplicate Scratchpad identity');
   }
+  const preview = previewProblem(paper.preview, paper, { tolerateNewer: read }); fail(!preview, preview);
+  const handoff = handoffProblem(paper.handoff, { tolerateNewer: read }); fail(!handoff, handoff);
   return paper;
 }
 export function blankPaper(name = 'Untitled Paper', width = 1440, height = 900) {
@@ -67,17 +78,17 @@ export function blankPaper(name = 'Untitled Paper', width = 1440, height = 900) 
   fail([width, height].every(n => Number.isInteger(n) && n >= 16 && n <= 10000), 'Artboard sizes must be whole pixels from 16 to 10000');
   return validatePaper({format:PAPER_FORMAT,version:1,name,pages:[{id:randomBytes(8).toString('hex'),name:'Page 1',next_id:2,root:[1],nodes:[{id:1,name:'Artboard 1',type:'frame',clip:true,rect:{x:0,y:0,w:width,h:height},style:{fills:[{type:'solid',color:'#ffffff'}],stroke:null,stroke_width:1,corner_radius:0,opacity:1},visible:true,locked:false,children:[]}]}],assets:{}});
 }
-async function noLink(target, optional = false) {
+export async function noLink(target, optional = false) {
   try { const st = await fs.lstat(target); if (st.isSymbolicLink()) throw new PaperError(400, 'Linked paths are not supported'); return st; }
   catch (error) { if (optional && error.code === 'ENOENT') return null; throw error; }
 }
-async function syncDir(directory) {
+export async function syncDir(directory) {
   let handle;
   try { handle = await fs.open(directory, 'r'); await handle.sync(); }
   catch (error) { if (!(process.platform === 'win32' && ['EISDIR','EPERM','EINVAL'].includes(error.code))) throw error; }
   finally { await handle?.close(); }
 }
-async function writeExclusive(file, bytes) {
+export async function writeExclusive(file, bytes) {
   const handle = await fs.open(file, 'wx', 0o600);
   try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
 }
@@ -113,7 +124,7 @@ export class PaperLibrary {
         await this.folder(item.name); const st = await fs.stat(file, {bigint:true}), key = `${st.mtimeNs}:${st.size}:${st.ino}`;
         let entry = this.cache.get(item.name);
         if (!entry || entry.key !== key) {
-          const paper = (await this.read(item.name)).paper; validatePaper(paper);
+          const paper = (await this.read(item.name)).paper; validatePaper(paper, { read: true });
           const frames = paper.pages.flatMap(p => p.nodes.filter(n => p.root.includes(n.id) && isArtboard(n))), first = frames[0]?.rect;
           entry = {key, value:{id:item.name,name:paper.name,pages:paper.pages.length,artboards:frames.length,modified:Number(st.mtimeMs),href:`./?paper=${encodeURIComponent(item.name)}`,size:first ? [first.w,first.h] : null,legacy:false,hasArtwork:paper.pages.some(p=>p.nodes.some(n=>n.type!=='frame'))}};
           const thumb = path.join(folder,'assets','thumbnail.png'); if (await noLink(thumb,true)) entry.value.thumbnail = `Paper/${item.name}/assets/thumbnail.png`;
@@ -176,9 +187,11 @@ export class PaperLibrary {
       authorize();
       const current = await this.read(id,kind);
       if (current.revision !== expected) throw new PaperError(409,'Paper changed elsewhere; no overwrite performed');
+      if (kind === 'paper' && document.handoff) await verifyStored(folder, document.handoff);
       const file = path.join(folder,`${kind}.json`); let previous;
       try { previous = await fs.readFile(file); } catch(error) { if(error.code!=='ENOENT')throw error; }
       await this.atomic(folder,`${kind}.json`,bytes,previous,authorize);
+      if (kind === 'paper') await markUnreferenced(folder, current.paper.handoff, document.handoff);
       const saved={revision:revision(bytes),saved:true};
       // Publish the durable commit before releasing the writer lock, so file
       // observers cannot announce the same bytes first as an unknown edit.

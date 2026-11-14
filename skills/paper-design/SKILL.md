@@ -2,7 +2,7 @@
 name: paper-design
 description: Create or revise visual direction and editable designs in Paper for websites, app screens, dashboards, banners and other graphics. Use when turning a brief or references into design alternatives, documenting a design system, or reviewing visual consistency.
 metadata:
-  version: "0.7.0-preview.23"
+  version: "0.7.0-preview.28"
 ---
 
 # Design in Paper
@@ -41,6 +41,14 @@ Inspect the result in the embedded Paper app when native visual access is availa
 
 For websites/apps, check representative compact and wide views plus relevant transitions with real content. Record content order and navigation/sidebar changes. A fixed-size banner needs its actual output dimensions and readable crop-safe composition, rather than a mobile breakpoint matrix. For motion, use the project's existing timing and reduced-motion behavior.
 
-Verify save and reopen. Inspect the intended export, including images/fonts, when export is part of the deliverable. If native visual access is unavailable, finish the authorized MCP work and report that native visual acceptance remains unverified; do not call structural checks a visual pass.
+Verify the save by reading it back and inspecting the view that is already open (reopen only when asked, or for one deliberate reload test). Inspect the intended export, including images/fonts, when export is part of the deliverable. If native visual access is unavailable, finish the authorized MCP work and report that native visual acceptance remains unverified; do not call structural checks a visual pass.
 
 Finish with the selected direction, changed files/Paper, actual verification, and any material rendering gap. Put only useful continuation decisions in `CONTEXT.md`; do not copy the chat. Review-only requests leave artwork and guides unchanged.
+
+## Working with others
+
+When more than one person or agent works on a Paper, or you are asked for advice rather than edits, follow the one shared method in [collaboration.md](references/collaboration.md) (method 1; the identical text ships with the Paper, Design, Diagram and Copy skills and is served publicly at `/collaboration.md`). It covers consultation, pair design, bounded fan-out, sequential takeover and implementation handoff; reading the Paper, `DESIGN.md` and feedback first; agreeing layer ids and roles; small revision-checked saves; independent visual review; and, after a 409, re-reading and re-applying your own change. `DESIGN.md` is the owner's: propose changes as feedback. The editable Paper, its motion played in place on the canvas and generated implementation code are three different things. Use the host, models and approvals your user already has.
+
+## Motion and interactions
+
+A Paper can carry authored motion and interactions as plain data (`preview` in `paper.json`, version 1). It is read and written with `paper_read` and `paper_save` like the rest of the Paper; there is no new tool. See [motion.md](references/motion.md) and [preview-model.schema.json](references/preview-model.schema.json). It holds numbers in ranges, short word lists, hex colours, existing layer and Page ids and plain text, never code, markup, selectors or URLs. Responsiveness is authored: give a Page a desktop and a mobile artboard and declare them as variants. Static exports draw the editable layers; Play (the ▶ in the editor) runs the motion. Say when you changed motion without seeing it in Play.

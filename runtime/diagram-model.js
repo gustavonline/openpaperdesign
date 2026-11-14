@@ -6,9 +6,22 @@ export const isPaperFormat=value=>value===PAPER_FORMAT||value==='osm-canvas';
 export const isArtboard = node => node.type === 'frame' && !node.diagram && node.canvas !== true;
 export function moveLayer(node,dx,dy){node.rect.x+=dx;node.rect.y+=dy;if(node.type==='stroke')node.points=node.points?.map(p=>({...p,x:p.x+dx,y:p.y+dy}));}
 // Resize without scaling the artwork. North/west edges leave child world positions unchanged.
-export function resizeArtboard(page,id,before,edge,dx,dy){
+// `pose` ({linear, inverse, fx, fy}, runtime/geometry.js) is the artboard's own animated pose while motion is on. dx and dy are then the pointer's displacement in
+// visible design units. The size changes by the inverse of the pose applied to it (so the grabbed corner follows the pointer), a north/west edge moves the box's
+// origin in its own coordinates (children keep their local places relative to what stays), and the box's canvas position is solved so that every point that was not
+// resized away is drawn exactly where it was: a point is drawn at position + translate + origin + linear * (point - origin), and the origin is a fixed FRACTION of
+// the box, so it moves when the box is resized. The authored rect and children stay in canonical units; with no pose this is the unposed resize below.
+export function resizeArtboard(page,id,before,edge,dx,dy,pose=null){
   const map=indexPage(page),board=map.get(id),r=before.rect;
   if(!isArtboard(board))throw new Error('Select an artboard to resize.');
+  if(pose?.inverse){
+    const m=pose.inverse,L=pose.linear,lx=m[0]*dx+m[2]*dy,ly=m[1]*dx+m[3]*dy,sx=edge.includes('w')?Math.min(lx,r.w-16):0,sy=edge.includes('n')?Math.min(ly,r.h-16):0;
+    const w=Math.min(1e6,Math.max(16,edge.includes('e')?r.w+lx:r.w-sx)),h=Math.min(1e6,Math.max(16,edge.includes('s')?r.h+ly:r.h-sy));
+    const o={x:(pose.fx||0)*r.w,y:(pose.fy||0)*r.h},n={x:(pose.fx||0)*w,y:(pose.fy||0)*h},d={x:sx+n.x-o.x,y:sy+n.y-o.y};
+    board.rect={x:Math.max(-1e6,Math.min(1e6,r.x+(o.x-n.x)+L[0]*d.x+L[2]*d.y)),y:Math.max(-1e6,Math.min(1e6,r.y+(o.y-n.y)+L[1]*d.x+L[3]*d.y)),w,h};
+    for(const child of board.children||[]){const c=map.get(child);if(c)moveLayer(c,-sx,-sy);}
+    resolveConnections(page,map);return board.rect;
+  }
   const x=edge.includes('w')?Math.max(-1e6,Math.min(r.x+dx,r.x+r.w-16)):r.x;
   const y=edge.includes('n')?Math.max(-1e6,Math.min(r.y+dy,r.y+r.h-16)):r.y;
   board.rect={x,y,w:Math.min(1e6,Math.max(16,edge.includes('e')?r.w+dx:r.x+r.w-x)),h:Math.min(1e6,Math.max(16,edge.includes('s')?r.h+dy:r.y+r.h-y))};

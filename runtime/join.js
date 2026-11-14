@@ -1,4 +1,4 @@
-import {invitationLinks, endedCopy, knownEnd} from './invitation.js';
+import {editorDestination, endedCopy, knownEnd} from './invitation.js';
 import {extractInvitation,readCode} from './access-code.js';
 // Every element is looked up when it is used: the page never holds on to a node that markup changes could replace.
 const $ = id => document.getElementById(id);
@@ -8,7 +8,7 @@ const ended = new URLSearchParams(location.search).get('ended');
 history.replaceState(null, '', '/join');
 function say(text, problem = false) { const node = $('status'); node.textContent = text; node.dataset.state = problem ? 'problem' : ''; }
 function show(step) {
-  $('code-form').hidden = step !== 'code'; $('link-form').hidden = step !== 'link'; $('choices').hidden = step !== 'done';
+  $('code-form').hidden = step !== 'code'; $('link-form').hidden = step !== 'link'; $('opening').hidden = step !== 'opening';
   const target = step === 'code' ? $('code') : step === 'link' ? $('invite') : null; if (target && !target.disabled) target.focus();
 }
 function locked(seconds) {
@@ -35,7 +35,7 @@ async function open(code = '') {
     show(code ? 'code' : 'link'); return;
   }
   busy = false; unlock.disabled = $('link-submit').disabled = false;
-  if (response.ok) return done(data, code);
+  if (response.ok) return done(data);
   if (data.reason === 'needs-code') { show('code'); say('Enter the access code from the person who shared this Paper.'); return; }
   if (data.reason === 'wrong-code') { show('code'); say(data.error, true); $('code').select(); return; }
   if (data.reason === 'bad-code') { show('code'); say(data.error, true); $('code').select(); return; }
@@ -43,14 +43,16 @@ async function open(code = '') {
   if (data.reason === 'locked') { token = ''; unlock.disabled = true; say(data.error, true); show('link'); return; }
   token = ''; say(response.status === 401 || response.status === 404 ? 'This invitation has ended. Ask the owner for a new one.' : data.error || 'The invitation could not be opened.', true); show('link');
 }
-function done(data, code) {
-  try {
-    const browser = new URL(data.href, location.origin);
-    if (browser.origin !== location.origin || browser.pathname !== '/' || !browser.searchParams.get('paper')) throw new Error('The invited Paper address is invalid.');
-    const invitation = new URL('/join', location.origin); invitation.hash = token; const apps = invitationLinks(invitation.href, code);
-    $('name').textContent = data.name || 'Shared Paper'; say(data.role === 'edit' ? 'You can edit this Paper.' : 'You can view this Paper.');
-    $('browser').href = browser.href; $('codex').href = apps.codex; $('claude').href = apps.claude; show('done');
-  } catch (error) { say(error.message, true); show('link'); }
+// The code was right: go straight to the same live Paper in this tab. The destination must be this origin's editor for one Paper and
+// invitation; the session cookie came with the same answer. Nothing else is offered here: the browser needs no plugin, and an agent
+// is given the same invitation message elsewhere.
+function done(data) {
+  let target;
+  try { target = editorDestination(data.href, location.origin); }
+  catch (error) { say(error.message, true); show('link'); return; }
+  token = ''; $('open-now').href = target;
+  say(data.role === 'edit' ? 'Opening the Paper. You can edit it.' : 'Opening the Paper. You can view it.'); show('opening');
+  location.replace(target);
 }
 $('code-form').addEventListener('submit', event => {
   event.preventDefault(); if (composing || busy) return;

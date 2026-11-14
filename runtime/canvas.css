@@ -1,7 +1,7 @@
-/* Editor layout after OpenPaperDesign desktop 3286238: full-viewport canvas, full-height 240/260 panels,
+/* Editor layout after OpenPaperDesign desktop 3286238: full-viewport canvas, full-height panels of one shared width (--panel-w),
    38px top rows whose bars float in the canvas corners when a panel is closed, vertical tool rail. */
-body{overflow:hidden;background:var(--canvas);--lw:0px;--rw:0px}
-body.left-open{--lw:240px}body.right-open{--rw:260px}
+body{overflow:hidden;background:var(--canvas);--lw:0px;--rw:0px;--panel-w:240px}
+body.left-open{--lw:var(--panel-w)}body.right-open{--rw:var(--panel-w)}
 
 #stage{position:fixed;top:0;bottom:0;left:var(--lw);right:var(--rw);overflow:hidden;overscroll-behavior:none;background:var(--canvas);cursor:default;touch-action:none}
 #stage:focus-visible{outline:none}
@@ -9,18 +9,18 @@ body.left-open{--lw:240px}body.right-open{--rw:260px}
 
 /* Panels */
 #left-panel,#right-panel{position:fixed;top:0;bottom:0;z-index:20;background:var(--surface);padding-top:40px;display:none}
-#left-panel{left:0;width:240px;border-right:1px solid var(--line);flex-direction:column}
-#right-panel{right:0;width:260px;border-left:1px solid var(--line);overflow:auto}
+#left-panel{left:0;width:var(--panel-w);border-right:1px solid var(--line);flex-direction:column}
+#right-panel{right:0;width:var(--panel-w);border-left:1px solid var(--line);overflow:auto}
 body.left-open #left-panel{display:flex}body.right-open #right-panel{display:block}
 
 /* Top rows: in the open panel (40px), or floating in the canvas corner. The floating bar keeps every control
    exactly where it is in the open row: content 10px from the edge (5 + 1px edge + 4 padding), the same
    220px content width, the same 20px centre line (top 2 + 36 / 2). Opening a panel moves nothing. */
 .topbar{position:fixed;top:0;z-index:30;height:40px;display:flex;align-items:center;gap:2px}
-#left-bar{left:0;width:240px;padding:0 10px}
-#right-bar{right:0;width:260px;padding:0 10px;justify-content:flex-end}
+#left-bar{left:0;width:var(--panel-w);padding:0 10px}
+#right-bar{right:0;width:var(--panel-w);padding:0 8px 0 6px;justify-content:flex-end}
 body:not(.left-open) #left-bar,body:not(.right-open) #right-bar{top:2px;height:36px;padding:4px;background:var(--popover);border:1px solid var(--edge);border-radius:10px;box-shadow:var(--shadow)}
-body:not(.left-open) #left-bar{left:5px;width:230px}
+body:not(.left-open) #left-bar{left:5px;width:calc(var(--panel-w) - 10px)}
 body:not(.right-open) #right-bar{right:5px;width:auto;padding-right:4px}
 /* The Paper title renames in place: one fixed slot, truncated, with the full name as its tooltip. */
 .title{flex:1;min-width:0;display:flex;align-items:center;padding:0 0 0 4px;height:26px}
@@ -146,7 +146,8 @@ body.paper-inspection-docked #rail .ibtn:focus-visible{outline:1px solid var(--m
 #tab-design section+section{border-top:1px solid var(--line);padding-top:8px}
 .list-row{display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:5px}
 .list-row .label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
-.list-row .count{color:var(--text-2);font-size:11px;font-variant-numeric:tabular-nums}
+.list-row .count{color:var(--text-2);font-size:11px;font-variant-numeric:tabular-nums}.list-row .pages{color:var(--text-2);font-size:11px;white-space:nowrap}.list-row.current .label{font-weight:600}.list-row.current::before{content:'';width:3px;height:14px;border-radius:2px;background:var(--accent);margin-left:-6px}
+.design-compare{display:grid;gap:8px;padding:0 6px;font-size:12px;line-height:1.45}.design-compare .note{margin:0}.design-compare .chips{display:flex;flex-wrap:wrap;gap:4px}.design-compare .chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px 0 4px;border-radius:11px;background:var(--field);font-size:11px;font-variant-numeric:tabular-nums}.design-compare .chip i{width:12px;height:12px;border-radius:3px;box-shadow:inset 0 0 0 1px var(--edge-strong)}
 .list-row .aa{width:16px;color:var(--text-2);font-size:11px}
 .swatch{width:16px;height:16px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--edge-strong);flex:0 0 16px}
 .colours-more{margin:6px}
@@ -182,7 +183,8 @@ body.paper-inspection-docked #rail .ibtn:focus-visible{outline:1px solid var(--m
 .sidebar-body{flex:1;min-height:0;padding:0 8px 8px;display:flex;flex-direction:column;overflow:hidden}
 .sidebar-body[hidden]{display:none}
 #pages{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:1px;scrollbar-width:thin}
-#pages .page-row{flex:none}
+#pages .page-row{flex:none}#pages-section h2{position:relative}#new-page{position:absolute;right:8px;top:4px;width:24px;height:24px}#new-page[hidden]{display:none}
+.page-rename{cursor:text}.page-rename input{flex:1;min-width:0;height:22px;padding:0 6px;font:inherit;font-size:12px}#page-menu .menu-label{max-width:260px;white-space:normal;line-height:1.4}
 .sidebar-splitter{height:8px;flex:none;position:relative;cursor:row-resize;touch-action:none;outline:none}
 .sidebar-splitter::after{content:"";position:absolute;width:100%;height:1px;top:3px;left:0;background:var(--line)}
 .sidebar-splitter:hover::after,.sidebar-splitter:focus-visible::after{background:var(--accent);height:2px}
@@ -289,15 +291,18 @@ body.inspecting #stage{cursor:crosshair}
 #sharing-dialog{box-sizing:border-box;width:min(520px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;border:1px solid var(--edge-strong);border-radius:14px;padding:22px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);font:14px/1.5 Inter,system-ui,sans-serif}
 #sharing-dialog::backdrop{background:#0004}
 #sharing-dialog header{display:flex;align-items:center;justify-content:space-between;gap:12px}#sharing-dialog h2{margin:0;font-size:18px;font-weight:600}#sharing-dialog p{font-size:13px;line-height:1.55;margin:12px 0}#share-state{font-weight:500}#share-detail{color:var(--text-2)}
-#share-links{display:grid;gap:10px}.share-invitation{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 0;border-top:1px solid var(--line)}.share-invitation>div:first-child{display:grid;gap:3px;min-width:120px;flex:1}.share-invitation strong{font-size:14px;font-weight:500;overflow-wrap:anywhere}.share-invitation span{color:var(--text-2);font-size:13px}.share-row-actions{display:flex;flex-wrap:wrap;gap:5px}
+#share-links{display:grid;gap:10px}.share-invitation{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 0;border-top:1px solid var(--line)}.share-invitation>div:first-child{display:grid;gap:3px;min-width:120px;flex:1}.share-invitation strong{font-size:14px;font-weight:500;overflow-wrap:anywhere}.share-invitation span{color:var(--text-2);font-size:13px}.share-row-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;flex:1 1 100%}
 #sharing-dialog button:not(.ibtn),#sharing-dialog .share-link{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--field);color:var(--text);font:inherit;font-size:13px;text-decoration:none;cursor:pointer}#sharing-dialog button:disabled{opacity:.5;cursor:default}#sharing-dialog button:not(.ibtn):hover:not(:disabled),#sharing-dialog .share-link:hover{background:var(--hover)}
 #share-create{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}.share-name{display:block;font-size:13px}.share-name input{display:block;width:100%;margin-top:6px;height:36px;font-size:14px}.share-name .note{color:var(--text-2);font-size:13px;margin-left:4px}.share-permission{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0}.share-permission select{width:120px;height:34px;font-size:13px}.share-reach{display:flex;gap:18px;flex-wrap:wrap;padding:0;margin:16px 0;border:0;font-size:13px}.share-reach legend{margin-bottom:8px;color:var(--text-2)}.share-reach label{display:flex;align-items:center;gap:5px}.share-reach input{margin:0;accent-color:var(--accent)}.share-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#sharing-dialog #share-primary{background:var(--selected);color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 22%,var(--line));min-height:36px}#sharing-dialog #share-new,#sharing-dialog .share-stop{border:0;background:transparent;color:var(--text-2);padding:6px 0;margin-top:10px;justify-content:flex-start}#sharing-dialog #share-new:hover,#sharing-dialog .share-stop:hover{color:var(--text)}
-#share-agent-panel{border-top:1px solid var(--line);padding-top:16px;margin-top:16px}#share-agent-panel h3{font-size:15px;margin:0}#share-agent-panel details{margin-top:14px;color:var(--text-2);font-size:13px}#share-agent-panel summary{cursor:pointer}#sharing-dialog textarea{width:100%;height:112px;margin-top:12px;font:12px/1.5 ui-monospace,monospace;resize:vertical}
+#sharing-dialog #share-primary{background:var(--selected);color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 22%,var(--line));min-height:36px}
+#sharing-dialog textarea{width:100%;height:112px;margin-top:12px;font:12px/1.5 ui-monospace,monospace;resize:vertical}
 .share-permission label{font-size:13px}.share-check{display:grid;grid-template-columns:16px minmax(0,1fr);gap:10px;align-items:start;margin:16px 0;font-size:13px;line-height:1.45;cursor:pointer}.share-check input{width:16px;height:16px;margin:2px 0 0;accent-color:var(--accent)}.share-check small{display:block;color:var(--text-2);font-size:12px}#share-expiry-note{margin:-6px 0 12px;color:var(--text-2);font-size:12px}
-.share-invitation .share-note{color:var(--text-2);font-size:12px;line-height:1.45}.share-invitation>div:first-child{flex:1 1 100%}.share-code{display:flex;align-items:center;gap:10px;flex:1 1 100%;min-height:40px;padding:6px 6px 6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--field)}.share-code span{color:var(--text-2);font-size:12px}.share-code output{flex:1;font-size:16px;font-weight:700;letter-spacing:.06em;font-variant-numeric:tabular-nums;user-select:all}
-#sharing-dialog .share-primary-action{background:var(--selected);color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 22%,var(--line))}
-@media(max-width:480px){#sharing-dialog{padding:18px;width:calc(100vw - 20px)}.share-row-actions{width:100%}.share-row-actions>button{flex:1}.share-reach{gap:12px}}
+.share-invitation .share-note{color:var(--text-2);font-size:12px;line-height:1.45}.share-invitation>div:first-child{flex:1 1 100%}.share-block{position:relative;display:grid;gap:4px;flex:1 1 100%;min-width:0;padding:8px 40px 10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--field)}.share-block-label{color:var(--text-2);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}.share-block-value{display:block;min-width:0;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;word-break:break-all;user-select:all}.share-block[data-kind=code] .share-block-value{font-size:16px;font-weight:700;letter-spacing:.06em;font-variant-numeric:tabular-nums}#sharing-dialog button:not(.ibtn).share-copy{position:absolute;top:4px;right:4px;width:30px;min-height:30px;height:30px;padding:0;border:0;background:transparent;color:var(--text-2)}#sharing-dialog button:not(.ibtn).share-copy:hover:not(:disabled){background:var(--hover);color:var(--text)}#sharing-dialog button:not(.ibtn).share-retry{justify-self:start;min-height:28px;padding:3px 8px}.share-progress{flex:1 1 100%;margin:0;font-size:13px;color:var(--text-2)}.share-failed .share-progress{color:var(--danger)}.share-copy-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.share-helper{color:var(--text-2);font-size:12px}#sharing-dialog button:not(.ibtn).share-stop{margin-left:auto;border-color:color-mix(in srgb,var(--danger) 65%,var(--line));background:color-mix(in srgb,var(--danger) 9%,var(--surface));color:var(--danger);font-weight:600}#sharing-dialog button:not(.ibtn).share-stop:hover:not(:disabled){background:color-mix(in srgb,var(--danger) 18%,var(--surface))}
+/* These two must outrank the generic dialog button rule (#sharing-dialog button:not(.ibtn)), so each carries the same :not(.ibtn) plus its class. */
+#sharing-dialog button:not(.ibtn).share-primary-action{background:color-mix(in srgb,var(--accent) 82%,#000);border-color:color-mix(in srgb,var(--accent) 82%,#000);color:#fff;font-weight:600}
+#sharing-dialog button:not(.ibtn).share-primary-action:hover:not(:disabled){background:color-mix(in srgb,var(--accent) 68%,#000);border-color:color-mix(in srgb,var(--accent) 68%,#000)}
+#sharing-dialog button:not(.ibtn).share-primary-action:focus-visible,#sharing-dialog button:not(.ibtn).share-stop:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:480px){#sharing-dialog{padding:18px;width:calc(100vw - 20px)}.share-row-actions>.share-stop{margin-left:0}.share-reach{gap:12px}}
 body.shared-paper [aria-label="Clear feedback…"],body.read-only [data-paper-inspection-comment-ui]{display:none!important}
 body.read-only .paper-design-mode{opacity:.4;cursor:default}
 
@@ -305,7 +310,8 @@ body.read-only .paper-design-mode{opacity:.4;cursor:default}
 
 body.read-only .paper-design-mode{pointer-events:none}body.read-only #rail [data-tool]:not([data-tool=select]):not([data-tool=hand]){opacity:.4;pointer-events:none}
 
-.artboard.free-root{background:transparent;box-shadow:none}.free-root>.board-label{display:none}
+.artboard.free-root{background:transparent;box-shadow:none}.free-root .board-label{display:none}
+.board-frame{position:absolute;inset:0;pointer-events:none}.board-frame>.board-label{pointer-events:auto}
 .board-resizers{position:absolute;inset:0;pointer-events:none;display:none;outline:calc(1px / var(--zoom)) solid var(--accent)}
 .artboard.board-selected>.board-resizers{display:block}.board-resizers button{position:absolute;pointer-events:auto;box-sizing:border-box;border:0;padding:0;background:transparent}
 .board-resizers [data-resize=n],.board-resizers [data-resize=s]{height:calc(8px / var(--zoom));left:0;right:0;cursor:ns-resize}.board-resizers [data-resize=n]{top:calc(-4px / var(--zoom))}.board-resizers [data-resize=s]{bottom:calc(-4px / var(--zoom))}
@@ -315,7 +321,10 @@ body.read-only .paper-design-mode{pointer-events:none}body.read-only #rail [data
 .board-resizers [data-resize=nw],.board-resizers [data-resize=se]{cursor:nwse-resize}.board-resizers [data-resize=ne],.board-resizers [data-resize=sw]{cursor:nesw-resize}
 
 /* Ephemeral collaborators: never part of artwork/export or hit testing. */
-#presence-layer{position:absolute;inset:0;z-index:34;pointer-events:none;overflow:hidden}#presence-roster{position:absolute;z-index:35;left:12px;top:52px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;max-width:calc(100% - 24px);pointer-events:auto;touch-action:none;cursor:grab;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:3px;box-shadow:0 2px 8px #0000000a}#presence-roster[hidden]{display:none}
+#presence-layer{position:absolute;inset:0;z-index:34;pointer-events:none;overflow:hidden}#presence-roster{position:absolute;z-index:35;left:0;right:0;top:0;display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:6px;padding:10px 8px 0;pointer-events:none}
+/* With a side panel closed, its floating corner bar sits over the canvas; the centred badges keep clear of it. */
+body:not(.left-open) #presence-roster,body:not(.right-open) #presence-roster{padding-left:calc(var(--panel-w) + 4px);padding-right:calc(var(--panel-w) + 4px)}
+@media(max-width:900px){#presence-roster,body:not(.left-open) #presence-roster,body:not(.right-open) #presence-roster{padding:48px 8px 0}}#presence-roster[hidden]{display:none}
 .presence-avatar{display:flex;align-items:center;justify-content:center;gap:4px;padding:0 7px;width:auto;height:24px;flex:none;border-radius:12px;background:color-mix(in srgb,var(--peer) 12%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--peer) 25%,transparent);font:14px system-ui;color:var(--peer);pointer-events:auto}
 .presence-status{font-size:11px;color:var(--text-2);padding:0 8px 0 4px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.presence-more{font-size:10px;color:var(--text-2);padding:0 4px}
 .presence-box{position:absolute;border:1.5px solid var(--peer);border-radius:2px;box-sizing:border-box}.presence-box.ghost{border-style:dashed;background:color-mix(in srgb,var(--peer) 4%,transparent)}
@@ -337,13 +346,52 @@ body.read-only .paper-design-mode{pointer-events:none}body.read-only #rail [data
 #notion-share-icon{display:flex;align-items:center;flex:0 0 16px}#notion-share-icon svg{width:16px;height:16px}
 #properties input[type=color]{width:100%;height:30px;border:1px solid var(--line);border-radius:5px;background:var(--field);padding:3px}
 
-.presence-grip{display:grid;place-items:center;width:18px;height:24px;border:0;background:transparent;color:var(--text-2);font:16px system-ui;cursor:grab;padding:0;border-radius:12px}.presence-grip:focus-visible{outline:2px solid var(--accent);outline-offset:1px}#presence-roster:active{cursor:grabbing}
+/* Each badge stands alone: draggable, focusable, never boxed together with the others. */
+.presence-avatar{cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--peer) 25%,transparent),0 1px 5px #00000014}.presence-avatar:active{cursor:grabbing}.presence-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.presence-avatar.moved{position:relative;z-index:1}
+.presence-status{pointer-events:none;background:var(--surface);border-radius:12px;padding:4px 10px;box-shadow:0 1px 5px #00000014}.presence-more{pointer-events:none}
 
 #design-tokens summary{list-style:none}#design-tokens summary::-webkit-details-marker{display:none}#design-tokens:not([open]) .section-chevron{transform:rotate(0)}.tokens-body{padding:4px 8px 12px}#design-tokens h3{margin:12px 6px 6px}
 #text-section>.pair+ .pair{margin-top:8px}#text-section textarea.field{margin-bottom:10px}.inspector-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.inspector-actions .btn{height:auto;min-height:28px;padding:5px 8px;white-space:normal;text-align:left}.inspector-actions #save-symbol{grid-column:1/-1}#node-kind{margin-left:auto}
 
-#toast{top:48px;bottom:auto;left:auto;right:12px;transform:none}.share-invitation{padding:14px;border:1px solid var(--line);border-radius:8px}.share-row-actions{width:100%;gap:8px}#sharing-dialog #share-new{padding:7px 12px;border:1px solid var(--line);background:var(--field);border-radius:6px}#sharing-dialog #share-stop{border-top:1px solid var(--line);border-radius:0;width:100%;margin-top:18px;padding-top:14px;color:var(--danger)}
+#toast{top:48px;bottom:auto;left:auto;right:12px;transform:none}.share-invitation{padding:14px;border:1px solid var(--line);border-radius:8px}.share-row-actions{width:100%;gap:8px}
 
 #tab-design{padding:0 0 12px}#tab-design section,#tab-design section+section{padding:0}#design-guide summary{height:32px;padding:0 14px;gap:7px;border-radius:0}.sidebar-heading{font-size:11px}#design-doc.prose{padding:0 14px 12px}#design-missing{padding:0 14px}
 
 .presence-avatar-role{font:10px/1 Inter,system-ui,sans-serif;white-space:nowrap}.presence-avatar-icon{font:14px/1 system-ui}.presence-avatar[data-kind="agent"]{border-radius:6px}
+
+/* Motion runs on the editor's own canvas: nothing here is a window, an overlay or a shield. */
+#motion-run{display:grid;gap:8px;margin-bottom:10px}#motion-run .row{display:flex;gap:6px;flex-wrap:wrap}#motion-run .btn{height:26px;padding:0 8px;font-size:12px}#motion-run .btn[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
+#motion-run .motion-time{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--text-2)}#motion-run .motion-time input{width:96px;height:26px;font-size:12px;font-variant-numeric:tabular-nums}
+#motion-run input[type=range]{width:100%;accent-color:var(--accent)}#motion-readout{font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-height:14px}#motion-status{margin:0;min-height:16px}
+/* Source handoff (Design tab): a stored, downloadable archive; nothing here opens or runs it. */
+.design-handoff details>summary{display:flex;align-items:center;height:32px;padding:0 14px;gap:7px;cursor:pointer}.handoff{display:grid;gap:6px;padding:0 14px 12px;font-size:12px;line-height:1.45}.handoff .note{margin:0}.handoff label{color:var(--text-2);font-size:11px}.handoff .field{width:100%}
+.handoff-summary{display:grid;gap:3px}.handoff-summary b{font-weight:600}.handoff-edit{display:grid;gap:4px;margin-top:6px}.handoff-edit .btn{justify-self:start;height:26px;padding:0 8px;font-size:12px;margin-top:4px}
+.handoff-file{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center;padding:4px 0;border-top:1px solid var(--line)}.handoff-file .meta{color:var(--text-2);font-size:11px;font-variant-numeric:tabular-nums;grid-column:1/-1}.handoff-file .btn{height:24px;padding:0 8px;font-size:12px}
+/* Motion (inspector) */
+#motion-section{padding:12px 14px;border-top:1px solid var(--line)}#motion-section h3{margin:0 0 8px}#motion-body{display:grid;gap:10px;font-size:12px}
+.motion-card{display:grid;gap:6px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--field)}.motion-card .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.motion-card label{display:grid;gap:2px;font-size:11px;color:var(--text-2)}
+.motion-card .field,#motion-body select.field{height:26px;font-size:12px;min-width:0}.motion-card input[type=number]{width:74px}.motion-card .check{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)}
+.motion-card .title{font-weight:600;font-size:12px;color:var(--text)}.motion-card button{height:24px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);font:inherit;font-size:11px}.motion-card .danger{color:var(--danger)}
+#motion-body .note{margin:0;color:var(--text-2)}
+
+/* Top bars: real allocation of the width there is. Both bars are fixed to opposite corners, so their widths must add up to the viewport; they are
+   sized from the same tokens (never by z-index or screenshot offsets) so no control is ever drawn over another:
+   - the right cluster has a fixed content width per tier (--rfloat is its floating box), and a compact tier (below 520px) that keeps Share as an
+     icon, the zoom level (its menu offers zoom to fit, to selection and 100%), the Zoom to fit button and the Properties toggle; zoom out/in keep
+     their keys (+ and -) and the zoom menu;
+   - below 480px the shared panel width gives way a little (never below 200px) so a floating bar has room beside an open panel;
+   - the left bar, when it floats, takes only what the right side leaves (--rext), its Paper title shrinks first, and below 431px beside an open
+     Properties panel the title yields entirely (Rename Paper… stays in the Paper menu). The Paper menu (its All Papers), motion Play/Pause and Pages always stay. */
+body{--rfloat:234px}
+body.right-open{--rext:var(--panel-w)}body:not(.right-open){--rext:calc(var(--rfloat) + 5px)}
+.share-button{width:66px;padding:0 6px;justify-content:center}.level{min-width:44px}
+body:not(.left-open) #left-bar{width:min(calc(var(--panel-w) - 10px),calc(100vw - var(--rext) - 11px))}
+@media(max-width:519px){body{--rfloat:136px}.share-button{width:28px}.share-button span{display:none}#zoom-out,#zoom-in{display:none}.level{min-width:40px;padding:0 4px}}
+@media(max-width:479px){body{--panel-w:clamp(200px,calc(100vw - 150px),240px)}}
+@media(max-width:430px){
+  body.right-open:not(.left-open) #left-bar{width:auto}body.right-open:not(.left-open) #left-bar .title{display:none}
+  /* Renaming the Paper from its menu gives the whole bar to the name field for as long as it is open. */
+  body.right-open:not(.left-open) #left-bar:has(.title-input:not([hidden])){width:min(calc(var(--panel-w) - 10px),calc(100vw - var(--rext) - 11px))}
+  body.right-open:not(.left-open) #left-bar:has(.title-input:not([hidden])) .title{display:flex}
+  body.right-open:not(.left-open) #left-bar:has(.title-input:not([hidden])) .ibtn{display:none}
+}

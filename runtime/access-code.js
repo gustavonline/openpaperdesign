@@ -28,7 +28,9 @@ export function findInvitationLink(text) {
   return link ? link[0].replace(/\)+$/, '') : '';
 }
 // Accepts a bare link, a bare 43-character key, or a whole pasted invitation message. The code is
-// taken from a labelled "code" line, or from the single leftover code-shaped word after the link.
+// taken from a labelled line ("Access code:", "Code:" or the older Danish "Adgangskode:", the code on the same or the next line), or from the single
+// leftover code-shaped word after the link. Unlabelled words must contain a digit: ordinary words such as "december" or
+// "Derefter" are made only of code symbols and must never be read as a code.
 export function extractInvitation(text) {
   const raw = typeof text === 'string' ? text.slice(0, 8192) : '';
   const link = LINK.exec(raw);
@@ -38,11 +40,11 @@ export function extractInvitation(text) {
     if (new RegExp(`^${TOKEN.source}$`).test(hash)) { token = hash; rest = ''; }
   }
   let code = '';
-  const labelled = /\b(?:access\s*)?code\b\s*[:：=-]?\s*([^\n]{0,40})/i.exec(rest);
+  const labelled = /\b(?:adgangskode|(?:access\s*)?code)\b\s*[:：=-]?\s*([^\n]{0,40})/i.exec(rest);
   if (labelled) code = readCode(labelled[1].trim().split(/\s{2,}|[,;]/)[0]);
   if (!code && token) {
     const words = rest.match(/(?<![\p{L}\p{N}])[\p{L}\p{N}]{4}[ \p{Pd}]?[\p{L}\p{N}]{4}(?![\p{L}\p{N}])/gu) || [];
-    const found = words.map(readCode).filter(Boolean);
+    const found = words.map(readCode).filter(read => read && /\d/.test(read));
     if (found.length === 1) code = found[0];
   }
   return { token, code };

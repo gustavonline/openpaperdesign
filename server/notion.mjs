@@ -541,7 +541,7 @@ export function createNotion({library,configDir,origin,autosync:timing={}}) {
         const parent=args.parentId?pageId(args.parentId):null;
         let remote;if(state?.link){remote=await remoteForSave(state.link.pageId,automatic);sameRemote(remote,state);}
         const bytes=await exportBundle(library,paperId);
-        if(bytes.length>20*MiB)fail(413,'This Paper bundle exceeds the 20 MiB Notion MCP upload limit. Reduce its assets; local export supports 50 MiB');
+        if(bytes.length>20*MiB)fail(413,'This Paper bundle exceeds the 20 MiB Notion MCP upload limit. Reduce its assets or handoff archives; local export supports 50 MiB');
         const localRevision=revision(bytes),remoteRevision=hex(bytes),savedAt=new Date().toISOString();
         // Name comes from the exported snapshot, never a later local edit.
         const snapshot=await readBundle(bytes);

@@ -1,11 +1,15 @@
 import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
-import {setupPresence} from './presence.js?v=22e96dd947ab';
+import {setupPresence} from './presence.js?v=2a7d7c240b0d';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
-import { setupSharing } from './sharing.js?v=e76b2d4ca5f2';
-import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
-import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame} from './editing-model.js?v=718e4bb39407';
+import { setupSharing } from './sharing.js?v=a989571611a9';
+import { createMotion } from './play.js?v=6170a9f023fd';
+import { IDENTITY, apply, parsePose, chainBasis, poseBasis } from './geometry.js?v=18dc3d2b4478';
+import { handoffProblem, directionProblem, withResource, withoutResource, withFields, HANDOFF_LIMITS } from './handoff-model.js?v=65d2e50b9d5f';
+import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
+import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=05fd3de55700';
+import { setupLibrary } from './diagram-ui.js?v=f50730c8cd9b';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=5dd9feb00f24';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -52,7 +56,8 @@ const selection = new Set();
 let inspection = false, inspectMode = false, spaceHeld = false, mode = 'select', leaving = false;
 let pending = false, saving = null, saveError = null, conflict = false, lastSaved = '';
 const entries = new Map(), nodes = new Map(), dom = new Map(), boards = new Map();
-let presenceUI,libraryUI, connectFrom = null, refreshingConnections = false;
+let presenceUI,libraryUI, connectFrom = null, refreshingConnections = false, motion = null;
+let pageRename = null;
 const connectionCache = new WeakMap();
 const history = [], future = [], expanded = new Set(), shownChildren = new Map();
 let camera = { x: 40, y: 80, z: .4 }, pageId = null, views = {}, viewReady = false;
@@ -63,7 +68,7 @@ const keyOf = (page, id) => `${page.id}:${id}`;
 const point = e => { const r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 const editable = target => target.isContentEditable || !!target.closest?.('input,textarea,select');
 const isVector = node => node.type === 'stroke' || node.type === 'connector';
-const imageFill = node => node.style?.fills?.find(f => f.type === 'image');
+const imageFill = imageFillOf;
 
 function message(text) {
   $('#toast').textContent = text; $('#toast').hidden = false;
@@ -76,7 +81,7 @@ function redraw() {
   world.style.transform = `translate(${camera.x}px,${camera.y}px) scale(${camera.z})`;
   world.style.setProperty('--zoom', camera.z);
   $('#zoom').textContent = `${Math.round(camera.z * 100)}%`;
-  paintBackground();presenceUI?.paint();
+  paintBackground();presenceUI?.paint();motion?.cameraChanged();
 }
 // Canvas view (per project, this browser only): None / Dots / Grid as a CSS background that follows the
 // camera, plus an optional canvas colour. Never part of the scene, its artwork or exports.
@@ -117,14 +122,12 @@ function viewport() {
   return { left, top, w: Math.max(120, w - left - 24), h: Math.max(120, h - top - 40) };
 }
 function fit(rects, maxZoom = 1) {
-  if (!rects.length) return;
-  const minX = Math.min(...rects.map(r => r.x)), minY = Math.min(...rects.map(r => r.y));
-  const maxX = Math.max(...rects.map(r => r.x + r.w)), maxY = Math.max(...rects.map(r => r.y + r.h));
-  const area = viewport(), z = bound(Math.min(area.w / Math.max(1, maxX - minX), area.h / Math.max(1, maxY - minY), maxZoom), .04, 4);
-  camera = { x: area.left + (area.w - (maxX - minX) * z) / 2 - minX * z, y: area.top + (area.h - (maxY - minY) * z) / 2 - minY * z, z };
+  camera = rects.length ? fitCamera(rects, viewport(), { maxZoom, limit: LIMIT }) : emptyCamera(viewport());
   paintCamera(); saveView();
 }
-function fitAll() { fit([...boards.values()].filter(b => !b.wrapper.hidden).map(b => b.viewRect)); }
+// The artwork of the shown Page(s): what is actually drawn (a hidden layer is not), within the canvas left by the open panels. With nothing to
+// show the camera goes to a fixed sensible place, so the command always does something and repeats stably. No artwork and no Page is touched.
+function fitAll() { fit([...boards.values()].filter(b => !b.wrapper.hidden && b.node.visible !== false).map(b => b.viewRect)); }
 function screenRect(key) {
   const r = dom.get(key)?.getBoundingClientRect(), s = stage.getBoundingClientRect();
   return r && r.width + r.height > 0 ? { r, s } : null;
@@ -149,7 +152,7 @@ function styleNode(node, element) {
   Object.assign(element.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px`, opacity: String(s.opacity ?? 1), display: node.visible === false ? 'none' : '', borderRadius: node.type === 'ellipse' ? '50%' : `${s.corner_radius || 0}px`, transform: node.rotation ? `rotate(${node.rotation}deg)` : '' });
   element.style.border = s.stroke && !isVector(node) ? `${s.stroke_width || 1}px solid ${s.stroke}` : '';
   if (node.type === 'text') {
-    if (!element.isContentEditable) element.textContent = node.text || '';
+    if (!element.isContentEditable) element.textContent = motion?.textFor(element.dataset.nodeKey) ?? (node.text || '');
     Object.assign(element.style, { background: 'transparent', color: fillColor(node), fontSize: `${node.font_size || 14}px`, fontWeight: text.bold ? '700' : '400', fontStyle: text.italic ? 'italic' : 'normal', lineHeight: String(text.line_height || 1.2), letterSpacing: `${text.letter_spacing || 0}px`, textAlign: node.align || 'left' });
   } else {
     element.style.backgroundColor = isVector(node) ? 'transparent' : node.style?.fills?.find(f => f.type === 'solid')?.color || 'transparent';
@@ -191,6 +194,7 @@ function makeNode(page, node, parentElement, boardKey) {
   let childHost=element;
   if(node.diagram){childHost=document.createElement('div');childHost.className='symbol-content';element.append(childHost);styleNode(node,element);}
   for (const child of node.children || []) makeNode(page, entries.get(page.id).get(child), childHost, boardKey);
+  motion?.dirty();
   return element;
 }
 function offsetForPage(index) {
@@ -206,7 +210,7 @@ function paint(key) {
   const b = boards.get(key), node = b.node, o = b.offset;
   b.viewRect = { ...node.rect, x: node.rect.x + o.x, y: node.rect.y + o.y };
   Object.assign(b.wrapper.style, { width: `${node.rect.w}px`, height: `${node.rect.h}px`, transform: `translate(${b.viewRect.x}px,${b.viewRect.y}px)` });
-  b.wrapper.classList.toggle('board-selected',selection.has(key)&&!node.locked&&selection.size===1);
+  b.wrapper.classList.toggle('board-selected',selection.has(key)&&!node.locked&&selection.size===1);syncBoardPose(b,key);
   b.name.textContent = node.name; b.name.title = node.name; b.name.setAttribute('aria-label', `Select board ${node.name}`);
   if (b.artboard) {styleNode({...node,rect:{...node.rect,x:0,y:0},rotation:0},b.content);Object.assign(b.content.style,{overflow:node.clip?'hidden':'visible',visibility:node.visible===false?'hidden':''});}
   else {const shown={...node,rect:{...node.rect,x:0,y:0}};if(node.type==='stroke')shown.points=node.points.map(p=>({...p,x:p.x-node.rect.x,y:p.y-node.rect.y}));styleNode(shown,dom.get(key));}
@@ -223,8 +227,10 @@ function layoutBoards() {
   const width=Math.max(...extents.map(r=>r.w))+240;let top=0;
   pageOffsets=extents.map((r,i)=>{if(i&&i%3===0)top+=Math.max(...extents.slice(i-3,i).map(r=>r.h))+240;return {x:(i%3)*width-r.x,y:top-r.y};});
   for (const [key, b] of boards) { b.offset = offsetForPage(scene.pages.indexOf(b.page)); b.wrapper.hidden = pageId !== 'all' && b.page.id !== pageId; paint(key); }
+  motion?.dirty();
 }
 function buildScene() {
+  previewEdits++;
   presenceUI?.clearEffects();
   world.replaceChildren(); dom.clear(); nodes.clear(); boards.clear(); entries.clear();
   for (const page of scene.pages) entries.set(page.id, new Map(page.nodes.map(n => [n.id, n])));
@@ -232,6 +238,7 @@ function buildScene() {
   for (const page of scene.pages) for (const rootId of page.root) mountRoot(page,entries.get(page.id).get(rootId));
   layoutBoards();
   libraryUI?.render();
+  motion?.dirty();
 }
 
 // Root wrappers position artboards and free layers alike; only actual artboards have paper chrome.
@@ -240,11 +247,11 @@ function mountRoot(page,node){
   wrapper.className=`artboard${artboard?'':' free-root'}`;wrapper.dataset.board=key;wrapper.setAttribute('aria-label',node.name);
   label.className='board-label';label.innerHTML='<button type="button" class="ibtn board-move" title="Move artboard"><svg class="icon"><use href="#i-grip"/></svg></button><button type="button" class="board-name" aria-pressed="false"></button>';
   const [move,name]=label.querySelectorAll('button');move.dataset.boardMove=key;move.setAttribute('aria-label',`Move ${node.name}`);name.dataset.boardSelect=key;content.className='board-content';
-  const b={wrapper,content,page,node,name,artboard,offset:offsetForPage(scene.pages.indexOf(page)),viewRect:node.rect};boards.set(key,b);
+  const b={wrapper,content,frame:null,page,node,name,artboard,offset:offsetForPage(scene.pages.indexOf(page)),viewRect:node.rect};boards.set(key,b);
   if(artboard){nodes.set(key,{page,node,boardKey:key,root:true,topLevel:true});dom.set(key,content);for(const id of node.children||[])makeNode(page,entries.get(page.id).get(id),content,key);}
   else {makeNode(page,{...node,rect:{...node.rect,x:0,y:0}},content,null);nodes.set(key,{page,node,boardKey:null,root:false,topLevel:true});}
-  wrapper.append(label,content);
-  if(artboard&&canEdit){const handles=document.createElement('div');handles.className='board-resizers';for(const edge of ['n','s','w','e','nw','ne','sw','se']){const h=document.createElement('button');h.type='button';h.dataset.resize=edge;h.dataset.resizeBoard=key;h.tabIndex=-1;h.title=`Resize artboard (${edge})`;h.setAttribute('aria-label',h.title);handles.append(h);}wrapper.append(handles);}
+  const frame=document.createElement('div');frame.className='board-frame';frame.append(label);wrapper.append(frame,content);b.frame=frame;
+  if(artboard&&canEdit){const handles=document.createElement('div');handles.className='board-resizers';for(const edge of ['n','s','w','e','nw','ne','sw','se']){const h=document.createElement('button');h.type='button';h.dataset.resize=edge;h.dataset.resizeBoard=key;h.tabIndex=-1;h.title=`Resize artboard (${edge})`;h.setAttribute('aria-label',h.title);handles.append(h);}wrapper.append(handles);b.resizers=handles;}
   wrapper.hidden=pageId!=='all'&&page.id!==pageId;const nextId=page.root[page.root.indexOf(node.id)+1],next=boards.get(keyOf(page,nextId))?.wrapper;if(next)next.before(wrapper);else world.append(wrapper);paint(key);return b;
 }
 function drawingContext(target){const b=boards.get(target?.closest?.('[data-board]')?.dataset.board);if(b?.artboard)return b;const page=nodes.get(selected)?.page||visiblePages()[0]||scene.pages[0];return {page,node:null,offset:offsetForPage(scene.pages.indexOf(page))};}
@@ -252,6 +259,7 @@ function contextOrigin(b){return b.node?b.viewRect:b.offset;}
 
 // Pages and the nested layer tree. Only expanded branches render, at most ROW_CAP rows per branch.
 function renderPages() {
+  if (pageRename && $('#pages').querySelector('.page-rename')) return;
   const list = $('#pages'), query = $('#page-search').value.trim().toLocaleLowerCase(), rows = [{ id: 'all', name: 'All pages' }, ...scene.pages].filter(p=>p.name.toLocaleLowerCase().includes(query));
   list.replaceChildren(...rows.map(p => {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'page-row'; b.dataset.page = p.id;
@@ -259,6 +267,7 @@ function renderPages() {
     b.innerHTML = `<svg class="icon"><use href="#i-${p.id === 'all' ? 'grid' : 'page'}"/></svg><span></span>`; b.querySelector('span').textContent = p.name; return b;
   }));
   if(!rows.length)list.append(note('No pages match.'));
+  $('#new-page').hidden = !canEdit;
 }
 function kindIcon(n) { return n.type === 'frame' ? 'frame' : n.type === 'text' ? 'text' : n.type === 'ellipse' ? 'ellipse' : n.type === 'connector' ? 'arrow' : n.type === 'stroke' ? 'pencil' : imageFill(n) ? 'image' : 'rect'; }
 function kindName(n) { return n.diagram ? 'Symbol' : n.type==='frame'&&n.canvas===true?'Group':imageFill(n) && n.type === 'rect' ? 'Image' : ({ text: 'Text', rect: 'Rectangle', ellipse: 'Ellipse', frame: 'Frame', stroke: 'Pencil', connector: 'Arrow' })[n.type] || n.type; }
@@ -319,7 +328,7 @@ function selectMany(keys, {reveal=false,primary=null}={}) {
   for(const key of selection){dom.get(key)?.classList.add('selected');boards.get(key)?.name.setAttribute('aria-pressed','true');if(selection.size===1&&!nodes.get(key).node.locked)boards.get(key)?.wrapper.classList.add('board-selected');}
   if(selected&&reveal)revealOnCanvas(selected);
   populateInspector();
-  libraryUI?.selectionChanged();presenceUI?.changed();
+  libraryUI?.selectionChanged();presenceUI?.changed();motion?.selectionChanged();
   if (selected && body.classList.contains('left-open') && !$('#layer-search').value) revealInTree(selected); else renderTree();
 }
 function selectNode(key,{reveal=false,add=false}={}){const keys=add?[...selection]:[];if(key&&nodes.has(key)){const i=keys.indexOf(key);if(add&&i>=0)keys.splice(i,1);else keys.push(key);}selectMany(keys,{reveal,primary:key});}
@@ -329,6 +338,7 @@ function populateDoc() {
   $('#doc-page').textContent = pageId === 'all' ? `${scene.pages.length} ${scene.pages.length === 1 ? 'page' : 'pages'} in this Paper` : pages[0]?.name || '';
 }
 function populateInspector() {
+  renderMotion();
   $('#multi-selection').hidden=selection.size<2;
   if(selection.size>1){form.hidden=true;$('#doc-view').hidden=true;$('#selection-count').textContent=`${selection.size} layers`;for(const button of $('#multi-selection').querySelectorAll('button'))button.disabled=!canEdit||(selection.size<3&&button.dataset.arrange?.startsWith('distribute'));return;}
   if (!selected) { form.hidden = true; $('#doc-view').hidden = false; populateDoc(); return; }
@@ -357,7 +367,10 @@ function populateInspector() {
 
 // History. Structural records keep exact page.nodes indices and the sibling position for undo.
 function updateHistory() { $('#undo').disabled = !history.length; $('#redo').disabled = !future.length; if (leftTab === 'design') renderDesign(); }
-function pushHistory(action) { Object.defineProperty(action,'_bytes',{value:JSON.stringify(action).length,writable:true,configurable:true});history.push(action);let bytes=history.reduce((sum,item)=>sum+(item._bytes||0),0);while(history.length>1&&(history.length>200||bytes>32*1024*1024))bytes-=history.shift()._bytes||0;future.length = 0; updateHistory(); queueSave(); }
+// Counts every change to the Paper's layers, Pages or motion (each edit, undo and redo, rebuild): the preview model is checked against the whole Paper, and that check
+// is kept only until this moves (see validPreview).
+let previewEdits = 0;
+function pushHistory(action) { previewEdits++; Object.defineProperty(action,'_bytes',{value:JSON.stringify(action).length,writable:true,configurable:true});history.push(action);let bytes=history.reduce((sum,item)=>sum+(item._bytes||0),0);while(history.length>1&&(history.length>200||bytes>32*1024*1024))bytes-=history.shift()._bytes||0;future.length = 0; updateHistory(); queueSave(); }
 function record(key, before, after) { if (JSON.stringify(before) !== JSON.stringify(after)) pushHistory({ key, before, after }); }
 function subtree(map, id) { const n = map.get(id); return n ? [id, ...(n.children || []).flatMap(c => subtree(map, c))] : []; }
 function detach(key) {
@@ -391,15 +404,26 @@ function applyNode(key, snapshot) {
   Object.keys(entry.node).forEach(k => delete entry.node[k]); Object.assign(entry.node, copy(snapshot)); paint(key);
 }
 function applyHistory(action, reverse) {
+  previewEdits++;
   if(action.kind==='page-edit'){
     const page=scene.pages.find(p=>p.id===action.pageId),map=new Map(page.nodes.map(n=>[n.id,n]));
     for(const change of action.changes){const node=reverse?change.before:change.after;if(node)map.set(change.id,copy(node));else map.delete(change.id);}
     page.nodes=(reverse?action.orderBefore:action.orderAfter).map(id=>map.get(id));page.root=copy(reverse?action.rootBefore:action.rootAfter);page.next_id=reverse?action.nextBefore:action.nextAfter;
+    if(action.hasPreview){const value=reverse?action.previewBefore:action.previewAfter;if(value===undefined)delete scene.preview;else scene.preview=copy(value);}
     buildScene();selectMany((reverse?action.selectionBefore:action.selectionAfter).filter(key=>nodes.has(key)));return;
   }
   if (!action.kind) { applyNode(action.key, reverse ? action.before : action.after); populateInspector(); renderTree(); return; }
   if(action.kind==='nodes'){for(const change of action.changes)applyNode(change.key,reverse?change.before:change.after);populateInspector();renderTree();return;}
   if (action.kind === 'name') { scene.name = reverse ? action.before : action.after; showTitle(); return; }
+  if (action.kind === 'preview') { const value = reverse ? action.before : action.after; if (value === undefined) delete scene.preview; else scene.preview = copy(value); renderMotion(); motion?.dirty(); return; }
+  if (action.kind === 'handoff') { const value = reverse ? action.before : action.after; if (value === undefined) delete scene.handoff; else scene.handoff = copy(value); renderHandoff(); return; }
+  if (action.kind === 'pages') {
+    const was = pageId, result = applyPageAction(scene, action, reverse); buildScene();
+    // Undo and redo bring the page in question back into view (a rename keeps whatever is shown); a vanished page falls to its neighbour.
+    if (action.op !== 'rename' && pageId !== 'all') pageId = result.focus || scene.pages[0].id; else if (pageId !== 'all' && !scene.pages.some(p => p.id === pageId)) pageId = result.focus || scene.pages[0].id;
+    if (pageId !== was) { layoutBoards(); if (validCamera(views[pageId])) { camera = { ...views[pageId] }; paintCamera(); saveView(); } else fitAll(); }
+    renderPages(); populateInspector(); renderTree(); renderDesign(); return;
+  }
   if (action.kind === 'symbols') { scene.symbols=copy(reverse?action.before:action.after);libraryUI.render();return; }
   if ((action.kind === 'add') !== reverse) { attach(action.rec); selectNode(action.key); }
   else { action.rec = detach(action.key); renderTree(); populateInspector(); }
@@ -417,15 +441,18 @@ function selectedRoots(){const page=nodes.get(selected)?.page;return page?select
 // Structural edits keep only changed nodes and ordering in history, rather than a full Paper snapshot.
 function pageChange(page,change){
   if(!canEdit)return;
-  commitFields();stopTextEdit();const before=copy(page),selectionBefore=[...selection];
+  commitFields();stopTextEdit();const before=copy(page),selectionBefore=[...selection],previewBefore=scene.preview===undefined?undefined:copy(scene.preview);
   try{
-    const result=change();resolveConnections(page);const old=new Map(before.nodes.map(n=>[n.id,n])),now=new Map(page.nodes.map(n=>[n.id,n])),changes=[];
+    const result=change();resolveConnections(page);
+    // Motion that pointed at a layer that is gone goes with it, and comes back with it on undo.
+    if(scene.preview!==undefined){const pruned=prunePreview(scene.preview,scene);if(pruned!==scene.preview){if(pruned===undefined)delete scene.preview;else scene.preview=pruned;}}const old=new Map(before.nodes.map(n=>[n.id,n])),now=new Map(page.nodes.map(n=>[n.id,n])),changes=[];
     for(const id of new Set([...old.keys(),...now.keys()]))if(JSON.stringify(old.get(id))!==JSON.stringify(now.get(id)))changes.push({id,before:old.get(id)||null,after:copy(now.get(id)||null)});
     if(!changes.length&&JSON.stringify(before.root)===JSON.stringify(page.root))return;
     const selectionAfter=(result||[]).map(id=>keyOf(page,id));
     const action={kind:'page-edit',pageId:page.id,changes,orderBefore:before.nodes.map(n=>n.id),orderAfter:page.nodes.map(n=>n.id),rootBefore:before.root,rootAfter:copy(page.root),nextBefore:before.next_id,nextAfter:page.next_id,selectionBefore,selectionAfter};
+    if(JSON.stringify(previewBefore)!==JSON.stringify(scene.preview)){action.hasPreview=true;action.previewBefore=previewBefore;action.previewAfter=scene.preview===undefined?undefined:copy(scene.preview);}
     buildScene();selectMany(selectionAfter);pushHistory(action);return result;
-  }catch(error){Object.keys(page).forEach(key=>delete page[key]);Object.assign(page,before);buildScene();selectMany(selectionBefore);message(error.message);}
+  }catch(error){Object.keys(page).forEach(key=>delete page[key]);Object.assign(page,before);if(previewBefore===undefined)delete scene.preview;else scene.preview=previewBefore;buildScene();selectMany(selectionBefore);message(error.message);}
 }
 function duplicateSelection(offset=16){const entry=nodes.get(selected);if(!entry)return;return pageChange(entry.page,()=>pasteLayers(entry.page,captureLayers(entry.page,selectedRoots()),{samePage:true,offset}));}
 let layerClipboard=null,styleClipboard=null;
@@ -460,8 +487,100 @@ async function pasteSelection(){
     pageChange(targetPage,()=>pasteLayers(targetPage,payload,{samePage:local}));setTool('select');
   }catch(error){message(`Paste failed: ${error instanceof SyntaxError?'The clipboard does not contain Paper layers.':error.message}`);}
 }
+let originalTarget=null,originalFocus=null;
+// One image's stored original, fetched again now through this view's own scoped fetch, never from the display copy. The command
+// belongs to the layer the menu was opened on; if that layer no longer shows the same stored image, nothing is downloaded.
+async function downloadOriginal(){
+  const target=originalTarget,back=originalFocus;originalTarget=originalFocus=null;
+  try{
+    const entry=nodes.get(target?.key);
+    if(!entry)throw new Error('Choose an image to download its original.');
+    const original=await fetchCapturedOriginal({captured:target,paperId,scene,node:entry.node,fetchImpl:(url,options)=>fetch(url,options)});
+    await download(original.blob,original.saveAs);message(`Download of the original ${original.saveAs} started. Your browser chooses where it goes.`);
+  }catch(error){if(error?.name!=='AbortError')message(error?.message||'The original could not be downloaded. Nothing was saved.');}
+  back?.focus?.();
+}
+// Fills the shared edit menu for a layer: the full menu in Edit, or only Download original where the editing commands do not apply.
+function paintEditMenu(key,only=false){
+  const entry=key&&nodes.get(key),image=entry&&imageFillOf(entry.node)?{key,...captureOriginal(scene,entry.node)}:null;
+  originalTarget=image;originalFocus=null;
+  const items=[...$('#edit-menu').children];
+  editMenuState(items.map(item=>({edit:item.dataset.edit})),{canEdit,original:!!image,only,copyOk:copyImageSupport({ClipboardItem:window.ClipboardItem,clipboard:navigator.clipboard}),saveOk:savePickerSupport(window)}).forEach((state,i)=>{items[i].hidden=state.hidden;if(items[i].dataset.edit)items[i].disabled=state.disabled;});
+  return !!image;
+}
+// ---- Images: Copy image, Save image…, and dropped files. Each starts from the stored original, fetched fresh through this view's own scoped fetch
+// and checked, for the layer the menu was opened on; the picture on screen is never the source.
+const originalRequest=(target,entry)=>({captured:target,paperId,scene,node:entry.node,fetchImpl:(url,options)=>fetch(url,options)});
+async function blobToPng(blob){
+  const url=URL.createObjectURL(blob),img=new Image();
+  try{
+    await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('The image could not be converted for the clipboard.'));img.src=url;});
+    const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;c.getContext('2d').drawImage(img,0,0);
+    const png=await new Promise(resolve=>c.toBlob(resolve,'image/png'));if(!png)throw new Error('The image could not be converted for the clipboard.');return png;
+  }finally{URL.revokeObjectURL(url);}
+}
+// The clipboard write starts inside the click (the item is made from a promise), so the browser's user activation still applies.
+async function copyImage(){
+  const target=originalTarget,back=originalFocus;originalTarget=originalFocus=null;
+  try{
+    const entry=nodes.get(target?.key);if(!entry)throw new Error('Choose an image to copy.');
+    const result=await copyOriginalImage({getOriginal:()=>fetchCapturedOriginal(originalRequest(target,entry)),toPng:blobToPng,clipboard:navigator.clipboard,ClipboardItem:window.ClipboardItem});
+    message(result.converted?'Image copied as a PNG picture, not as a file.':'Image copied as a picture, not as a file.');
+  }catch(error){if(error?.name!=='AbortError')message(error?.message||'The image could not be copied.');}
+  back?.focus?.();
+}
+async function saveImage(){
+  const target=originalTarget,back=originalFocus;originalTarget=originalFocus=null;
+  try{
+    const entry=nodes.get(target?.key);if(!entry)throw new Error('Choose an image to save.');
+    const plan=plannedOriginal({captured:target,scene,node:entry.node});
+    // The chooser opens now, inside the click; the original is then fetched fresh through the scoped fetch and checked against the same layer.
+    const result=await saveWithChooser({picker:options=>window.showSaveFilePicker(options),name:plan.saveAs,mime:plan.mime,description:'Image',produce:async()=>{const original=await fetchCapturedOriginal(originalRequest(target,nodes.get(target.key)||entry));if(original.mime!==plan.mime||original.saveAs!==plan.saveAs)throw new OriginalError('changed','This image changed while the save location was open.');return original.blob;}});
+    message(result.saved?`Saved ${result.name}.`:'Save cancelled. Nothing was saved.');
+  }catch(error){if(error?.name!=='AbortError')message(error?.message||'The image could not be saved.');}
+  back?.focus?.();
+}
+const hasFiles=e=>[...(e.dataTransfer?.types||[])].includes('Files');
+function measureImage(blob){
+  return new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(blob),img=new Image(),done=fn=>{clearTimeout(timer);URL.revokeObjectURL(url);fn();},timer=setTimeout(()=>done(()=>reject(new Error('timeout'))),15000);
+    img.onload=()=>done(()=>resolve({w:img.naturalWidth,h:img.naturalHeight}));img.onerror=()=>done(()=>reject(new Error('undecodable')));img.src=url;
+  });
+}
+let importing=false;
+async function dropImages(e){
+  if(!canEdit){message('This Paper is view-only, so images can’t be added.');return;}
+  if(inspection){message('Switch to Edit to add images to the canvas.');return;}
+  if(importing){message('Images are still being added. Drop again in a moment.');return;}
+  const files=[...e.dataTransfer.files],candidate=boards.get(e.target.closest?.('[data-board]')?.dataset.board),board=candidate?.artboard?keyOf(candidate.page,candidate.node.id):null,before=scene;
+  importing=true;
+  try{
+    const result=await importImageFiles(files,{
+      read:file=>file.arrayBuffer(),measure:measureImage,
+      upload:async(bytes,mime)=>{const response=await fetch(`/api/assets${paperQuery}`,{method:'POST',headers:{...clientHeaders,'Content-Type':mime},body:bytes}),data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);return data;},
+      alive:()=>scene===before&&canEdit,
+      place:(item,index)=>{
+        scene.assets[item.asset]=item.path;if(item.saveAs){scene.assetNames??={};scene.assetNames[item.asset]??=item.saveAs;}
+        const size=imageSize(item.size,{z:camera.z,w:stage.clientWidth,h:stage.clientHeight}),name=(item.saveAs||'Image').replace(/\.[^.]+$/,'').slice(0,80)||'Image';
+        // Centred on the drop point (then stepped for further files), whatever the camera: insertTemplate maps screen to world.
+        insertTemplate({name,root:1,nodes:[{id:1,type:'rect',name,rect:{x:0,y:0,w:size.w,h:size.h},style:{fills:[{type:'image',asset:item.asset,mode:'fit',...(item.saveAs?{name:item.saveAs}:{})}],opacity:1},visible:true,locked:false}]},{board,x:e.clientX-size.w*camera.z/2+index*28,y:e.clientY-size.h*camera.z/2+index*28});
+      },
+    });
+    message(importSummary(result));
+  }catch(error){message(error?.message||'The images could not be added.');}
+  finally{importing=false;}
+}
+// A dropped file must never navigate this tab away from the editor, whoever may drop and wherever it lands; only the canvas imports it.
+window.addEventListener('dragover',e=>{if(!hasFiles(e))return;e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect=canEdit&&!inspection&&stage.contains(e.target)?'copy':'none';},true);
+window.addEventListener('drop',e=>{
+  if(!hasFiles(e))return;e.preventDefault();
+  if(!stage.contains(e.target)&&!overlayRoot.contains(e.target))return;   // the Scratchpad and other targets keep their own handlers
+  e.stopPropagation();void dropImages(e);
+},true);
 function editCommand(action){
   const entry=nodes.get(selected),page=entry?.page;
+  if(action==='copy-image')return copyImage();if(action==='save-image')return saveImage();
+  if(action==='download-original')return downloadOriginal();
   if(action==='copy')return copySelection();if(action==='link')return copyLink();if(action==='paste')return pasteSelection();
   if(!canEdit||!page)return;
   if(action==='cut')return copySelection(true);if(action==='duplicate')return duplicateSelection();if(action==='delete')return removeSelected();
@@ -560,7 +679,7 @@ async function flushSave() {
 }
 function exportScene() {
   commitFields(); stopTextEdit(); endRename(true);
-  download(new Blob([JSON.stringify(scene, null, 2)], { type: 'application/json' }), `${slug(scene.name)}.paper.json`);
+  void download(new Blob([JSON.stringify(scene, null, 2)], { type: 'application/json' }), `${slug(scene.name)}.paper.json`).catch(error => message(error.message));
   recoverySnapshot = JSON.stringify(scene); updateSaveState();
 }
 async function recoverPaper() {
@@ -624,7 +743,7 @@ function flushFeedback() {
 }
 function downloadFeedback() {
   let bytes = feedback.pendingBytes; try { bytes ??= localStorage.getItem(FEEDBACK_BACKUP); } catch { /* Fall back to the live snapshot. */ }
-  download(new Blob([bytes ?? JSON.stringify(feedback.workspace)], { type: 'application/json' }), `${slug(scene?.name)}.feedback.json`);
+  void download(new Blob([bytes ?? JSON.stringify(feedback.workspace)], { type: 'application/json' }), `${slug(scene?.name)}.feedback.json`).catch(error => message(error.message));
 }
 
 // Inspector fields: live preview while typing, one undo step per field interaction (on change).
@@ -658,7 +777,8 @@ function applyField(node, target) {
 }
 form.addEventListener('submit', e => e.preventDefault());
 let cancelling = false, liveEdit = false;
-form.addEventListener('focusin', () => { liveEdit = false; if (selected) fieldBefore = { key: selected, node: copy(nodes.get(selected).node) }; });
+form.addEventListener('focusout', () => queueMicrotask(syncEditing));
+form.addEventListener('focusin', () => { syncEditing(); liveEdit = false; if (selected) fieldBefore = { key: selected, node: copy(nodes.get(selected).node) }; });
 form.addEventListener('input', e => {
   if (!canEdit||!selected || !['text', 'color', 'color-picker', 'x', 'y', 'w', 'h', 'font_size','line_height','letter_spacing','opacity','corner_radius','rotation','stroke_width','stroke_color'].includes(e.target.name)) return;
   const { node } = nodes.get(selected); if (applyField(node, e.target)) { liveEdit = true; paint(selected); queueSave(); }
@@ -708,14 +828,14 @@ function startTextEdit(key, selectAll = false) {
   if (selected !== key) selectNode(key);
   const before = copy(entry.node);
   element.contentEditable = 'plaintext-only'; if (element.contentEditable !== 'plaintext-only') element.contentEditable = 'true';
-  element.focus({ preventScroll: true }); textEdit = key; textCancel = false;
+  element.focus({ preventScroll: true }); textEdit = key; textCancel = false; syncEditing();
   if (selectAll) { const range = document.createRange(); range.selectNodeContents(element); getSelection().removeAllRanges(); getSelection().addRange(range); }
   let editedHeight=before.rect.h;
   const fitText=()=>{element.style.height='auto';editedHeight=Math.max(before.rect.h,Math.ceil(element.scrollHeight));element.style.height=editedHeight+'px';};
   element.addEventListener('input',fitText);
   element.addEventListener('blur', () => {
     element.removeEventListener('input',fitText);
-    textEdit = null; element.contentEditable = 'false';
+    textEdit = null; element.contentEditable = 'false'; queueMicrotask(syncEditing);
     if (!textCancel) {entry.node.text = element.innerText.replace(/\n$/, '');entry.node.rect.h=editedHeight;}
     textCancel = false; paint(key); if (entry.node.text !== before.text||entry.node.rect.h!==before.rect.h) record(key, before, copy(entry.node)); populateInspector();
   }, { once: true });
@@ -725,7 +845,7 @@ function stopTextEdit() { if (textEdit) dom.get(textEdit)?.blur(); }
 
 // Pointer gestures on the canvas.
 function cancelGesture(){
-  const g=gesture;if(!g)return;gesture=null;
+  const g=gesture;if(!g)return;gesture=null;queueMicrotask(syncEditing);
   clearGuides();g.marquee?.remove();
   if(g.kind==='resize')for(const item of g.before)applyNode(item.key,item.before);
   else if(g.kind==='node'){for(const item of g.changes||[{key:g.key,before:g.before}])applyNode(item.key,item.before);if(g.duplicateAction)applyHistory(g.duplicateAction,true);}
@@ -735,7 +855,7 @@ function cancelGesture(){
 }
 function finishGesture() {
   if (!gesture) return;
-  const g = gesture; gesture = null;
+  const g = gesture; gesture = null; queueMicrotask(syncEditing);
   clearGuides();g.marquee?.remove();
   if (g.pointerId !== undefined && stage.hasPointerCapture(g.pointerId)) stage.releasePointerCapture(g.pointerId);
   if(g.kind==='resize'&&g.moved){pushHistory({kind:'nodes',changes:g.before.map(item=>({...item,after:copy(nodes.get(item.key).node)}))});populateInspector();}
@@ -823,9 +943,9 @@ function insertTemplate(template,drop) {
   if(!canEdit)return;
   const candidate=drop?.board?boards.get(drop.board):null,b=drop?candidate?.artboard?candidate:drawingContext(null):drawingContext(null);
   commitFields();stopTextEdit();setTool('select');
-  const r=template.nodes.find(n=>n.id===template.root).rect,area=stage.getBoundingClientRect(),origin=contextOrigin(b);
-  const x=(drop?drop.x-area.left:stage.clientWidth/2)-camera.x,y=(drop?drop.y-area.top:stage.clientHeight/2)-camera.y;
-  const made=instantiate(template,b.page,b.node?.id??null,x/camera.z-origin.x-(drop?0:r.w/2),y/camera.z-origin.y-(drop?0:r.h/2)),map=entries.get(b.page.id);
+  const r=template.nodes.find(n=>n.id===template.root).rect,area=stage.getBoundingClientRect();
+  const x=(drop?drop.x-area.left:stage.clientWidth/2)-camera.x,y=(drop?drop.y-area.top:stage.clientHeight/2)-camera.y,at=contextPoint(b,x/camera.z,y/camera.z);
+  const made=instantiate(template,b.page,b.node?.id??null,at.x-(drop?0:r.w/2),at.y-(drop?0:r.h/2)),map=entries.get(b.page.id);
   connectionCache.delete(b.page);
   b.page.nodes.push(...made.nodes);(b.node?b.node.children:b.page.root).push(made.root.id);for(const n of made.nodes)map.set(n.id,n);
   const key=keyOf(b.page,made.root.id);if(b.node)makeNode(b.page,made.root,b.content,keyOf(b.page,b.node.id));else mountRoot(b.page,made.root);refreshConnections(b.page);
@@ -835,7 +955,45 @@ $('#connect-symbol').addEventListener('click',()=>{if(!canEdit||!selected)return
 $('#edit-connection-label').addEventListener('click',()=>{const entry=nodes.get(selected),n=entry?.node.children?.map(id=>entries.get(entry.page.id).get(id)).find(n=>n.connectionLabel);if(n)startTextEdit(keyOf(entry.page,n.id),true);});
 const guides=[];
 function clearGuides(){for(const element of guides)element.remove();guides.length=0;}
-function moveChanges(){const page=nodes.get(selected).page,map=entries.get(page.id);return selectedRoots().map(id=>map.get(id)).filter(n=>!n.locked&&!n.bindings&&!n.connectionLabel).map(node=>({key:keyOf(page,node.id),before:copy(node),scale:childTransform(map.get(node.parent),map),world:nodeBounds(node,map)}));}
+function moveChanges(){const page=nodes.get(selected).page,map=entries.get(page.id);return selectedRoots().map(id=>map.get(id)).filter(n=>!n.locked&&!n.bindings&&!n.connectionLabel).map(node=>({key:keyOf(page,node.id),before:copy(node),scale:childTransform(map.get(node.parent),map),world:nodeBounds(node,map),pose:liveBasis(page,node)}));}
+// While motion is on the live layer elements are animated and the Paper's model is not, so a pointer displacement must become the change of the model value that
+// makes the layer follow the pointer ON SCREEN. `liveBasis` is that map for a layer's parent chain (runtime/geometry.js): the animated rotate and scale of every
+// ancestor with its canonical diagram scale, read from the elements' computed style. It is null when nothing above the layer is posed, and then the canonical
+// path below is used exactly as before. The model is never touched by the pose; only the pointer-to-model conversion knows about it.
+const livePose = element => element ? parsePose(getComputedStyle(element)) : parsePose();
+function liveBasis(page, node) {
+  if (!motion?.engaged) return null;
+  const map = entries.get(page.id), chain = [];
+  for (let parent = map.get(node.parent); parent; parent = map.get(parent.parent)) chain.push({ pose: livePose(dom.get(keyOf(page, parent.id))).linear, sx: parent.diagram ? parent.rect.w / parent.diagram.width : 1, sy: parent.diagram ? parent.rect.h / parent.diagram.height : 1 });
+  const basis = chainBasis(chain); return basis.posed && basis.inverse ? basis : null;
+}
+// An artboard's own pose, for resizing it; and a canvas point as a coordinate inside a drawing context, through the board's pose about its ACTUAL computed origin
+// (a top-level artboard's default is the centre of its box, a layer's is its top-left; nothing here assumes either).
+function boardPose(b) {
+  if (!motion?.engaged || !b?.artboard) return null;
+  const pose = livePose(b.content), w = b.node.rect.w, h = b.node.rect.h, basis = poseBasis(pose.linear, w ? pose.ox / w : 0, h ? pose.oy / h : 0);
+  return basis.posed && basis.inverse ? basis : null;
+}
+function contextPoint(b, wx, wy) {
+  const origin = contextOrigin(b), x = wx - origin.x, y = wy - origin.y;
+  if (!b.node || !b.artboard || !motion?.engaged) return { x, y, pose: null };
+  // A translation moves where the board is drawn even when it does not rotate or scale it, so a point always goes through the pose: drawn = translate + origin + linear * (point - origin).
+  const pose = livePose(b.content), basis = poseBasis(pose.linear), usable = basis.posed && basis.inverse, local = apply(usable ? basis.inverse : IDENTITY, x - pose.tx - pose.ox, y - pose.ty - pose.oy);
+  return { x: local.x + pose.ox, y: local.y + pose.oy, pose: usable ? boardPose(b) : null };
+}
+// An artboard's name and move grip, its selection frame and its resize handles are UI beside its content, so while motion poses the content they take the same pose
+// (the same computed translate, rotate and scale, about the same origin since they share its box): grip, outline, handles and their hit areas then sit on the displayed
+// artboard. Only an artboard that motion actually animates is touched, the frame only while it is selected, and only when the pose changed.
+function setPose(b, target, slot, values) {
+  if (!target) return; const key = values.join('|'); if (b[slot] === key) return; b[slot] = key;
+  ['translate', 'rotate', 'scale'].forEach((name, i) => { target.style[name] = values[i] === 'none' ? '' : values[i]; });
+}
+function syncBoardPose(b, key) {
+  if (!b?.artboard) return;
+  const plain = ['none', 'none', 'none'], animated = !!(motion?.engaged && !b.wrapper.hidden && key && motion.posed?.(key)), style = animated ? getComputedStyle(b.content) : null, pose = style ? [style.translate, style.rotate, style.scale] : plain;
+  setPose(b, b.frame, 'frameKey', pose); setPose(b, b.resizers, 'poseKey', b.wrapper.classList.contains('board-selected') ? pose : plain);
+}
+const syncBoardPoses = () => { for (const [key, b] of boards) syncBoardPose(b, key); };
 function snapDelta(g,event,dx,dy){
   clearGuides();let x=dx/camera.z,y=dy/camera.z;
   if(event.shiftKey){if(Math.abs(x)>Math.abs(y))y=0;else x=0;}
@@ -852,28 +1010,29 @@ function snapDelta(g,event,dx,dy){
 stage.addEventListener('pointerdown', e => {
   if (inspection || e.button !== 0 || e.target.isContentEditable) return;
   if (e.target.closest('[data-board-select]') && !spaceHeld) return;
-  commitFields(); stopTextEdit(); closeMenu();
+  commitFields(); stopTextEdit(); closeMenu(); motion?.setEditing(true); queueMicrotask(syncEditing);
   const p = point(e), pan = spaceHeld || mode === 'hand';
   const resize=e.target.closest('[data-resize-board]');
-  if(resize&&!pan&&canEdit){const key=resize.dataset.resizeBoard,entry=nodes.get(key);if(entry.node.locked)return;const map=entries.get(entry.page.id),before=[entry.node,...(entry.node.children||[]).map(id=>map.get(id))].filter(Boolean).map(node=>({key:keyOf(entry.page,node.id),before:copy(node)}));gesture={kind:'resize',key,edge:resize.dataset.resize,start:p,before,pointerId:e.pointerId};stage.setPointerCapture(e.pointerId);e.preventDefault();return;}
+  if(resize&&!pan&&canEdit){const key=resize.dataset.resizeBoard,entry=nodes.get(key);if(entry.node.locked)return;const map=entries.get(entry.page.id),before=[entry.node,...(entry.node.children||[]).map(id=>map.get(id))].filter(Boolean).map(node=>({key:keyOf(entry.page,node.id),before:copy(node)}));gesture={kind:'resize',key,edge:resize.dataset.resize,start:p,before,pose:boardPose(boards.get(key)),pointerId:e.pointerId};stage.setPointerCapture(e.pointerId);e.preventDefault();return;}
   const handle = e.target.closest('[data-board-move]'), layer = e.target.closest('[data-node-key]');
   if(connectFrom && !pan){const target=hitSymbol(e.target);if(target===connectFrom)return;if(target&&connectNodes(connectFrom,target)){setTool('select');return;}setTool('select');return;}
   if (pan) gesture = { kind: 'pan', start: p, camera: { ...camera } };
   else if (mode !== 'select') {
-    const b=drawingContext(e.target),origin=contextOrigin(b);
-    const x=(p.x-camera.x)/camera.z-origin.x,y=(p.y-camera.y)/camera.z-origin.y;
-    gesture={kind:'draw',key:null,tool:mode,context:b,layer:layer?.dataset.nodeKey||null,text:mode==='text'?textAt(e.clientX,e.clientY):null,source:mode==='connector'?hitSymbol(e.target):null,lastClient:{x:e.clientX,y:e.clientY},start:p,origin:{x,y}};
+    const b=drawingContext(e.target),at=contextPoint(b,(p.x-camera.x)/camera.z,(p.y-camera.y)/camera.z),x=at.x,y=at.y;
+    gesture={kind:'draw',pose:at.pose,key:null,tool:mode,context:b,layer:layer?.dataset.nodeKey||null,text:mode==='text'?textAt(e.clientX,e.clientY):null,source:mode==='connector'?hitSymbol(e.target):null,lastClient:{x:e.clientX,y:e.clientY},start:p,origin:{x,y}};
   } else if (handle || layer) {
     const key = handle ? handle.dataset.boardMove : (e.metaKey||e.ctrlKey?layer.dataset.nodeKey:hitSymbol(layer)), node = nodes.get(key).node;
     if(e.shiftKey){selectNode(key,{add:true});stage.focus({preventScroll:true});e.preventDefault();return;}
     const collapse=selection.size>1&&selection.has(key);if(selection.has(key))selectMany([...selection],{primary:key});else selectNode(key);
     if (canEdit && !node.locked && !node.bindings){const changes=moveChanges(),excluded=new Set(changes.flatMap(item=>subtree(entries.get(nodes.get(item.key).page.id),nodes.get(item.key).node.id))),page=nodes.get(key).page;
-      gesture={kind:'node',key,before:copy(node),changes,start:p,collapse,duplicatePending:e.altKey,snapRects:page.nodes.filter(n=>!excluded.has(n.id)&&n.visible!==false&&(n.parent??null)===(node.parent??null)).slice(0,2000).map(n=>nodeBounds(n,entries.get(page.id)))};
+      const snapNodes=page.nodes.filter(n=>!excluded.has(n.id)&&n.visible!==false&&(n.parent??null)===(node.parent??null)).slice(0,2000);
+      gesture={kind:'node',key,before:copy(node),changes,start:p,collapse,duplicatePending:e.altKey,snapRects:snapNodes.map(n=>nodeBounds(n,entries.get(page.id))),snapKeys:snapNodes.map(n=>keyOf(page,n.id))};
     }
   } else if(e.shiftKey){const marquee=document.createElement('div');marquee.className='selection-marquee';stage.append(marquee);gesture={kind:'marquee',start:p,marquee,page:drawingContext(e.target).page,previous:e.metaKey?[...selection]:[]};}
   else { selectNode(null); gesture = { kind: 'pan', start: p, camera: { ...camera } }; }
   presenceUI?.changed();
   if (gesture) { gesture.pointerId = e.pointerId; stage.setPointerCapture(e.pointerId); }
+  syncEditing();
   e.preventDefault(); stage.focus({ preventScroll: true });
 });
 stage.addEventListener('pointermove', e => {
@@ -884,11 +1043,12 @@ stage.addEventListener('pointermove', e => {
   gesture.moved = true;
   if (gesture.kind === 'pan') { camera.x = bound(gesture.camera.x + dx); camera.y = bound(gesture.camera.y + dy); paintCamera(); }
   else if(gesture.kind==='marquee'){const s=stage.getBoundingClientRect(),x=Math.min(p.x,gesture.start.x),y=Math.min(p.y,gesture.start.y),w=Math.abs(dx),h=Math.abs(dy);Object.assign(gesture.marquee.style,{left:`${x}px`,top:`${y}px`,width:`${w}px`,height:`${h}px`});gesture.box={left:s.left+x,top:s.top+y,right:s.left+x+w,bottom:s.top+y+h};}
-  else if(gesture.kind==='resize'){for(const item of gesture.before)Object.assign(nodes.get(item.key).node,copy(item.before));const entry=nodes.get(gesture.key);resizeArtboard(entry.page,entry.node.id,gesture.before[0].before,gesture.edge,dx/camera.z,dy/camera.z);for(const item of gesture.before)paint(item.key);}
+  else if(gesture.kind==='resize'){for(const item of gesture.before)Object.assign(nodes.get(item.key).node,copy(item.before));const entry=nodes.get(gesture.key);resizeArtboard(entry.page,entry.node.id,gesture.before[0].before,gesture.edge,dx/camera.z,dy/camera.z,gesture.pose);for(const item of gesture.before)paint(item.key);}
   else if (gesture.kind === 'draw') {
     if (!gesture.key) gesture.key = newNode(gesture.context, gesture.origin.x, gesture.origin.y);
     let ax=dx/camera.z,ay=dy/camera.z;
     if(e.shiftKey&&gesture.tool!=='stroke'){if(gesture.tool==='connector'){const angle=Math.round(Math.atan2(ay,ax)/(Math.PI/4))*Math.PI/4,length=Math.hypot(ax,ay);ax=Math.cos(angle)*length;ay=Math.sin(angle)*length;}else{const side=Math.max(Math.abs(ax),Math.abs(ay));ax=Math.sign(ax||1)*side;ay=Math.sign(ay||1)*side;}}
+    if (gesture.pose) { const local = apply(gesture.pose.inverse, ax, ay); ax = local.x; ay = local.y; }
     const node = nodes.get(gesture.key).node, x = gesture.origin.x + ax, y = gesture.origin.y + ay;
     if (node.type === 'text') return;
     if (node.type === 'stroke') node.points.push({ x, y, p: e.pressure || .5 });
@@ -897,12 +1057,42 @@ stage.addEventListener('pointermove', e => {
     node.rect = { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
     if (node.type === 'connector') node.points = [{ x: gesture.origin.x - minX, y: gesture.origin.y - minY }, { x: x - minX, y: y - minY }];
     paint(gesture.key);
-  } else if (gesture.kind === 'node') {
-    if(gesture.duplicatePending){gesture.duplicatePending=false;if(duplicateSelection(0)){gesture.duplicateAction=history.pop();updateHistory();gesture.key=selected;gesture.changes=moveChanges();}}
-    const delta=snapDelta(gesture,e,dx,dy);
-    for(const item of gesture.changes){const node=nodes.get(item.key).node,x=bound(item.before.rect.x+delta.x/(item.scale.sx||1)),y=bound(item.before.rect.y+delta.y/(item.scale.sy||1));moveLayer(node,x-node.rect.x,y-node.rect.y);paint(item.key);}
-  }
+  } else if (gesture.kind === 'node') moveNodes(gesture, e, dx, dy);
 });
+// One step of a layer drag. The pointer's displacement, in visible design units, becomes each layer's change in ITS parent's coordinates: the canonical diagram scale
+// as always, or the inverse of the animated ancestors' map while motion poses them (so the layer follows the pointer on screen, with no jump at either end).
+// Snapping and guides keep working while parents are posed, in screen space: they compare what is drawn (the layers' visible bounds, held at the pose the drag started
+// from) and the guides are drawn where those edges are on screen; the snapped pointer displacement then goes through the same conversion.
+const stageBox = element => { const r = element.getBoundingClientRect(), s = stage.getBoundingClientRect(); return { x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height }; };
+function snapVisible(g, event, dx, dy) {
+  clearGuides(); let delta = { x: dx, y: dy };
+  if (event.shiftKey) { if (Math.abs(delta.x) > Math.abs(delta.y)) delta.y = 0; else delta.x = 0; }
+  if (event.altKey || !g.changes?.length) return { x: delta.x / camera.z, y: delta.y / camera.z };
+  g.visual ??= { anchor: stageBox(dom.get(g.changes[0].key)), others: (g.snapKeys || []).map(key => dom.get(key)).filter(Boolean).map(stageBox).filter(r => r.w + r.h > 0) };
+  const r = g.visual.anchor, offset = offsetForPage(scene.pages.indexOf(nodes.get(g.changes[0].key).page)), threshold = 5;
+  for (const axis of ['x', 'y']) {
+    if (event.shiftKey && delta[axis] === 0) continue;
+    const size = axis === 'x' ? 'w' : 'h', edges = [r[axis] + delta[axis], r[axis] + delta[axis] + r[size] / 2, r[axis] + delta[axis] + r[size]]; let nearest = threshold, adjust = null, target;
+    if (canvasView.objects) for (const other of g.visual.others) for (const value of [other[axis], other[axis] + other[size] / 2, other[axis] + other[size]]) for (const edge of edges) if (Math.abs(value - edge) < nearest) { nearest = Math.abs(value - edge); adjust = value - edge; target = value; }
+    if (adjust !== null) { delta[axis] += adjust; const guide = document.createElement('div'); guide.className = `snap-guide ${axis}`; guide.style[axis === 'x' ? 'left' : 'top'] = `${target}px`; stage.append(guide); guides.push(guide); }
+    else if (canvasView.snap) { const world = (r[axis] + delta[axis] - camera[axis]) / camera.z - offset[axis]; delta[axis] = (Math.round(world / 8) * 8 + offset[axis]) * camera.z + camera[axis] - r[axis]; }
+  }
+  return { x: delta.x / camera.z, y: delta.y / camera.z };
+}
+function moveNodes(g, e, dx, dy) {
+  if (g.duplicatePending) { g.duplicatePending = false; if (duplicateSelection(0)) { g.duplicateAction = history.pop(); updateHistory(); g.key = selected; g.changes = moveChanges(); } }
+  if (g.changes.some(item => item.pose)) {
+    const visible = snapVisible(g, e, dx, dy);
+    for (const item of g.changes) {
+      const local = item.pose ? apply(item.pose.inverse, visible.x, visible.y) : { x: visible.x / (item.scale.sx || 1), y: visible.y / (item.scale.sy || 1) };
+      const node = nodes.get(item.key).node, x = bound(item.before.rect.x + local.x), y = bound(item.before.rect.y + local.y); moveLayer(node, x - node.rect.x, y - node.rect.y); paint(item.key);
+    }
+    return;
+  }
+  const delta = snapDelta(g, e, dx, dy);
+  for (const item of g.changes) { const node = nodes.get(item.key).node, x = bound(item.before.rect.x + delta.x / (item.scale.sx || 1)), y = bound(item.before.rect.y + delta.y / (item.scale.sy || 1)); moveLayer(node, x - node.rect.x, y - node.rect.y); paint(item.key); }
+}
+
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(name, finishGesture);
 // Middle button (wheel click) pans while held over the canvas in both modes, Edit and Inspect.
 // It is taken in the window's capture phase, before Inspection's own document handlers, only over the owned
@@ -945,6 +1135,7 @@ function inspectionOwns(e) {
   }
   return false;
 }
+// While Play is open it owns every pointer, wheel and gesture over the whole window, scrolling natively; the editor's camera and tools take none of it.
 function overCanvas(e) {
   const r = stage.getBoundingClientRect();
   return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom && !e.target.closest?.('#left-panel,#right-panel,#library-panel,.topbar,#rail,.menu,dialog,#status') && !inspectionOwns(e);
@@ -1054,6 +1245,8 @@ tree.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight' && open === 'false') { e.preventDefault(); expanded.add(key); renderTree(); focusRow(key); }
   else if (e.key === 'ArrowLeft' && open === 'true') { e.preventDefault(); expanded.delete(key); renderTree(); focusRow(key); }
   else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectNode(key, { reveal: true }); focusRow(key); }
+  // Menu key or Shift+F10 on the focused row: only an image row has a menu, so any other row keeps its keys and the browser's own behaviour.
+  else if (!e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey && ((e.key === 'ContextMenu' && !e.shiftKey) || (e.key === 'F10' && e.shiftKey))) { if (openRowMenu(row, { keyboard: true })) e.preventDefault(); }
 });
 $('#layer-search').addEventListener('input', renderTree);
 $('#layer-search').addEventListener('keydown', e => { if (e.key === 'Escape') { e.target.value = ''; renderTree(); } });
@@ -1061,12 +1254,324 @@ $('#layer-search').addEventListener('keydown', e => { if (e.key === 'Escape') { 
 // Pages: each keeps its own camera.
 $('#page-search').addEventListener('input',renderPages);
 $('#page-search').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();e.target.value='';renderPages();}});
-$('#pages').addEventListener('click', e => {
-  const row = e.target.closest('[data-page]'); if (!row || row.dataset.page === pageId) return;
+function showPage(id) {
+  if (id === pageId) return;
   commitFields(); stopTextEdit(); saveViewNow(); selectNode(null);
-  pageId = row.dataset.page; layoutBoards(); renderPages(); populateInspector(); renderTree(); renderDesign();
+  pageId = id; layoutBoards(); renderPages(); populateInspector(); renderTree(); renderDesign();
   if (validCamera(views[pageId])) { camera = { ...views[pageId] }; paintCamera(); saveView(); } else fitAll();
+}
+$('#pages').addEventListener('click', e => { const row = e.target.closest('[data-page]'); if (row && !row.closest('.page-rename')) showPage(row.dataset.page); });
+
+// Page CRUD by hand. New page: a white artboard on a new page named for the next free number, in rename so it can be named at once. Rename: double-click, F2,
+// or the menu. Delete: from the menu, after a second confirming press. Each is one undoable step and goes through the same save as every other change.
+let pageMenuFor = null, pageMenuKeyAt = 0, pageDeleteArmed = false;
+const pageRef = id => scene.pages.find(p => p.id === id);
+const randomPageId = () => { const bytes = new Uint8Array(8); crypto.getRandomValues(bytes); return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''); };
+function newPage() {
+  const problem = pageProblem(scene, 'add', { canEdit }); if (problem) { message(problem); return; }
+  commitFields(); stopTextEdit();
+  const record = addPageTo(scene, blankPage({ id: randomPageId(), name: nextPageName(scene.pages) })); buildScene(); showPageNow(record.page.id); pushHistory(record); startPageRename(record.page.id, { isNew: true });
+}
+function showPageNow(id) { saveViewNow(); selectNode(null); pageId = id; layoutBoards(); renderPages(); populateInspector(); renderTree(); renderDesign(); fitAll(); }
+function startPageRename(id, { isNew = false } = {}) {
+  const problem = pageProblem(scene, 'rename', { canEdit, id }); if (problem) { message(problem); return; }
+  if (pageRename) return;
+  const page = pageRef(id); $('#page-search').value = ''; pageRename = { id, done: false };
+  renderPages();
+  const row = $('#pages').querySelector(`[data-page="${CSS.escape(id)}"]`); if (!row) { pageRename = null; return; }
+  const holder = document.createElement('div'), input = document.createElement('input'); holder.className = 'page-row page-rename'; holder.dataset.page = id; holder.innerHTML = '<svg class="icon"><use href="#i-page"/></svg>';
+  input.className = 'field'; input.type = 'text'; input.maxLength = 120; input.value = page.name; input.setAttribute('aria-label', `Page name for ${page.name}`); input.autocomplete = 'off'; holder.append(input); row.replaceWith(holder);
+  const finish = (commit, refocus) => {
+    if (pageRename?.id !== id || pageRename.done) return;
+    if (commit) {
+      const clean = cleanPageName(input.value);
+      if (!clean.ok) { message(clean.reason); input.focus(); return; }
+      pageRename.done = true; pageRename = null;
+      const live = pageRef(id);
+      if (live && clean.name !== live.name) { const stillProblem = pageProblem(scene, 'rename', { canEdit, id }); if (stillProblem) message(stillProblem); else pushHistory(renamePageIn(scene, id, clean.name)); }
+    } else { pageRename.done = true; pageRename = null; }
+    renderPages(); populateInspector(); renderDesign();
+    if (refocus) $('#pages').querySelector(`[data-page="${CSS.escape(id)}"]`)?.focus();
+  };
+  input.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); finish(true, true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false, true); } });
+  input.addEventListener('blur', () => { if (pageRename?.id === id && !pageRename.done) { const clean = cleanPageName(input.value); finish(clean.ok, false); } });
+  input.focus(); input.select();
+}
+function deletePage(id) {
+  const problem = pageProblem(scene, 'delete', { canEdit, id }); if (problem) { message(problem); return; }
+  commitFields(); stopTextEdit();
+  const index = scene.pages.findIndex(p => p.id === id), name = scene.pages[index].name, wasShown = pageId === id;
+  const record = deletePageFrom(scene, id, pruneForPage); buildScene();
+  if (wasShown) { pageId = neighbourAfterDelete(scene.pages, index).id; layoutBoards(); }
+  selectNode(null); pushHistory(record); renderPages(); populateInspector(); renderTree(); renderDesign();
+  if (wasShown) { if (validCamera(views[pageId])) { camera = { ...views[pageId] }; paintCamera(); saveView(); } else fitAll(); }
+  message(`Deleted “${name}”. Undo brings it back.`);
+}
+const pruneForPage = pruneMotionForPage;
+function paintPageMenu(id) {
+  const menu = $('#page-menu'), note = $('#page-menu-note'), rename = menu.querySelector('[data-page-action="rename"]'), del = menu.querySelector('[data-page-action="delete"]');
+  const renameProblem = pageProblem(scene, 'rename', { canEdit, id }), deleteProblem = pageProblem(scene, 'delete', { canEdit, id });
+  pageDeleteArmed = false; rename.disabled = !!renameProblem; del.disabled = !!deleteProblem; del.textContent = 'Delete page…';
+  note.hidden = !(renameProblem || deleteProblem); note.textContent = renameProblem || deleteProblem || '';
+  del.title = deleteProblem || ''; rename.title = renameProblem || '';
+}
+function openPageMenu(row, { keyboard, x = 0, y = 0 }) {
+  const id = row?.dataset.page; if (!id || id === 'all' || !pageRef(id)) return false;
+  pageMenuFor = id; paintPageMenu(id); const r = row.getBoundingClientRect();
+  showMenu($('#page-menu'), { at: () => keyboard ? { x: r.left + 24, y: r.bottom } : { x, y }, keyboard, trigger: keyboard ? { setAttribute() {}, focus: () => row.focus(), contains: () => false } : null });
+  if (keyboard) pageMenuKeyAt = Date.now();
+  return true;
+}
+$('#new-page').addEventListener('click', newPage);
+$('#pages').addEventListener('dblclick', e => { const row = e.target.closest('.page-row[data-page]'); if (row && row.dataset.page !== 'all' && !row.closest('.page-rename')) { e.preventDefault(); startPageRename(row.dataset.page); } });
+$('#pages').addEventListener('contextmenu', e => {
+  const row = e.target.closest('.page-row[data-page]'), keyboard = e.clientX === 0 && e.clientY === 0;
+  if (keyboard && row && Date.now() - pageMenuKeyAt < 600 && openMenuEl === $('#page-menu')) { e.preventDefault(); return; }
+  if (openPageMenu(row, { keyboard, x: e.clientX, y: e.clientY })) e.preventDefault();
 });
+$('#pages').addEventListener('keydown', e => {
+  const row = e.target.closest('.page-row[data-page]'); if (!row || e.target !== row || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.key === 'F2' && row.dataset.page !== 'all') { e.preventDefault(); startPageRename(row.dataset.page); }
+  else if (!e.repeat && ((e.key === 'ContextMenu' && !e.shiftKey) || (e.key === 'F10' && e.shiftKey))) { if (openPageMenu(row, { keyboard: true })) e.preventDefault(); }
+});
+$('#page-menu').addEventListener('click', e => {
+  const item = e.target.closest('[data-page-action]'); if (!item || item.disabled) return;
+  const id = pageMenuFor, action = item.dataset.pageAction;
+  if (action === 'rename') { closeMenu(); startPageRename(id); return; }
+  if (action === 'delete') {
+    const page = pageRef(id); if (!page) { closeMenu(); return; }
+    // One more press to confirm, naming what goes with it.
+    if (!pageDeleteArmed) { pageDeleteArmed = true; const count = pageLayerCount(page); item.textContent = `Delete “${page.name.length > 24 ? page.name.slice(0, 23) + '…' : page.name}” and ${count} ${count === 1 ? 'layer' : 'layers'}?`; return; }
+    closeMenu(); deletePage(id);
+  }
+});
+
+
+// ---- Motion, in place. The editor's own live layer elements are the artwork: one small Play/Pause toggle animates them where they are (play.js), on this same canvas,
+// with the same camera, Page, selection, panels and tools. Nothing is copied, covered, locked or made modal, nothing is saved, and the editor keeps every gesture
+// (see the contract at the top of play.js). Motion below is the inspector's section for what the selected layer does, with the optional time, replay, reduced-motion
+// and reset-to-artwork controls and the deliberate "Try interaction" for authored click actions.
+// The preview model is validated against the whole Paper (every Page, layer, root and state it names must exist), which is linear in the layers, and the motion runtime
+// asks for the model many times while a scene is built. The answer is therefore kept for the actual scene object, the actual preview object and the layer count, and
+// dropped by every edit, undo, redo and rebuild (previewEdits): a large Paper is validated once per change, never once per layer.
+let previewValidity = null;
+function validPreview() {
+  if (!scene) return null;
+  const total = scene.pages.reduce((sum, page) => sum + page.nodes.length, 0), kept = previewValidity;
+  if (kept && kept.scene === scene && kept.preview === scene.preview && kept.edits === previewEdits && kept.total === total) return kept.value;
+  const value = previewProblem(scene.preview, scene) ? null : scene.preview || null; previewValidity = { scene, preview: scene.preview, edits: previewEdits, total, value }; return value;
+}
+const motionHost = {
+  scene: () => scene,
+  preview: validPreview,
+  pageShown: id => pageId === 'all' || pageId === id,
+  nodeEl: (p, n) => dom.get(p + ':' + n) || null,
+  keyOf: (p, n) => p + ':' + n,
+  nodeText: (p, n) => entries.get(p)?.get(n)?.text || '',
+  rootEl: (p, n) => { const map = entries.get(p); let node = map?.get(n); while (node && map.has(node.parent)) node = map.get(node.parent); return node ? boards.get(p + ':' + node.id)?.content || null : null; },
+  layerBox: (p, n) => { const map = entries.get(p), node = map?.get(n), root = node && map.get(node.parent); return root && !map.has(root.parent) ? { y: node.rect.y, h: node.rect.h, rootH: root.rect.h } : null; },
+  get stage() { return stage; },
+  camera: () => camera,
+  selectedKeys: () => selection,
+  currentPage: () => pageId,
+  // Explicit Try navigation uses the editor's own Page and camera actions; the toggle itself never does.
+  navigate: (id, rootId) => { if (!scene.pages.some(p => p.id === id)) return; showPage(id); if (rootId !== undefined) { const b = boards.get(id + ':' + rootId); if (b) fit([b.viewRect]); } },
+  panTo: (p, n) => { const r = dom.get(p + ':' + n)?.getBoundingClientRect(), s = stage.getBoundingClientRect(); if (!r) return; camera.y = bound(camera.y + s.top + 56 - r.top); paintCamera(); saveView(); },
+  frame: () => { syncBoardPoses(); if (presenceUI?.needsPaint?.()) presenceUI.paint(); },
+};
+motion = createMotion(motionHost);
+motion.bindControls({ toggle: $('#play-toggle'), replay: $('#motion-replay'), reset: $('#motion-reset'), reduce: $('#motion-reduce'), scrub: $('#motion-scrub'), ms: $('#motion-ms'), readout: $('#motion-readout'), status: $('#motion-status') });
+onSurfaceDispose(() => { motion?.destroy(); });
+$('#handoff-attach').addEventListener('click', () => $('#handoff-file').click());
+$('#handoff-file').addEventListener('change', event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) attachHandoff(file); });
+$('#handoff-direction').addEventListener('change', event => { const value = event.target.value; handoffEdit(handoff => withFields(handoff, { direction: value })); });
+$('#handoff-source').addEventListener('change', event => { const value = event.target.value; handoffEdit(handoff => withFields(handoff, { source: value })); });
+$('#handoff-gaps').addEventListener('change', event => { const value = event.target.value; handoffEdit(handoff => withFields(handoff, { gaps: value })); });
+$('#handoff-entry').addEventListener('change', event => { const [resource, entryPath] = event.target.value ? event.target.value.split('\n') : []; handoffEdit(handoff => withFields(handoff, { entry: resource ? { resource, path: entryPath } : null })); });
+$('#motion-try').addEventListener('click', () => { const entry = selection.size === 1 ? nodes.get(selected) : null; if (entry) motion.tryLayer(entry.page.id, entry.node.id); });
+// Whether anything that edits is in progress: a gesture that changes artwork (a pan only moves the camera), a text edit, or a focused inspector field. Effects are held at their
+// current pose for exactly that long.
+function syncEditing() { motion?.setEditing(!!(gesture && gesture.kind !== 'pan') || !!textEdit || liveEdit || form.contains(document.activeElement), { textKey: textEdit }); }
+// Exports and previews draw the authored artwork: the clone is taken from the live layers, so a state's alternate text and a pin's offset are taken off it.
+function canonicalClone(root) {
+  for (const el of [root, ...root.querySelectorAll('*')]) {
+    el.style.marginTop = ''; const key = el.dataset?.nodeKey; if (key && motion?.textFor(key) !== null && motion?.textFor(key) !== undefined) { const entry = nodes.get(key); if (entry) el.textContent = entry.node.text || ''; }
+  }
+  return root;
+}
+
+// One change to the preview model: checked against the Paper before it is kept, one undo step, saved like any other edit.
+function motionEdit(change) {
+  if (!canEdit) { message('This Paper is view-only, so motion can’t be changed.'); return false; }
+  commitFields();
+  const before = scene.preview === undefined ? undefined : copy(scene.preview), next = change(before === undefined ? null : copy(before)), problem = previewProblem(next, scene);
+  if (problem) { message(problem); renderMotion(); return false; }
+  if (JSON.stringify(next) === JSON.stringify(before)) return true;
+  if (next === undefined) delete scene.preview; else scene.preview = next;
+  pushHistory({ kind: 'preview', before, after: next === undefined ? undefined : copy(next) }); renderMotion(); motion?.dirty(); return true;
+}
+// The author's source handoff: one change to paper.handoff, checked before it is kept, one undo step, saved like any other edit. The archive bytes were already stored by the upload.
+function handoffEdit(change) {
+  if (!canEdit) { message('This Paper is view-only, so the handoff can’t be changed.'); return false; }
+  const before = scene.handoff === undefined ? undefined : copy(scene.handoff), next = change(before === undefined ? undefined : copy(before)), problem = handoffProblem(next);
+  if (problem) { message(problem); renderHandoff(); return false; }
+  if (JSON.stringify(next) === JSON.stringify(before)) return true;
+  if (next === undefined) delete scene.handoff; else scene.handoff = next;
+  pushHistory({ kind: 'handoff', before, after: next === undefined ? undefined : copy(next) }); renderHandoff(); return true;
+}
+const sizeLabel = bytes => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+async function downloadHandoff(resource) {
+  const status = $('#handoff-status');
+  try {
+    status.textContent = `Preparing ${resource.name}…`;
+    const response = await fetch(`/api/handoff${paperQuery}&resource=${encodeURIComponent(resource.id)}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `The archive could not be downloaded (${response.status}).`);
+    const blob = await response.blob(); if (blob.size !== resource.bytes) throw new Error('The downloaded archive does not match its recorded size.');
+    const where = await download(new Blob([await blob.arrayBuffer()], { type: 'application/octet-stream' }), resource.name); status.textContent = where === 'host' ? `${resource.name} was handed to the app to save.` : `${resource.name} was downloaded. It was not opened or run.`;
+  } catch (error) { status.textContent = error.message; }
+}
+async function attachHandoff(file) {
+  const status = $('#handoff-status');
+  try {
+    if (!canEdit) throw new Error('This Paper is view-only.'); if (!/\.zip$/i.test(file.name)) throw new Error('Choose a .zip file.'); if (file.size > HANDOFF_LIMITS.resourceBytes) throw new Error(`A source archive must fit within ${HANDOFF_LIMITS.resourceBytes / 1048576} MB.`);
+    const direction = $('#handoff-direction').value.trim() || 'Selected', named = directionProblem(direction); if (named) throw new Error(named);
+    status.textContent = `Checking ${file.name}…`;
+    const response = await fetch(`/api/handoff${paperQuery}&name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { ...clientHeaders, 'Content-Type': 'application/octet-stream' }, body: file }), data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `The archive was refused (${response.status}).`);
+    if (handoffEdit(handoff => withResource(handoff, data.resource, { direction }))) status.textContent = `${data.resource.name} is attached: ${data.resource.entries.length} files. It is stored and downloadable by anyone with this Paper; it is never opened or run here.`;
+  } catch (error) { status.textContent = error.message; }
+}
+function renderHandoff() {
+  const handoff = scene?.handoff, section = $('#handoff-section'), supported = handoff && handoff.version === 1;
+  section.hidden = !(handoff || canEdit); if (section.hidden) return;
+  const summary = $('#handoff-summary'), files = $('#handoff-files'), edit = $('#handoff-edit');
+  summary.replaceChildren(); files.replaceChildren(); edit.hidden = !canEdit;
+  if (handoff && !supported) { summary.append(mk('p', { class: 'note', text: `This Paper’s handoff is version ${handoff.version}, which this version cannot show or change.` })); edit.hidden = true; return; }
+  const line = (label, value) => value ? mk('div', {}, mk('b', { text: `${label}: ` }), document.createTextNode(value)) : null;
+  if (handoff) {
+    const history = (handoff.alternatives || []).map(a => `${a.label} (${a.status})`).join(', '), entry = handoff.entrypoint;
+    summary.append(...[line('Selected', handoff.selected.label), line('Historical or alternative', history), line('Entry point', entry ? `${entry.path}${entry.run ? ` · ${entry.run}` : ''}` : ''), line('Source', handoff.provenance?.source), line('Licence', handoff.provenance?.license), line('Not carried by the Paper', (handoff.support?.gaps || []).join(' · '))].filter(Boolean));
+    for (const resource of handoff.resources || []) {
+      const kinds = ['font', 'license', 'script', 'page', 'style'].map(role => [role, resource.entries.filter(e => e.role === role).length]).filter(([, n]) => n).map(([role, n]) => `${n} ${role}${n > 1 ? 's' : ''}`).join(' · ');
+      const row = mk('div', { class: 'handoff-file' }, mk('span', { text: resource.name, title: resource.sha256 }), mk('button', { type: 'button', class: 'btn', text: 'Download', 'aria-label': `Download ${resource.name}` }));
+      row.querySelector('button').addEventListener('click', () => downloadHandoff(resource));
+      if (canEdit) { const remove = mk('button', { type: 'button', class: 'btn', text: 'Remove', title: 'Stop sharing this archive with the Paper', 'aria-label': `Remove ${resource.name} from the handoff` }); remove.addEventListener('click', () => handoffEdit(h => { const next = withoutResource(h, resource.id); return next.resources.length || next.alternatives?.length || next.provenance || next.support || next.reference ? next : undefined; })); row.append(remove); }
+      row.append(mk('span', { class: 'meta', text: `${sizeLabel(resource.bytes)} · ${resource.entries.length} files${kinds ? ` · ${kinds}` : ''} · sha256 ${resource.sha256.slice(0, 12)}…` }));
+      files.append(row);
+    }
+  } else summary.append(mk('p', { class: 'note', text: 'Nothing is attached. Attach a ZIP only when the design depends on source this Paper cannot carry.' }));
+  if (!canEdit) return;
+  const direction = $('#handoff-direction'), entry = $('#handoff-entry'), source = $('#handoff-source'), gaps = $('#handoff-gaps');
+  if (document.activeElement !== direction) direction.value = handoff?.selected?.label || ''; if (document.activeElement !== source) source.value = handoff?.provenance?.source || ''; if (document.activeElement !== gaps) gaps.value = (handoff?.support?.gaps || []).join('\n');
+  const options = [mk('option', { value: '', text: 'None chosen' })];
+  for (const resource of handoff?.resources || []) for (const e of resource.entries.filter(item => item.role === 'page')) options.push(mk('option', { value: `${resource.id}\n${e.path}`, text: e.path }));
+  entry.replaceChildren(...options); entry.value = handoff?.entrypoint ? `${handoff.entrypoint.resource}\n${handoff.entrypoint.path}` : ''; entry.disabled = options.length < 2; direction.disabled = source.disabled = gaps.disabled = !handoff;
+}
+const mk = (tag, props = {}, ...kids) => { const node = document.createElement(tag); for (const [key, value] of Object.entries(props)) { if (key === 'text') node.textContent = value; else if (key === 'class') node.className = value; else if (key.startsWith('aria-') || key === 'title' || key === 'type') node.setAttribute(key, value); else node[key] = value; } node.append(...kids); return node; };
+const MOTION_LABELS = { opacity: 'Opacity', x: 'Move X', y: 'Move Y', scale: 'Scale', rotate: 'Rotate °', blur: 'Blur', backdropBlur: 'Glass blur', color: 'Text colour', background: 'Background' };
+const TRIGGER_LABELS = { load: 'When played', 'scroll-in': 'On scroll into view', scroll: 'With scroll position', hover: 'On hover', focus: 'On focus', state: 'When a state is set' };
+function renderMotion() {
+  const box = $('#motion-section'), body_ = $('#motion-body'), entry = selection.size === 1 ? nodes.get(selected) : null, tryButton = $('#motion-try');
+  const p = scene?.preview, any = !!(p && ((p.animations?.length || 0) + (p.texts?.length || 0) + (p.sticky?.length || 0) + (p.interactions?.length || 0)));
+  // The motion controls stay available whenever the Paper has motion; the authoring below needs a selected layer. Try interaction is only for a layer with a click action.
+  box.hidden = !entry && !any;
+  const clicks = entry ? motion.interactionsFor(entry.page.id, entry.node.id).length : 0;
+  tryButton.disabled = !clicks; tryButton.title = clicks ? 'Run this layer’s click actions on the canvas, once' : entry ? 'This layer has no click action to try' : 'Select a layer that has a click action to try it';
+  if (!entry) { body_.replaceChildren(); return; }
+  const pid = entry.page.id, nid = entry.node.id, preview = scene.preview, problem = previewProblem(preview, scene), mine = list => (list || []).filter(r => r.page === pid && r.node === nid);
+  if (problem) { body_.replaceChildren(mk('p', { class: 'note', text: `The preview model can’t be used: ${problem}. Fix it in paper.json (an agent can) to author motion here again.` })); return; }
+  const parts = [];
+  const animations = mine(preview?.animations), interactions = mine(preview?.interactions);
+  if (!canEdit) {
+    parts.push(mk('p', { class: 'note', text: animations.length || interactions.length ? `${animations.length} motion ${animations.length === 1 ? 'effect' : 'effects'} and ${interactions.length} click ${interactions.length === 1 ? 'action' : 'actions'} on this layer. Press Play to see them. This Paper is view-only.` : 'No motion on this layer.' }));
+    body_.replaceChildren(...parts); return;
+  }
+  const edit = (id, mutate) => motionEdit(prev => { const record = prev.animations.find(a => a.id === id); mutate(record); return prev; });
+  // Presets: ordinary records the person then tunes below.
+  const add = mk('select', { class: 'field', 'aria-label': 'Add motion to this layer' }, mk('option', { value: '', text: 'Add motion…' }), ...Object.entries(PRESETS).map(([key, p]) => mk('option', { value: key, text: p.label })));
+  add.addEventListener('change', () => { const key = add.value; add.value = ''; if (key) motionEdit(prev => withRecord(prev, 'animations', presetRecord(prev, pid, nid, key))); });
+  parts.push(add);
+  for (const record of animations) {
+    const card = mk('div', { class: 'motion-card', role: 'group', 'aria-label': `Motion ${record.id}` }), type = record.trigger.type;
+    const trigger = mk('select', { class: 'field', 'aria-label': 'When it moves' }, ...Object.entries(TRIGGER_LABELS).filter(([key]) => key !== 'state' || type === 'state').map(([key, label]) => mk('option', { value: key, text: label, selected: key === type })));
+    trigger.addEventListener('change', () => edit(record.id, r => { const next = trigger.value; r.trigger = next === 'scroll-in' ? { type: next, threshold: .25 } : next === 'scroll' ? { type: next, from: 0, to: 80 } : { type: next }; if (next !== 'load') delete r.iterations; if (next === 'scroll') { delete r.delayMs; delete r.direction; } }));
+    const num = (label, value, min, max, apply, disabled = false) => { const input = mk('input', { class: 'field', type: 'number', min: String(min), max: String(max), step: 'any', value: String(value), disabled }); input.setAttribute('aria-label', label); input.addEventListener('change', () => { const n = Number(input.value); if (input.value === '' || !Number.isFinite(n)) { renderMotion(); return; } edit(record.id, r => apply(r, n)); }); return mk('label', { text: label }, input); };
+    const easing = mk('select', { class: 'field', 'aria-label': 'Easing' }, ...EASINGS.map(e => mk('option', { value: e, text: e, selected: (record.easing || 'linear') === e })));
+    easing.addEventListener('change', () => edit(record.id, r => { r.easing = easing.value; }));
+    const remove = mk('button', { type: 'button', class: 'danger', text: 'Remove', 'aria-label': `Remove motion ${record.id}` }); remove.addEventListener('click', () => motionEdit(prev => withoutRecord(prev, 'animations', record.id)));
+    card.append(mk('div', { class: 'row' }, trigger, remove));
+    card.append(mk('div', { class: 'row' }, num('Duration ms', record.durationMs, 1, 60000, (r, n) => { r.durationMs = Math.round(n); }), num('Delay ms', record.delayMs || 0, 0, 60000, (r, n) => { if (n) r.delayMs = Math.round(n); else delete r.delayMs; }, type === 'scroll'), mk('label', { text: 'Easing' }, easing)));
+    if (type === 'scroll-in') card.append(mk('div', { class: 'row' }, num('Visible %', Math.round((record.trigger.threshold ?? .25) * 100), 0, 100, (r, n) => { r.trigger.threshold = n / 100; })));
+    if (type === 'scroll') card.append(mk('div', { class: 'row' }, num('From px', record.trigger.from, 0, 100000, (r, n) => { r.trigger.from = n; }), num('To px', record.trigger.to, 0, 100000, (r, n) => { r.trigger.to = n; })));
+    if (type === 'load') { const loop = mk('input', { type: 'checkbox', checked: record.iterations === 'infinite' }); loop.addEventListener('change', () => edit(record.id, r => { if (loop.checked) r.iterations = 'infinite'; else delete r.iterations; })); card.append(mk('label', { class: 'check' }, loop, document.createTextNode('Repeat forever'))); }
+    if (record.keyframes.length === 2) {
+      const row = mk('div', { class: 'row' });
+      for (const name of Object.keys(record.keyframes[0]).filter(key => key !== 'offset')) {
+        if (typeof record.keyframes[0][name] === 'string') { row.append(mk('label', { text: MOTION_LABELS[name] }, mk('span', { text: `${record.keyframes[0][name]} → ${record.keyframes[1][name]}` }))); continue; }
+        const [lo, hi] = PROPERTIES[name], from = num(`${MOTION_LABELS[name]} from`, record.keyframes[0][name], lo, hi, (r, n) => { r.keyframes[0][name] = n; }), to = num(`${MOTION_LABELS[name]} to`, record.keyframes[1][name], lo, hi, (r, n) => { r.keyframes[1][name] = n; });
+        row.append(from, to);
+      }
+      card.append(row);
+    } else card.append(mk('p', { class: 'note', text: `${record.keyframes.length} keyframes. Edit them in paper.json (an agent can).` }));
+    parts.push(card);
+  }
+  // Click: what pressing this layer does. State changes create their state the first time they are used.
+  const click = mk('select', { class: 'field', 'aria-label': 'Add a click action' }, mk('option', { value: '', text: 'Add click action…' }), mk('option', { value: 'navigate', text: 'Go to a Page', disabled: scene.pages.length < 2 }), mk('option', { value: 'set-state', text: 'Set a state' }), mk('option', { value: 'back', text: 'Go back' }));
+  click.addEventListener('change', () => {
+    const kind = click.value; click.value = ''; if (!kind) return;
+    motionEdit(prev => {
+      let next = prev; const action = kind === 'navigate' ? { type: 'navigate', page: scene.pages.find(p => p.id !== pid)?.id } : kind === 'back' ? { type: 'back' } : { type: 'set-state', state: 'state', value: 'on' };
+      if (kind === 'set-state') next = ensureState(next, 'state', 'on');
+      return withRecord(next, 'interactions', { id: uniqueId(next?.interactions, 'click'), page: pid, node: nid, on: 'click', actions: [action] });
+    });
+  });
+  parts.push(click);
+  for (const record of interactions) {
+    const card = mk('div', { class: 'motion-card', role: 'group', 'aria-label': `Click action ${record.id}` }), action = record.actions[0];
+    const edit2 = mutate => motionEdit(prev => { const r = prev.interactions.find(i => i.id === record.id); mutate(r, prev); return prev; });
+    const pageSel = mk('select', { class: 'field', 'aria-label': 'Go to Page' }, ...scene.pages.map(p => mk('option', { value: p.id, text: p.name, selected: p.id === action.page })));
+    pageSel.addEventListener('change', () => edit2(r => { r.actions[0] = { type: 'navigate', page: pageSel.value }; }));
+    const remove = mk('button', { type: 'button', class: 'danger', text: 'Remove', 'aria-label': `Remove click action ${record.id}` }); remove.addEventListener('click', () => motionEdit(prev => withoutRecord(prev, 'interactions', record.id)));
+    if (record.actions.length !== 1 || !['navigate', 'set-state', 'back'].includes(action.type)) { card.append(mk('div', { class: 'row' }, mk('span', { class: 'title', text: `On click: ${record.actions.map(a => a.type).join(', ')}` }), remove), mk('p', { class: 'note', text: 'Edit this in paper.json (an agent can).' })); parts.push(card); continue; }
+    card.append(mk('div', { class: 'row' }, mk('span', { class: 'title', text: 'On click' }), remove));
+    if (action.type === 'navigate') card.append(mk('div', { class: 'row' }, mk('label', { text: 'Go to Page' }, pageSel)));
+    else if (action.type === 'back') card.append(mk('p', { class: 'note', text: 'Goes back to the Page it came from.' }));
+    else {
+      const stateInput = mk('input', { class: 'field', type: 'text', maxLength: 40, value: action.state }), valueInput = mk('input', { class: 'field', type: 'text', maxLength: 40, value: action.value });
+      stateInput.setAttribute('aria-label', 'State'); valueInput.setAttribute('aria-label', 'Set to');
+      const apply = () => { const name = stateInput.value.trim(), value = valueInput.value.trim(); if (!/^[a-zA-Z0-9_-]{1,40}$/.test(name) || !value) { message('A state needs a name of letters, digits, - or _, and a value.'); renderMotion(); return; } motionEdit(prev => { const next = ensureState(prev, name, value), r = next.interactions.find(i => i.id === record.id); r.actions[0] = { type: 'set-state', state: name, value }; return next; }); };
+      stateInput.addEventListener('change', apply); valueInput.addEventListener('change', apply);
+      card.append(mk('div', { class: 'row' }, mk('label', { text: 'State' }, stateInput), mk('label', { text: 'Set to' }, valueInput)));
+    }
+    parts.push(card);
+  }
+  // Pinned while scrolling: only a layer directly inside a top-level artboard.
+  const parent = entry.node.parent == null ? null : entries.get(pid).get(entry.node.parent);
+  if (parent && entry.page.root.includes(parent.id) && isArtboard(parent)) {
+    const pinned = mine(preview?.sticky)[0], pin = mk('input', { type: 'checkbox', checked: !!pinned });
+    pin.addEventListener('change', () => motionEdit(prev => pin.checked ? withRecord(prev, 'sticky', { id: uniqueId(prev?.sticky, 'pin'), page: pid, node: nid }) : withoutRecord(prev, 'sticky', pinned.id)));
+    parts.push(mk('label', { class: 'check' }, pin, document.createTextNode('Pin to the top while the page scrolls')));
+  }
+  // A top-level artboard can be declared as the responsive version of its Page for a range of window widths: metadata for whoever implements the design.
+  // The editor itself shows every artboard as authored and never swaps or fits them.
+  if (entry.page.root.includes(nid) && isArtboard(entry.node)) {
+    const variant = (preview?.variants || []).find(v => v.page === pid && v.root === nid), use = mk('input', { type: 'checkbox', checked: !!variant });
+    use.addEventListener('change', () => motionEdit(prev => use.checked ? withRecord(prev, 'variants', { id: uniqueId(prev?.variants, 'variant'), page: pid, root: nid, label: (entry.node.name || 'Artboard').slice(0, 40) }) : withoutRecord(prev, 'variants', variant.id)));
+    parts.push(mk('label', { class: 'check' }, use, document.createTextNode('Declare as a responsive version of this Page')));
+    if (variant) {
+      const range = (label, key) => { const input = mk('input', { class: 'field', type: 'number', min: '0', max: '10000', step: '1', placeholder: key === 'minWidth' ? '0' : 'any', value: variant[key] ?? '' }); input.setAttribute('aria-label', label); input.addEventListener('change', () => motionEdit(prev => { const r = prev.variants.find(v => v.id === variant.id); if (input.value === '') delete r[key]; else r[key] = Math.round(Number(input.value)); return prev; })); return mk('label', { text: label }, input); };
+      parts.push(mk('div', { class: 'motion-card' }, mk('div', { class: 'row' }, range('Shown from px wide', 'minWidth'), range('up to px wide', 'maxWidth')), mk('p', { class: 'note', text: 'For whoever builds this design: the window widths this artboard is meant for. A width outside every range uses the nearest one. The editor still shows every artboard as it is; nothing here swaps or scales them.' })));
+    }
+  }
+  body_.replaceChildren(...parts);
+}
+// A state used by a click action: defined the first time, with a resting value so Play has something to start from.
+function ensureState(preview, name, value) {
+  const states = preview?.states || [], found = states.find(s => s.id === name);
+  if (found) return found.values.includes(value) || found.values.length >= 8 ? preview : withRecord(preview, 'states', { ...found, values: [...found.values, value] });
+  const rest = value === 'default' ? 'other' : 'default';
+  return withRecord(preview, 'states', { id: name, values: [rest, value], initial: rest });
+}
 
 // Panels: wide surfaces dock both; below 1024 px one panel at a time. The artwork keeps its place on screen
 // and its zoom when a panel opens or closes: screenX = stage.left + camera.x + worldX * z, so a moved stage
@@ -1095,7 +1600,7 @@ $('#zoom-in').addEventListener('click', () => zoomCenter(1.2)); $('#zoom-out').a
 // Small menus (project, zoom, canvas view, shapes): one open at a time. Arrows move, Enter/Space choose,
 // Escape or a press outside closes, and focus returns to the control that opened it.
 let openMenuEl = null, menuTrigger = null;
-const menuItems = el => [...el.querySelectorAll('button:not(:disabled),input')];
+const menuItems = el => [...el.querySelectorAll('button:not(:disabled):not([hidden]),input')];
 function showMenu(el, { at, trigger = null, keyboard = false }) {
   closeMenu(); el.hidden = false;
   const w = el.offsetWidth, h = el.offsetHeight, p = at(w, h);
@@ -1133,31 +1638,62 @@ function exportBoard() {
   return !selected && shown.length === 1 ? shown[0] : null;
 }
 const boardSize = b => ({ w: Math.ceil(b.node.rect.w), h: Math.ceil(b.node.rect.h) });
+// Image export of the chosen layers. What is exported: the selected layers (a layer, a group, several layers, or a whole artboard), cropped to their
+// rendered bounds; with nothing selected and a single design on screen, that design. Everything is on one Page. PNG keeps transparency, JPEG sits on white.
+let exportScale = 1, exporting = false;
+try { const saved = Number(localStorage.getItem('openpaperdesign:export-scale')); if (EXPORT_SCALES.includes(saved)) exportScale = saved; } catch { /* Default scale. */ }
+function exportKeys() {
+  const keys = [...selection].filter(key => nodes.has(key));
+  if (keys.length) return keys;
+  const b = exportBoard(); if (!b) return [];
+  const own = [...boards].find(([, board]) => board === b)?.[0]; return own ? [own] : [];
+}
+function exportRootKey(key) {
+  const entry = nodes.get(key), map = entries.get(entry.page.id); let node = entry.node;
+  while (node && map.has(node.parent)) node = map.get(node.parent);
+  return keyOf(entry.page, node.id);
+}
+// The size the menu advertises is measured on the very same untransformed off-screen copy that the capture draws (buildExportClone), never on the live,
+// camera-scaled canvas, so what is promised and what is saved cannot differ. (Fonts and images are not awaited here: their boxes are sized by the Paper.)
+function exportMeasure(keys) {
+  if (!keys.length) return null;
+  let built; try { built = buildExportClone(keys); return measureExport(built); } catch { return null; } finally { built?.crop.remove(); }
+}
+function paintExportMenu() {
+  const keys = exportKeys(), estimate = exportMeasure(keys), ready = !!estimate && !!inspectionLib?.snapdom && !exporting;
+  const entry = keys.length === 1 ? nodes.get(keys[0]) : null, label = !keys.length ? 'Select layers to export' : entry ? entry.node.name : `${keys.length} layers`;
+  $('#export-target').textContent = label; $('#export-target').title = entry ? `${entry.node.name} · ${entry.page.name}` : '';
+  const px = estimate && exportPixels(estimate, exportScale);
+  $('#export-size').textContent = px ? `${px.width} × ${px.height} px${px.reduced ? ` (limited from ${px.requested}×)` : ''}` : '';
+  for (const kind of ['png', 'jpeg']) { const item = exportMenu.querySelector(`[data-export="${kind}"]`); item.disabled = !ready; item.title = inspectionLib?.snapdom ? '' : 'Image export needs the toolbar bundle, which hasn’t loaded'; }
+  for (const item of exportMenu.querySelectorAll('[data-export-scale]')) item.setAttribute('aria-checked', String(Number(item.dataset.exportScale) === exportScale));
+  exportMenu.querySelector('[data-export="html"]').disabled = !exportBoard();
+}
 $('#export').addEventListener('click', e => {
-  const b = exportBoard(), r = e.currentTarget.getBoundingClientRect();
-  $('#export-target').textContent = b ? b.node.name : 'Select a design to export';
-  $('#export-target').title = b ? `${b.node.name} · ${b.page.name}` : '';
-  $('#export-size').textContent = b ? `${boardSize(b).w} × ${boardSize(b).h}` : '';
-  exportMenu.querySelector('[data-export="png"]').disabled = !b || !inspectionLib?.snapdom;
-  exportMenu.querySelector('[data-export="png"]').title = inspectionLib?.snapdom ? '' : 'PNG export needs the toolbar bundle, which hasn’t loaded';
-  exportMenu.querySelector('[data-export="html"]').disabled = !b;
+  const r = e.currentTarget.getBoundingClientRect();
+  paintExportMenu();
   toggleMenu(exportMenu, e.currentTarget, e.detail === 0, w => ({ x: r.right - w, y: r.bottom + 6 }));
 });
 exportMenu.addEventListener('click', e => {
+  const scaleItem = e.target.closest('[data-export-scale]');
+  if (scaleItem) { exportScale = Number(scaleItem.dataset.exportScale); try { localStorage.setItem('openpaperdesign:export-scale', String(exportScale)); } catch { /* Not remembered. */ } paintExportMenu(); return; }
   const item = e.target.closest('[data-export]'); if (!item || item.disabled) return;
-  closeMenu(); if (item.dataset.export === 'json') exportScene();else if(item.dataset.export==='bundle')exportBundle();else if(item.dataset.export==='preview'){commitFields();stopTextEdit();paperPreview(50*1024*1024).then(({html})=>download(new Blob([html],{type:'text/html'}),`${slug(scene.name)}.preview.html`)).catch(error=>message(error.message));} else exportArtboard(item.dataset.export);
+  // The save chooser must open inside this click, before any await: closeMenu and the image command do nothing asynchronous first.
+  closeMenu(); if (item.dataset.export === 'png' || item.dataset.export === 'jpeg') { void exportImageCommand(item.dataset.export); return; }
+  if (item.dataset.export === 'json') exportScene();else if(item.dataset.export==='bundle')exportBundle();else if(item.dataset.export==='preview'){commitFields();stopTextEdit();paperPreview(50*1024*1024).then(({html})=>download(new Blob([html],{type:'text/html'}),`${slug(scene.name)}.preview.html`)).catch(error=>message(error.message));} else exportArtboard(item.dataset.export);
 });
 $('#copy-paper-link').addEventListener('click',()=>{closeMenu();copyLink();});
 async function exportBundle(){
   if(access.shared)return;
-  try{commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your local changes before exporting.');const response=await fetch(`/api/bundle${paperQuery}`,{cache:'no-store'});if(!response.ok)throw new Error((await response.json()).error||'Export failed.');download(await response.blob(),`${slug(scene.name)}.paper.zip`);message('Exported Paper with its assets and notes');}catch(error){message(error.message);}
+  try{commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your local changes before exporting.');const response=await fetch(`/api/bundle${paperQuery}`,{cache:'no-store'});if(!response.ok)throw new Error((await response.json()).error||'Export failed.');await download(await response.blob(),`${slug(scene.name)}.paper.zip`);message('Download of the Paper with its assets and notes was started.');}catch(error){message(error.message);}
 }
 $('#paper-import').addEventListener('change',async event=>{
   const file=event.target.files?.[0];event.target.value='';if(!file)return;
   try{if(file.size>50*1024*1024)throw new Error('Paper files must fit within 50 MB.');commitFields();stopTextEdit();if(!await flushSave()||!await flushFeedback())throw new Error('Save your changes before opening another Paper.');const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':/\.json$/i.test(file.name)?'application/json':'application/zip'},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'This Paper could not be opened.');leaving=true;location.assign(result.href);}catch(error){message(error.message);}
 });
 const slug = text => (text || 'artboard').normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toLowerCase().slice(0, 60) || 'artboard';
-function download(blob, name) { if(inPaperSurface){void surfaceDownload(blob,name);return;}const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+// A download is only ever REQUESTED: the browser or host chooses the place and does not report back. In the host app the request is awaited, so a refusal is seen.
+async function download(blob, name) { if(inPaperSurface){if(await surfaceDownload(blob,name)===false)throw new Error('The host app did not accept the download. Nothing was saved.');return 'host';}const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); return 'browser'; }
 const dataUrl = async url => {
   const response = await fetch(url); if (!response.ok) throw new Error(`${url} (${response.status})`);
   const blob = await response.blob();
@@ -1185,7 +1721,7 @@ async function paperPreview(limit=18*1024*1024){
     const roots=page.root.map(id=>nodes.get(keyOf(page,id))?.node).filter(Boolean),minX=Math.min(0,...roots.map(n=>n.rect.x)),minY=Math.min(0,...roots.map(n=>n.rect.y));
     const w=Math.max(1,...roots.map(n=>n.rect.x+n.rect.w))-minX,h=Math.max(1,...roots.map(n=>n.rect.y+n.rect.h))-minY;
     pageInfo.push({id:page.id,name:page.name||'Page',w,h});
-    for(const node of roots){const original=dom.get(keyOf(page,node.id));if(!original)continue;const clone=original.cloneNode(true);for(const element of [clone,...clone.querySelectorAll('*')]){element.classList?.remove('selected');element.removeAttribute('contenteditable');element.removeAttribute('title');for(const attr of [...element.attributes])if(attr.name.startsWith('data-'))element.removeAttribute(attr.name);}
+    for(const node of roots){const original=dom.get(keyOf(page,node.id));if(!original)continue;const clone=canonicalClone(original.cloneNode(true));for(const element of [clone,...clone.querySelectorAll('*')]){element.classList?.remove('selected');element.removeAttribute('contenteditable');element.removeAttribute('title');for(const attr of [...element.attributes])if(attr.name.startsWith('data-'))element.removeAttribute(attr.name);}
       Object.assign(clone.style,{position:'absolute',left:`${node.rect.x-minX}px`,top:`${node.rect.y-minY}px`,width:`${node.rect.w}px`,height:`${node.rect.h}px`});section.append(clone);
     }container.append(section);
   }
@@ -1205,6 +1741,72 @@ async function pngCredits(blob) {
   let crc=0xffffffff;for(const byte of chunk.subarray(4,-4)){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^(crc&1?0xedb88320:0);}view.setUint32(chunk.length-4,(crc^0xffffffff)>>>0);
   return new Blob([data.subarray(0,-12),chunk,data.subarray(-12)],{type:'image/png'});
 }
+async function exportImageCommand(kind) {
+  if (exporting) return;
+  const keys = exportKeys(); if (!keys.length) { message('Select layers to export.'); return; }
+  const first = nodes.get(keys[0]), names = keys.length === 1 ? first.node.name : `${first.page.name}-selection`, file = exportFileName(slug(names), {kind, scale: exportScale}), scale = exportScale;
+  exporting = true;
+  try {
+    const result = await exportImage({kind, file, canChoose: !inPaperSurface && savePickerSupport(window), picker: options => window.showSaveFilePicker(options), render: () => renderSelection(keys, kind, scale), deliver: async (blob, name) => { await download(blob, name); }});
+    message(result.state === 'saved' ? `Saved ${result.name}.` : result.state === 'cancelled' ? 'Export cancelled. Nothing was saved.' : inPaperSurface ? `Sent ${result.name} to the host app’s download. The app chooses where it goes and does not report it back.` : `Download of ${result.name} started. Your browser chooses where it goes.`);
+  } catch (error) { if (error?.name !== 'AbortError') message(`Export failed: ${error?.message || error}`); }
+  finally { exporting = false; }
+}
+// Draws the chosen layers, as the canvas draws them, in an untransformed off-screen copy: only those layers (others hidden, holding layers drawing
+// nothing of their own), editor-only state removed, cropped to their rendered bounds, then encoded at the chosen scale.
+function measureExport({holder, kept}) {
+  const origin = holder.getBoundingClientRect();
+  return unionBox(kept.map(el => { const r = el.getBoundingClientRect(); return {x: r.left - origin.left, y: r.top - origin.top, w: r.width, h: r.height}; }));
+}
+function buildExportClone(keys) {
+  const stillThere = keys.every(key => nodes.has(key)) && keys.every(key => nodes.get(key).page === nodes.get(keys[0]).page);
+  if (!stillThere) throw new Error('The selected layers changed. Select them again.');
+  const rootKeys = [...new Set(keys.map(exportRootKey))], roots = rootKeys.map(key => boards.get(key)).filter(Boolean);
+  if (roots.length !== rootKeys.length) throw new Error('The selected layers changed. Select them again.');
+  const minX = Math.min(...roots.map(b => b.node.rect.x)), minY = Math.min(...roots.map(b => b.node.rect.y)), maxX = Math.max(...roots.map(b => b.node.rect.x + b.node.rect.w)), maxY = Math.max(...roots.map(b => b.node.rect.y + b.node.rect.h));
+  const crop = document.createElement('div'), holder = document.createElement('div'); crop.setAttribute('aria-hidden', 'true');
+  Object.assign(crop.style, {position: 'fixed', left: '-100000px', top: '0', width: `${Math.ceil(maxX - minX)}px`, height: `${Math.ceil(maxY - minY)}px`, overflow: 'hidden', pointerEvents: 'none'});
+  Object.assign(holder.style, {position: 'absolute', left: '0', top: '0', width: `${Math.ceil(maxX - minX)}px`, height: `${Math.ceil(maxY - minY)}px`});
+  const clones = new Map(), keep = new Map();
+  for (const b of roots) {
+    const clone = canonicalClone(b.content.cloneNode(true)), rootKey = keyOf(b.page, b.node.id); clones.set(rootKey, clone);
+    Object.assign(clone.style, {position: 'absolute', left: `${b.node.rect.x - minX}px`, top: `${b.node.rect.y - minY}px`, width: `${b.node.rect.w}px`, height: `${b.node.rect.h}px`});
+    holder.append(clone);
+  }
+  // Found by their key before the editor-only attributes are stripped.
+  for (const key of keys) { const rootKey = exportRootKey(key), clone = clones.get(rootKey), el = nodes.get(key).root ? clone : clone.querySelector(`[data-node-key="${CSS.escape(key)}"]`); if (!el) throw new Error('The selected layers changed. Select them again.'); (keep.get(rootKey) || keep.set(rootKey, []).get(rootKey)).push(el); }
+  for (const [rootKey, clone] of clones) {
+    prepareSelectionClone(clone, keep.get(rootKey) || []);
+    for (const el of [clone, ...clone.querySelectorAll('*')]) { el.classList?.remove('selected'); el.removeAttribute('title'); el.removeAttribute('contenteditable'); for (const attr of [...el.attributes]) if (attr.name.startsWith('data-')) el.removeAttribute(attr.name); }
+  }
+  crop.append(holder); body.append(crop);
+  return {crop, holder, kept: [...keep.values()].flat()};
+}
+async function renderSelection(keys, kind, scale) {
+  if (!inspectionLib?.snapdom) throw new Error('Image export needs the toolbar bundle, which hasn’t loaded.');
+  commitFields(); stopTextEdit();
+  const built = buildExportClone(keys), {crop, holder} = built;
+  try {
+    await document.fonts.ready;
+    await Promise.all([...holder.querySelectorAll('img')].map(img => img.decode()));
+    const box = measureExport(built);
+    if (!box) throw new Error('The selected layers have nothing visible to draw.');
+    const px = exportPixels(box, scale);
+    Object.assign(crop.style, {width: `${box.w}px`, height: `${box.h}px`}); Object.assign(holder.style, {left: `${-box.x}px`, top: `${-box.y}px`});
+    const jpeg = kind === 'jpeg', capture = await inspectionLib.snapdom(crop, {width: px.width, height: px.height, dpr: 1, embedFonts: true, backgroundColor: jpeg ? '#ffffff' : null});
+    let blob = await capture.toBlob({format: jpeg ? 'jpg' : 'png', width: px.width, height: px.height, ...(jpeg ? {quality: .92, backgroundColor: '#ffffff'} : {})});
+    if (!(blob instanceof Blob) || !blob.size) throw new Error('The image could not be drawn.');
+    blob = jpeg ? await jpegCredits(blob) : await pngCredits(blob);
+    // Whatever the encoder did, the file is checked against what was promised before anything is saved.
+    const bitmap = await createImageBitmap(blob); const size = {width: bitmap.width, height: bitmap.height}; bitmap.close?.();
+    if (size.width !== px.width || size.height !== px.height) throw new Error(`The image came out at ${size.width} × ${size.height} instead of ${px.width} × ${px.height}.`);
+    return blob;
+  } finally { crop.remove(); }
+}
+async function jpegCredits(blob) {
+  if (!Object.keys(scene.assetCredits || {}).length) return blob;
+  return new Blob([jpegWithNotice(new Uint8Array(await blob.arrayBuffer()), 'Paper asset licences ' + JSON.stringify(scene.assetCredits))], {type: 'image/jpeg'});
+}
 async function exportArtboard(kind) {
   const b = exportBoard(); if (!b) { message('Select a design to export.'); return; }
   commitFields(); stopTextEdit();
@@ -1212,7 +1814,7 @@ async function exportArtboard(kind) {
   // An untransformed copy of the rendered artboard, off screen, with editor-only state removed.
   const holder = document.createElement('div'); holder.setAttribute('aria-hidden', 'true');
   Object.assign(holder.style, { position: 'fixed', left: '-100000px', top: '0', width: `${w}px`, height: `${h}px`, pointerEvents: 'none' });
-  const clone = b.content.cloneNode(true);
+  const clone = canonicalClone(b.content.cloneNode(true));
   for (const el of [clone, ...clone.querySelectorAll('*')]) {
     el.classList?.remove('selected'); el.removeAttribute('title'); el.removeAttribute('contenteditable');
     for (const attr of [...el.attributes]) if (attr.name.startsWith('data-')) el.removeAttribute(attr.name);
@@ -1221,11 +1823,8 @@ async function exportArtboard(kind) {
   try {
     await document.fonts.ready;
     await Promise.all([...clone.querySelectorAll('img')].map(img => img.decode()));
-    if (kind === 'png') {
-      const capture = await inspectionLib.snapdom(clone, { width: w, height: h, dpr: 1, embedFonts: true, backgroundColor: null });
-      download(await pngCredits(await capture.toBlob({ format: 'png', width: w, height: h })), `${slug(name)}.png`);
-    } else download(new Blob([await standaloneHtml(clone, name, w, h)], { type: 'text/html' }), `${slug(name)}.html`);
-    message(`Exported “${name}” as ${kind.toUpperCase()} (${w} × ${h})`);
+    await download(new Blob([await standaloneHtml(clone, name, w, h)], { type: 'text/html' }), `${slug(name)}.html`);
+    message(`Download of “${name}” as an HTML file (${w} × ${h}) was started.`);
   } catch (error) { message(`Export failed: ${error.message || error}`); }
   finally { holder.remove(); }
 }
@@ -1312,9 +1911,38 @@ stage.addEventListener('contextmenu', e => {
   if (inspection || e.target.isContentEditable) return;
   e.preventDefault();
   const key=hitSymbol(e.target)||e.target.closest('[data-board-select]')?.dataset.boardSelect;
-  if(key){if(!selection.has(key))selectNode(key);for(const item of $('#edit-menu').querySelectorAll('[data-edit]'))item.disabled=!canEdit&&!['copy','copy-style','link'].includes(item.dataset.edit);showMenu($('#edit-menu'),{at:()=>({x:e.clientX,y:e.clientY}),keyboard:e.clientX===0&&e.clientY===0});return;}
+  if(key){if(!selection.has(key))selectNode(key);
+    // "Download original" belongs to the element actually under the pointer (or focused), whatever else is selected, and only when it is an image.
+    paintEditMenu(e.target.closest?.('[data-node-key]')?.dataset.nodeKey);
+    showMenu($('#edit-menu'),{at:()=>({x:e.clientX,y:e.clientY}),keyboard:e.clientX===0&&e.clientY===0});return;}
   const keyboard = e.clientX === 0 && e.clientY === 0, r = stage.getBoundingClientRect();
   paintCanvasMenu(); showMenu(canvasMenu, { at: () => keyboard ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: e.clientX, y: e.clientY }, keyboard });
+});
+// Inspect's overlay covers the canvas and receives the right-click, so the stage never sees it. Look through the overlay to the layer
+// the person sees; its own toolbar, panels and fields keep their menus, and a keyboard-opened menu uses the Layers tree below.
+const overlayRoot = $('#paper-inspection-root');
+overlayRoot.addEventListener('contextmenu', e => {
+  if ((e.clientX === 0 && e.clientY === 0) || e.target.closest?.('button,input,textarea,select,a,[role=menu],[role=dialog],[contenteditable=true],[data-paper-inspection-comment-ui],.paper-inspection-toolbar-motion')) return;
+  const key = layerUnderPointer(document.elementsFromPoint(e.clientX, e.clientY), { inOverlay: el => overlayRoot.contains(el), inStage: el => stage.contains(el) });
+  if (!key || !paintEditMenu(key, true)) return;
+  e.preventDefault(); showMenu($('#edit-menu'), { at: () => ({ x: e.clientX, y: e.clientY }) });
+}, true);
+// The Layers tree reaches the same command by mouse and by keyboard. A browser may deliver Menu / Shift+F10 on a focused row as a
+// keydown only, with no contextmenu event, so the key is handled in the tree's keydown handler and opens the menu through this same
+// function; a contextmenu event that does arrive for that same press is ignored.
+let menuKeyAt = 0;
+function openRowMenu(row, { keyboard, x = 0, y = 0 }) {
+  if (!row?.dataset.key || !paintEditMenu(row.dataset.key, true)) return false;
+  const r = row.getBoundingClientRect();
+  if (keyboard) { originalFocus = row; menuKeyAt = Date.now(); }
+  // The stand-in trigger of a keyboard-opened menu: Escape returns focus to the row, and a press anywhere outside the menu (even on the row, which is not a toggle) dismisses it.
+  showMenu($('#edit-menu'), { at: () => keyboard ? { x: r.left + 24, y: r.bottom } : { x, y }, keyboard, trigger: keyboard ? { setAttribute() {}, focus: () => row.focus(), contains: () => false } : null });
+  return true;
+}
+tree.addEventListener('contextmenu', e => {
+  const row = e.target.closest?.('.tree-row'), keyboard = e.clientX === 0 && e.clientY === 0;
+  if (keyboard && row && Date.now() - menuKeyAt < 600 && openMenuEl === $('#edit-menu')) { e.preventDefault(); return; }
+  if (openRowMenu(row, { keyboard, x: e.clientX, y: e.clientY })) e.preventDefault();
 });
 canvasMenu.addEventListener('click', e => {
   const p = e.target.closest('[data-pattern]');
@@ -1340,12 +1968,15 @@ $('#left-panel .switch').addEventListener('keydown', e => {
   if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
   e.preventDefault(); setLeftTab(leftTab === 'canvas' ? 'design' : 'canvas'); $(`[data-tab="${leftTab}"]`).focus();
 });
+// `rows` are [label, count, color, pages-text, title, current]; the last three are optional.
 function countRows(container, rows, swatch) {
-  container.replaceChildren(...rows.map(([label, count, color]) => {
-    const row = document.createElement('div'); row.className = 'list-row';
-    row.innerHTML = swatch ? '<span class="swatch"></span><span class="label"></span><span class="count"></span>' : '<span class="aa">Aa</span><span class="label"></span><span class="count"></span>';
-    if (swatch) row.querySelector('.swatch').style.background = color;
-    row.querySelector('.label').textContent = label; row.querySelector('.count').textContent = count; return row;
+  container.replaceChildren(...rows.map(([label, count, color, pages, title, current]) => {
+    const row = document.createElement('div'); row.className = 'list-row' + (current ? ' current' : '');
+    row.innerHTML = swatch === 'none' ? '<span class="label"></span><span class="count"></span>' : swatch ? '<span class="swatch"></span><span class="label"></span><span class="count"></span>' : '<span class="aa">Aa</span><span class="label"></span><span class="count"></span>';
+    if (swatch && swatch !== 'none') row.querySelector('.swatch').style.background = color;
+    row.querySelector('.label').textContent = label; row.querySelector('.count').textContent = count;
+    if (pages) { const span = document.createElement('span'); span.className = 'pages'; span.textContent = pages; row.append(span); }
+    if (title) row.title = title; return row;
   }));
 }
 function renderMarkdown(text) {
@@ -1372,31 +2003,36 @@ function renderMarkdown(text) {
 // images, not styles or tokens, and are only mentioned.
 async function renderDesign() {
   if (!scene || !body.classList.contains('left-open') || leftTab !== 'design') return;
-  const pages = scene.pages;
-  const styles = new Map(), colours = new Map(), add = (m, k) => m.set(k, (m.get(k) || 0) + 1);
-  let images = 0;
-  for (const page of pages) for (const n of page.nodes) {
-    if (n.type === 'text') { const t = n.text_style || {}; add(styles, `${n.font_size || 14}|${t.bold ? 1 : 0}|${t.italic ? 1 : 0}`); }
-    const fills = n.style?.fills || [], covered = fills.some(f => f.type === 'image' && f.mode !== 'fit' && scene.assets?.[f.asset]);
-    if (fills.some(f => f.type === 'image')) images++;
-    if (!covered) for (const f of fills) if (f.type === 'solid' && f.color) add(colours, f.color.toLowerCase());
-    if (isVector(n) && n.style?.stroke) add(colours, n.style.stroke.toLowerCase());
+  if (designText === null) {
+    try { const response = await fetch(assetUrl('DESIGN.md'), { cache: 'no-store' }); if (!response.ok) throw new Error(); designText = await response.text(); }
+    catch { designText = ''; }
+    if (designText) $('#design-doc').replaceChildren(renderMarkdown(designText));
   }
-  const styleRows = [...styles].map(([k, c]) => { const [size, bold, italic] = k.split('|'); return [`Inter ${Number(size)} · ${bold === '1' ? 'Bold' : 'Regular'}${italic === '1' ? ' Italic' : ''}`, c, Number(size)]; }).sort((a, b) => b[2] - a[2] || b[1] - a[1]);
-  const colourRows = [...colours].sort((a, b) => b[1] - a[1]).map(([color, c]) => [color, c, color]);
+  const current = pageId === 'all' ? null : pageId, inventory = designInventory(scene, { guide: designText || null, currentPageId: current }), total = inventory.pageCount;
+  const share = pages => total > 1 ? `${pages}/${total} pages` : '';
+  countRows($('#design-coverage'), inventory.coverage.map(p => [p.name, `${p.layers} ${p.layers === 1 ? 'layer' : 'layers'} · ${p.textStyles} text · ${p.colours} ${p.colours === 1 ? 'colour' : 'colours'}`, null, '', `${p.name}${p.current ? ' (shown)' : ''}`, p.current]), 'none');
+  const styleRows = inventory.styles.map(s => [s.label, s.layers, s.size, share(s.pages), `${s.layers} text ${s.layers === 1 ? 'layer' : 'layers'} on ${s.pages} of ${total} ${total === 1 ? 'page' : 'pages'}${s.onCurrent ? '; used on the shown page' : ''}`]);
+  const colourRows = inventory.colours.map(c => [c.color, c.layers, c.color, share(c.pages), `${c.layers} ${c.layers === 1 ? 'layer' : 'layers'} on ${c.pages} of ${total} ${total === 1 ? 'page' : 'pages'}: ${c.pageNames.join(', ')}`]);
   countRows($('#text-styles'), styleRows); countRows($('#colours'), allColours ? colourRows : colourRows.slice(0, 24), true);
   if (colourRows.length > 24) {
     const more = button(allColours ? 'Show fewer colours' : `Show all ${colourRows.length} colours`, () => { allColours = !allColours; renderDesign(); });
     more.className = 'btn colours-more'; more.setAttribute('aria-expanded', String(allColours)); $('#colours').append(more);
   }
   if (!styleRows.length) $('#text-styles').replaceChildren(Object.assign(document.createElement('p'), { className: 'note', textContent: 'No text here.' }));
-  $('#image-note').hidden = !images;
-  if (designText === null) {
-    try { const response = await fetch(assetUrl('DESIGN.md'), { cache: 'no-store' }); if (!response.ok) throw new Error(); designText = await response.text(); }
-    catch { designText = ''; }
-    if (designText) $('#design-doc').replaceChildren(renderMarkdown(designText));
+  $('#image-note').hidden = !inventory.images;
+  // Compared with the guide only where it states exact hex colours; otherwise the panel says it cannot compare, and does not guess.
+  const compare = $('#design-compare'), say = text => Object.assign(document.createElement('p'), { className: 'note', textContent: text });
+  const chips = (label, colours) => { const box = document.createElement('div'), strong = say(label), row = document.createElement('div'); row.className = 'chips'; for (const colour of colours.slice(0, 24)) { const chip = document.createElement('span'), dot = document.createElement('i'); chip.className = 'chip'; dot.style.background = colour; chip.append(dot, colour); row.append(chip); } if (colours.length > 24) row.append(say(`+${colours.length - 24} more`)); box.append(strong, row); return box; };
+  if (!designText) compare.replaceChildren(say('This Paper has no design guide to compare with.'));
+  else if (!inventory.compare.supported) compare.replaceChildren(say('The design guide states no hex colours, so there is nothing exact to compare. Text styles and named colours are not compared.'));
+  else {
+    const parts = [say(`Compared by hex value only, against the ${inventory.compare.listed} ${inventory.compare.listed === 1 ? 'colour' : 'colours'} the guide states. Names, rgb() values and typography are not compared.`)];
+    parts.push(inventory.compare.notInGuide.length ? chips(`In use but not in the guide (${inventory.compare.notInGuide.length})`, inventory.compare.notInGuide) : say('Every colour in use is stated in the guide.'));
+    parts.push(inventory.compare.unusedInGuide.length ? chips(`In the guide but not used on any page (${inventory.compare.unusedInGuide.length})`, inventory.compare.unusedInGuide) : say('Every colour the guide states is in use.'));
+    compare.replaceChildren(...parts);
   }
   $('#design-guide').hidden = !designText; $('#design-missing').hidden = !!designText;
+  renderHandoff();
 }
 
 // Inspection: loaded once the canvas has painted, so its native toolbar (with its own drag, dock and
@@ -1574,6 +2210,7 @@ async function remoteFeedback(silent=false) {
 function listenForChanges() {
   let events,timer,stopped=false,guideRevision,failures=0,polling=false;
   function revoked(reason){
+    motion?.destroy(); $('#play-toggle').disabled = true; $('#play-toggle').title = 'This invitation has ended, so motion is unavailable.';
     // Only a reason the server gave is named; anything else (an older server, a dropped stream) is a neutral "ended".
     const known=knownEnd(reason);
     if(accessEndedReason){if(known&&accessEndedReason==='ended'){accessEndedReason=known;updateSaveState();}return;}

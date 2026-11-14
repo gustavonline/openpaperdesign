@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=1c8112e33a2b"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=271dd71bf261"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -20,8 +20,13 @@
   <symbol id="i-redo" viewBox="0 0 16 16"><path d="M3 13V9.5a5 5 0 0 1 10 0M15 7l-2 2.8-2.6-2.4"/></symbol>
   <symbol id="i-export" viewBox="0 0 16 16"><path d="M8 10V1.8M4.8 5 8 1.8 11.2 5M5 7H3v7h10V7h-2"/></symbol>
   <symbol id="i-minus" viewBox="0 0 16 16"><path d="M3 8h10"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></symbol>
   <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+  <symbol id="i-play" viewBox="0 0 16 16"><path d="M5 3.2v9.6L12.6 8z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 16 16"><path d="M5.5 3.5v9M10.5 3.5v9"/></symbol>
   <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
   <symbol id="i-caret" viewBox="0 0 16 16"><path d="M4 6.5 8 10.5 12 6.5"/></symbol>
   <symbol id="i-page" viewBox="0 0 16 16"><path d="M3.5 1.8h6l3 3v9.4h-9z"/><path d="M9.5 1.8v3h3"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></symbol>
@@ -44,7 +49,7 @@
   <div id="tab-canvas" class="tab" role="tabpanel" aria-labelledby="tab-canvas-btn">
     <div id="sidebar-sections">
       <section id="pages-section" class="sidebar-section" data-sidebar-section="pages">
-        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="pages-toggle" aria-expanded="true" aria-controls="pages-panel"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Pages</button></h2>
+        <h2><button type="button" class="sidebar-heading" data-sidebar-toggle id="pages-toggle" aria-expanded="true" aria-controls="pages-panel"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Pages</button><button type="button" class="ibtn" id="new-page" aria-label="New page" title="New page"><svg class="icon"><use href="#i-plus"/></svg></button></h2>
         <div id="pages-panel" class="sidebar-body"><label class="search"><span class="sr-only">Find a page</span><svg class="icon"><use href="#i-search"/></svg><input id="page-search" class="field" type="search" placeholder="Find a page" autocomplete="off"></label><div id="pages" role="group" aria-label="Pages in this Paper"></div></div>
       </section>
       <div class="sidebar-splitter" data-sidebar-splitter="pages" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize · Arrow keys to adjust · Home/End for limits"></div>
@@ -69,14 +74,31 @@
     <div class="sidebar-footer"><button type="button" id="sidebar-reset" title="Restore default section sizes and open sections">Reset panel layout</button></div>
   </div>
   <div id="tab-design" class="tab" role="tabpanel" aria-labelledby="tab-design-btn" hidden>
-    <section class="in-use"><details open id="design-tokens"><summary class="sidebar-heading"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Tokens</summary><div class="tokens-body">
+    <section class="in-use"><details open id="design-tokens"><summary class="sidebar-heading"><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg>Observed in this Paper</summary><div class="tokens-body">
+      <p class="note" id="design-observed-note">Counted from the Pages as they are now, and recounted whenever they change. This only describes the artwork: it never edits the design guide below.</p>
+      <h3>Pages</h3><div id="design-coverage" class="list"></div>
       <h3>Text styles</h3><div id="text-styles" class="list"></div>
       <h3>Colours</h3><div id="colours" class="list"></div>
       <p class="note" id="image-note" hidden>Colours inside images stay in those images and aren’t listed.</p>
+      <h3>Compared with the design guide</h3><div id="design-compare" class="design-compare"></div>
     </div></details></section>
     <section class="design-doc">
       <details id="design-guide"><summary><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg><span>Design guide</span><a id="design-open" href="DESIGN.md" target="_blank" rel="noopener" title="Open the governing DESIGN.md">DESIGN.md</a></summary><div id="design-doc" class="prose"></div></details>
       <p class="note" id="design-missing" hidden>This Paper has no DESIGN.md yet.</p>
+    </section>
+    <section class="design-handoff" id="handoff-section" hidden>
+      <details id="handoff-details"><summary><svg class="section-chevron icon" aria-hidden="true"><use href="#i-chevron"/></svg><span>Source handoff</span></summary>
+        <div id="handoff-body" class="handoff">
+          <p class="note" id="handoff-note">Source archives the author attached on purpose for whoever builds this design: a ZIP that is only stored and downloaded, never opened or run here.</p>
+          <div id="handoff-summary" class="handoff-summary"></div><div id="handoff-files" class="list"></div>
+          <div id="handoff-edit" class="handoff-edit" hidden>
+            <label for="handoff-direction">Selected direction</label><input id="handoff-direction" class="field" maxlength="80" placeholder="For example Blåtryk 03" autocomplete="off">
+            <label for="handoff-entry">Entry point</label><select id="handoff-entry" class="field"></select>
+            <label for="handoff-source">Source and licence</label><input id="handoff-source" class="field" maxlength="300" placeholder="Where it comes from and under what licence" autocomplete="off">
+            <label for="handoff-gaps">What the Paper does not carry (one per line)</label><textarea id="handoff-gaps" class="field" rows="3" placeholder="For example: the canvas background exists only as source"></textarea>
+            <button type="button" class="btn" id="handoff-attach">Attach source ZIP…</button><input id="handoff-file" type="file" accept=".zip,application/zip" hidden>
+          </div><p id="handoff-status" class="note" role="status" aria-live="polite"></p>
+        </div></details>
     </section>
   </div>
 </aside>
@@ -85,6 +107,7 @@
 <div id="left-bar" data-canvas-chrome class="topbar">
   <button id="home" class="ibtn" type="button" title="Paper menu" aria-label="Paper menu" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu"><svg class="icon"><use href="#i-grid"/></svg></button>
   <span class="title"><button id="title-text" class="title-text" type="button"></button><input id="title-input" class="field title-input" type="text" maxlength="80" aria-label="Paper name" spellcheck="false" hidden></span>
+  <button id="play-toggle" class="ibtn" type="button" aria-pressed="false" title="Play motion" aria-label="Play motion"><svg class="icon"><use href="#i-play"/></svg></button>
   <button id="left-toggle" class="ibtn toggle" type="button" aria-pressed="false" aria-controls="left-panel" title="Pages, layers and design" aria-label="Pages, layers and design"><svg class="icon"><use href="#i-sidebar"/></svg></button>
 </div>
 <div id="project-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Paper" hidden>
@@ -123,6 +146,9 @@
   <button type="button" role="menuitem" data-edit="copy-style">Copy style<kbd>⌥⌘C</kbd></button>
   <button type="button" role="menuitem" data-edit="paste-style">Paste style<kbd>⌥⌘V</kbd></button>
   <button type="button" role="menuitem" data-edit="link">Copy link</button>
+  <button type="button" role="menuitem" data-edit="copy-image" hidden>Copy image</button>
+  <button type="button" role="menuitem" data-edit="save-image" hidden>Save image…</button>
+  <button type="button" role="menuitem" data-edit="download-original" hidden>Download original</button>
   <button type="button" role="menuitem" data-edit="delete">Delete</button>
 </div>
 
@@ -162,10 +188,20 @@
     <section><h3>Actions</h3><div class="inspector-actions"><button type="button" class="btn" data-edit="duplicate">Duplicate</button><button type="button" class="btn" data-edit="ungroup">Ungroup</button><button type="button" class="btn" data-edit="link">Copy link</button></div></section>
     <section id="symbol-actions" hidden><div class="inspector-actions"><button type="button" class="btn" id="connect-symbol">Connect to…</button><button type="button" class="btn" id="save-symbol">Save to Scratchpad</button><button type="button" class="btn" id="edit-connection-label" hidden>Edit label</button></div><p class="note" id="connect-hint" hidden>Click another symbol to connect. Escape cancels.</p></section>
   </form>
+  <section id="motion-section" hidden><h3>Motion</h3>
+    <div id="motion-run" role="group" aria-label="Motion on the canvas">
+      <p class="note">Motion plays on the canvas itself, on the layers you see. It is never saved.</p>
+      <div class="row"><button type="button" class="btn" id="motion-replay">Replay</button><button type="button" class="btn" id="motion-reduce" aria-pressed="false" title="Show states without moving">Reduce motion</button><button type="button" class="btn" id="motion-reset" hidden title="Cancel every effect and show the artwork">Reset to artwork</button></div>
+      <label class="motion-time"><span>Time (ms)</span><input class="field" id="motion-ms" type="number" min="0" max="3600000" step="1" value="0" title="Type a time in milliseconds and press Enter" aria-label="Set time in milliseconds (exact)"></label>
+      <input id="motion-scrub" type="range" min="0" max="1" step="1" value="0" aria-label="Time in milliseconds"><output id="motion-readout"></output>
+      <button type="button" class="btn" id="motion-try" disabled title="Select a layer that has a click action to try it">Try interaction</button>
+      <p id="motion-status" class="note" role="status" aria-live="polite"></p>
+    </div>
+    <div id="motion-body"></div></section>
 </aside>
 <div id="right-bar" data-canvas-chrome class="topbar">
   <button id="export" class="share-button" type="button" title="Share or export" aria-label="Share" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu"><svg class="icon"><use href="#i-export"/></svg><span>Share</span></button>
-  <span class="zoom"><button id="zoom-out" class="ibtn" type="button" title="Zoom out (−)" aria-label="Zoom out"><svg class="icon"><use href="#i-minus"/></svg></button><button id="zoom" class="level" type="button" title="Zoom options" aria-haspopup="menu" aria-expanded="false">100%</button><button id="zoom-in" class="ibtn" type="button" title="Zoom in (+)" aria-label="Zoom in"><svg class="icon"><use href="#i-plus"/></svg></button></span>
+  <span class="zoom"><button id="zoom-out" class="ibtn" type="button" title="Zoom out (−)" aria-label="Zoom out"><svg class="icon"><use href="#i-minus"/></svg></button><button id="zoom" class="level" type="button" title="Zoom options" aria-haspopup="menu" aria-expanded="false">100%</button><button id="zoom-in" class="ibtn" type="button" title="Zoom in (+)" aria-label="Zoom in"><svg class="icon"><use href="#i-plus"/></svg></button><button id="zoom-fit" class="ibtn" type="button" data-zoom="fit" title="Zoom to fit (⇧1)" aria-label="Zoom to fit"><svg class="icon"><use href="#i-fit"/></svg></button></span>
   <button id="right-toggle" class="ibtn toggle" type="button" aria-pressed="true" aria-controls="right-panel" title="Properties" aria-label="Properties"><svg class="icon"><use href="#i-sidebar-right"/></svg></button>
 </div>
 <!-- Exports of the artwork as it is rendered (no editor chrome), and the whole Paper as its file. -->
@@ -174,7 +210,13 @@
   <button type="button" role="menuitem" id="copy-paper-link" hidden>Copy link</button>
   <hr class="owner-only">
   <div class="menu-label" id="export-target"></div>
-  <button type="button" role="menuitem" data-export="png">PNG image<kbd id="export-size"></kbd></button>
+  <button type="button" role="menuitem" data-export="png">PNG image<kbd>transparent</kbd></button>
+  <button type="button" role="menuitem" data-export="jpeg">JPEG image<kbd>white background</kbd></button>
+  <div class="menu-label" id="export-size" aria-live="polite"></div>
+  <button type="button" role="menuitemradio" data-export-scale="1" aria-checked="true">1×</button>
+  <button type="button" role="menuitemradio" data-export-scale="2" aria-checked="false">2×</button>
+  <button type="button" role="menuitemradio" data-export-scale="3" aria-checked="false">3×</button>
+  <div class="menu-label" id="export-note">Images show the layers as drawn. Motion is not included.</div>
   <button type="button" role="menuitem" data-export="html">HTML file<kbd>fonts + images inside</kbd></button>
   <hr>
   <button type="button" role="menuitem" data-export="json">Paper file<kbd>.json · all pages</kbd></button>
@@ -188,21 +230,23 @@
   <header><h2 id="sharing-title">Share Paper</h2><button type="button" class="ibtn" data-close-sharing aria-label="Close sharing"><svg class="icon"><use href="#i-close"/></svg></button></header>
   <p id="share-state" role="status">Only you have access</p>
   <div id="share-links" aria-label="Invitations"></div>
-  <button type="button" id="share-new" class="share-quiet" hidden>New invitation</button>
   <form id="share-create">
     <div class="share-permission"><label for="share-role">Access</label><select id="share-role" class="field"><option value="view">Can view</option><option value="edit">Can edit</option></select></div>
     <div class="share-permission"><label for="share-expiry">Expires</label><select id="share-expiry" class="field"><option value="1h">In 1 hour</option><option value="1d" selected>In 1 day</option><option value="7d">In 7 days</option><option value="never">Never</option></select></div>
     <p id="share-expiry-note" class="note" hidden>No end time. It works only while OpenPaperDesign is running and awake on this computer.</p>
     <label class="share-check"><input type="checkbox" id="share-protect" checked><span>Code protection<small>Guests need both the link and an access code.</small></span></label>
     <fieldset class="share-reach"><legend>Share over</legend><label><input type="radio" name="share-reach" value="online" checked> Internet</label><label><input type="radio" name="share-reach" value="network"> Local network</label><label><input type="radio" name="share-reach" value="local"> This computer only</label></fieldset>
-    <div class="share-actions"><button type="submit" id="share-primary">Create invitation</button><button type="button" id="share-create-cancel" hidden>Cancel</button></div>
+    <div class="share-actions"><button type="submit" id="share-primary">Create invitation</button></div>
   </form>
-  <section id="share-agent-panel" hidden aria-label="Open with an agent"><h3>Open with an agent</h3><p>The recipient can open this invitation with the Paper plugin in Codex or Claude Code. The access code is included in the message.</p><div class="share-actions"><a id="share-codex" class="share-link">Open in Codex</a><a id="share-claude" class="share-link">Open in Claude Code</a></div><details><summary>Manual MCP connection</summary><p>For other MCP clients. Keep the access key and code private.</p><button type="button" id="share-agent">Copy connection</button></details></section>
   <textarea class="field share-copy-fallback" aria-label="Copy this text" readonly hidden></textarea>
-  <button type="button" id="share-stop" class="share-stop" hidden>Stop sharing this Paper</button>
 </dialog>
 <!-- Save status: its own small live note beside the right corner bar; silent until something changes. -->
 <div id="status" data-canvas-chrome class="save-status" role="status" aria-live="polite" hidden></div>
+<div id="page-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Page actions" hidden>
+  <div class="menu-label" id="page-menu-note" hidden></div>
+  <button type="button" role="menuitem" data-page-action="rename">Rename<kbd>F2</kbd></button>
+  <button type="button" role="menuitem" data-page-action="delete">Delete page…</button>
+</div>
 <div id="zoom-menu" data-canvas-chrome class="float menu" role="menu" hidden>
   <button type="button" role="menuitem" data-zoom="fit">Zoom to fit<kbd>⇧1</kbd></button>
   <button type="button" role="menuitem" data-zoom="selection">Zoom to selection<kbd>⇧2</kbd></button>
@@ -224,5 +268,5 @@
 <div id="toast" data-canvas-chrome role="status" hidden></div>
 <dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is saved with this Paper.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="paper-inspection-root"></div>
-<script type="module" src="app.js?v=f6209b84613c"></script>
+<script type="module" src="app.js?v=454fbcb0ec71"></script>
 </body></html>
