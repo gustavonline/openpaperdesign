@@ -6,9 +6,19 @@ export const isPaperFormat=value=>value===PAPER_FORMAT||value==='osm-canvas';
 export const isArtboard = node => node.type === 'frame' && !node.diagram && node.canvas !== true;
 export function moveLayer(node,dx,dy){node.rect.x+=dx;node.rect.y+=dy;if(node.type==='stroke')node.points=node.points?.map(p=>({...p,x:p.x+dx,y:p.y+dy}));}
 // Resize without scaling the artwork. North/west edges leave child world positions unchanged.
-export function resizeArtboard(page,id,before,edge,dx,dy){
+// `pose` ({linear, inverse}, runtime/geometry.js) is the linear part of the artboard's own animated pose while motion is on. dx and dy are then the pointer's
+// displacement in visible design units: the size changes by the inverse of the pose applied to it (so the corner follows the pointer), and a north/west edge moves
+// the box's origin in its own coordinates, which is seen on the canvas through the same pose. The authored rect and children stay in canonical units.
+export function resizeArtboard(page,id,before,edge,dx,dy,pose=null){
   const map=indexPage(page),board=map.get(id),r=before.rect;
   if(!isArtboard(board))throw new Error('Select an artboard to resize.');
+  if(pose?.inverse){
+    const m=pose.inverse,lx=m[0]*dx+m[2]*dy,ly=m[1]*dx+m[3]*dy,ox=edge.includes('w')?Math.min(lx,r.w-16):0,oy=edge.includes('n')?Math.min(ly,r.h-16):0;
+    const shift={x:pose.linear[0]*ox+pose.linear[2]*oy,y:pose.linear[1]*ox+pose.linear[3]*oy};
+    board.rect={x:Math.max(-1e6,Math.min(1e6,r.x+shift.x)),y:Math.max(-1e6,Math.min(1e6,r.y+shift.y)),w:Math.min(1e6,Math.max(16,edge.includes('e')?r.w+lx:r.w-ox)),h:Math.min(1e6,Math.max(16,edge.includes('s')?r.h+ly:r.h-oy))};
+    for(const child of board.children||[]){const n=map.get(child);if(n)moveLayer(n,-ox,-oy);}
+    resolveConnections(page,map);return board.rect;
+  }
   const x=edge.includes('w')?Math.max(-1e6,Math.min(r.x+dx,r.x+r.w-16)):r.x;
   const y=edge.includes('n')?Math.max(-1e6,Math.min(r.y+dy,r.y+r.h-16)):r.y;
   board.rect={x,y,w:Math.min(1e6,Math.max(16,edge.includes('e')?r.w+dx:r.x+r.w-x)),h:Math.min(1e6,Math.max(16,edge.includes('s')?r.h+dy:r.y+r.h-y))};

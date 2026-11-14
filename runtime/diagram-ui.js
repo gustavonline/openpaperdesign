@@ -1,6 +1,6 @@
 import {paperAsset} from './surface.js?v=da065f7b280e';
 import {DIAGRAM_FAMILIES,makeSymbol,symbolPreview} from './diagram-library.js?v=e55bd274695a';
-import {captureSymbol} from './diagram-model.js?v=49ba16a33b90';
+import {captureSymbol} from './diagram-model.js?v=3b37f5a632f7';
 const symbolId=()=>crypto.randomUUID?.()||Array.from(crypto.getRandomValues(new Uint8Array(16)),n=>n.toString(16).padStart(2,'0')).join('');
 // Library is a view over ordinary layers. Scratchpad is part of the same Paper JSON.
 export function setupLibrary(host) {

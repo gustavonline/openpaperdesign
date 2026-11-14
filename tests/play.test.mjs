@@ -302,3 +302,51 @@ test('destroying motion (the surface goes away, an invitation ends) cancels ever
   assert.equal(w.el('D state title').textContent, 'A clear starting point.'); assert.equal(w.el('D sticky glass navigation').style.marginTop, ''); assert.equal(w.snap().engaged, false);
   w.motion.dirty(); env.flush(); w.motion.toggle(); w.motion.tryLayer(w.page(0).id, w.named('D Together toggle')); assert.equal(w.live().filter(a => !all.includes(a)).length, 0, 'nothing comes back after destroy'); assert.equal(env.frames.size, 0);
 });
+
+// ---- 9. The selection frame of an animated artboard is told when the pose on screen changes, and by nothing else.
+const withRootHover = () => {
+  const scene = addMotion(syntheticLanding()), page = scene.pages[0], root = page.nodes.find(n => n.name === 'Landing · desktop');
+  scene.preview.animations.push({id: 'root-hover', page: page.id, node: root.id, trigger: {type: 'hover'}, keyframes: [{x: 0, rotate: 0}, {x: 40, rotate: 5}], durationMs: 300, easing: 'ease-out'});
+  assert.equal(previewProblem(scene.preview, scene), null, 'a hover effect on an artboard itself is a valid model'); return scene;
+};
+test('the editor is told about a changed pose once per clock frame, once per seek, pause and rebind, and never while nothing moves', t => {
+  const w = mount(t), {env, controls} = w; assert.equal(w.state.frames, 0, 'nothing before motion is on'); press(controls.toggle);
+  const afterBind = w.state.frames; assert.ok(afterBind >= 1 && afterBind <= 3, `one notification for the whole rebind, not one per effect (${afterBind})`);
+  env.advance(100); assert.ok(env.runFrame()); assert.equal(w.state.frames, afterBind + 1, 'one per clock frame'); env.advance(100); env.runFrame(); assert.equal(w.state.frames, afterBind + 2);
+  const before = w.state.frames; press(controls.toggle); assert.ok(w.state.frames > before, 'pausing sets a pose'); const paused = w.state.frames; w.motion.seek(1200); const sought = w.state.frames; assert.ok(sought > paused && sought <= paused + 2, 'seeking sets a pose (and holds the pause it implies)');
+  assert.equal(env.frames.size, 0, 'paused: no frame is scheduled'); env.advance(1000); assert.equal(w.state.frames, sought, 'and nothing is announced'); w.rebuild(); assert.ok(w.state.frames > sought, 'a rebind announces the new poses');
+  w.controls.reset.fire('click'); const reset = w.state.frames; assert.equal(env.frames.size, 0); env.hide(true); env.hide(false); assert.equal(w.state.frames, reset, 'motion off: nothing to follow');
+});
+test('an artboard’s own hover effect is followed one frame at a time only while it runs; effects on its layers and an idle canvas schedule nothing', t => {
+  const w = mount(t, {scene: withRootHover()}), {env, controls} = w, root = w.el('Landing · desktop'); press(controls.toggle); press(controls.toggle); assert.equal(env.frames.size, 0, 'paused with a root effect: no frame');
+  const hover = w.anims('Landing · desktop').find(a => a.frames[1].rotate === '5deg');
+  // Paused by the person, the effect shows its end state at once and nothing runs.
+  root.fire('pointerenter'); assert.equal(hover.running, false); assert.equal(env.frames.size, 0, 'paused: nothing is scheduled'); root.fire('pointerleave');
+  // Playing: the effect runs without the clock, and each frame announces the pose until it ends.
+  press(controls.toggle); env.frames.clear(); root.fire('pointerenter'); assert.equal(hover.running, true); assert.ok(env.frames.size >= 1, 'a frame is asked for to follow the running effect');
+  let pumped = 0; for (let i = 0; i < 20 && hover.running; i++) { env.advance(50); const seen = w.state.frames; env.runFrame(); assert.ok(w.state.frames > seen, 'each frame announces the pose'); pumped++; }
+  assert.ok(pumped >= 1 && pumped < 20, 'it ran and it ended'); assert.equal(hover.running, false); assert.equal(hover.currentTime, hover.end);
+  // A hover on an ordinary layer adds no frame request of its own.
+  env.frames.clear(); w.el('D primary CTA').fire('pointerenter'); assert.equal([...env.frames.values()].length, 0, 'only an artboard’s own effect is followed');
+  const calm = mount(t, {scene: withRootHover()}); press(calm.controls.toggle); calm.env.frames.clear(); calm.env.hide(true); calm.el('Landing · desktop').fire('pointerenter'); assert.equal(calm.env.frames.size, 0, 'hidden: frozen, so no pump'); calm.env.hide(false);
+  calm.el('Landing · desktop').fire('pointerleave'); calm.el('Landing · desktop').fire('pointerenter'); calm.motion.destroy(); assert.equal(calm.env.frames.size, 0, 'destroy cancels the pump and the clock');
+});
+
+// ---- 10. Concurrent effects: the stated composition is what the runtime builds.
+test('every record is its own effect, created in declared order with fill both and the default (replace) composite, on the layer’s own element, with no origin or transform of its own', t => {
+  const w = mount(t), {env, controls} = w; press(controls.toggle);
+  const declared = w.scene.preview.animations.filter(r => w.host.pageShown(r.page) && w.host.nodeEl(r.page, r.node)); assert.equal(env.animations.length, declared.length, 'one effect per record, none merged');
+  declared.forEach((record, i) => {
+    const a = env.animations[i]; assert.equal(a.target, w.host.nodeEl(record.page, record.node), `record ${record.id} runs on its own layer element`);
+    assert.equal(a.options.fill, 'both', 'before it triggers it shows its first keyframe, after it ends its last'); assert.ok(!('composite' in a.options) && a.frames.every(f => !('composite' in f)), 'the default composite: replace'); assert.equal(a.options.duration, record.durationMs); assert.equal(a.options.delay, record.delayMs || 0);
+    for (const frame of a.frames) assert.deepEqual(Object.keys(frame).filter(k => !['offset', 'opacity', 'translate', 'rotate', 'scale', 'filter', 'backdropFilter', 'color', 'backgroundColor'].includes(k)), [], 'only the documented CSS properties');
+    assert.ok(!a.frames.some(f => 'transform' in f || 'transformOrigin' in f), 'the layer’s own transform and its origin are never animated or replaced');
+  });
+  // Two records on one property of one layer are two effects in the declared order: the later one is what the browser applies for that property.
+  const cta = w.anims('D primary CTA').filter(a => a.frames.some(f => f.scale !== undefined)); assert.ok(cta.length >= 2, 'the landing CTA has a load scale and a hover scale on the same layer');
+  const order = cta.map(a => env.animations.indexOf(a)), declaredScale = declared.filter(r => r.node === w.named('D primary CTA') && r.keyframes.some(k => k.scale !== undefined)).map(r => env.animations.indexOf(env.animations.find(a => a.options.duration === r.durationMs && a.frames[0].scale === String(r.keyframes[0].scale))));
+  assert.deepEqual(order, [...order].sort((x, y) => x - y), 'effects of one layer are in declared order'); assert.deepEqual(declaredScale.filter(i => i >= 0), [...declaredScale.filter(i => i >= 0)].sort((x, y) => x - y));
+  const hover = cta.find(a => a.frames[1].scale === '1.04'), load = cta.find(a => a !== hover); assert.ok(env.animations.indexOf(hover) > env.animations.indexOf(load), 'the hover record is declared after the load record, so its first keyframe (scale 1) holds the property at rest');
+  // A rebind keeps the order.
+  w.rebuild(); const again = env.animations.filter(a => !a.cancelled); assert.deepEqual(again.map(a => a.options.duration), declared.map(r => r.durationMs), 'declared order after a rebind');
+});

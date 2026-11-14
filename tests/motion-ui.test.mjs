@@ -48,7 +48,7 @@ test('the Motion section offers the stated presets and tuning, only to people wh
   const [app, html] = await Promise.all(['app.js', 'index.html'].map(read));
   assert.match(html, /<section id="motion-section" hidden><h3>Motion<\/h3>[\s\S]*<div id="motion-body"><\/div><\/section>/);
   const ui = slice(app, 'function renderMotion() {', 'function ensureState(');
-  for (const control of ['Add motion to this layer', 'When it moves', 'Duration ms', 'Delay ms', 'Easing', 'Repeat forever', 'Add a click action', 'Pin to the top while the page scrolls', 'Use as a preview variant of this Page', 'Shown from px wide']) assert.ok(ui.includes(control), control);
+  for (const control of ['Add motion to this layer', 'When it moves', 'Duration ms', 'Delay ms', 'Easing', 'Repeat forever', 'Add a click action', 'Pin to the top while the page scrolls', 'Declare as a responsive version of this Page', 'Shown from px wide']) assert.ok(ui.includes(control), control);
   assert.match(ui, /if \(!canEdit\) \{\s*parts\.push\(mk\('p', \{ class: 'note', text: animations\.length \|\| interactions\.length \?/, 'view-only people see a summary, not controls'); assert.match(ui, /The preview model can’t be used: \$\{problem\}/);
   assert.match(ui, /Object\.entries\(PRESETS\)\.map\(\(\[key, p\]\) => mk\('option', \{ value: key, text: p\.label \}\)\)/); assert.match(ui, /record\.keyframes\.length === 2/); assert.match(ui, /Edit them in paper\.json \(an agent can\)/);
   assert.match(app, /function populateInspector\(\) \{\s*renderMotion\(\);/, 'it follows the selection');

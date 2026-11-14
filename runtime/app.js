@@ -3,11 +3,12 @@ import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLea
 import {setupPresence} from './presence.js?v=2a7d7c240b0d';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
-import { createMotion } from './play.js?v=97f5531536d6';
+import { createMotion } from './play.js?v=b3c6ce324a79';
+import { IDENTITY, apply, parsePose, chainBasis, poseBasis } from './geometry.js?v=d8d6bdecb42d';
 import { handoffProblem, withResource, withoutResource, withFields, HANDOFF_LIMITS } from './handoff-model.js?v=dff204719b9f';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
-import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
-import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
+import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=3b37f5a632f7';
+import { setupLibrary } from './diagram-ui.js?v=488ecd6beaa3';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=5dd9feb00f24';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
@@ -209,7 +210,7 @@ function paint(key) {
   const b = boards.get(key), node = b.node, o = b.offset;
   b.viewRect = { ...node.rect, x: node.rect.x + o.x, y: node.rect.y + o.y };
   Object.assign(b.wrapper.style, { width: `${node.rect.w}px`, height: `${node.rect.h}px`, transform: `translate(${b.viewRect.x}px,${b.viewRect.y}px)` });
-  b.wrapper.classList.toggle('board-selected',selection.has(key)&&!node.locked&&selection.size===1);
+  b.wrapper.classList.toggle('board-selected',selection.has(key)&&!node.locked&&selection.size===1);syncBoardPose(b);
   b.name.textContent = node.name; b.name.title = node.name; b.name.setAttribute('aria-label', `Select board ${node.name}`);
   if (b.artboard) {styleNode({...node,rect:{...node.rect,x:0,y:0},rotation:0},b.content);Object.assign(b.content.style,{overflow:node.clip?'hidden':'visible',visibility:node.visible===false?'hidden':''});}
   else {const shown={...node,rect:{...node.rect,x:0,y:0}};if(node.type==='stroke')shown.points=node.points.map(p=>({...p,x:p.x-node.rect.x,y:p.y-node.rect.y}));styleNode(shown,dom.get(key));}
@@ -249,7 +250,7 @@ function mountRoot(page,node){
   if(artboard){nodes.set(key,{page,node,boardKey:key,root:true,topLevel:true});dom.set(key,content);for(const id of node.children||[])makeNode(page,entries.get(page.id).get(id),content,key);}
   else {makeNode(page,{...node,rect:{...node.rect,x:0,y:0}},content,null);nodes.set(key,{page,node,boardKey:null,root:false,topLevel:true});}
   wrapper.append(label,content);
-  if(artboard&&canEdit){const handles=document.createElement('div');handles.className='board-resizers';for(const edge of ['n','s','w','e','nw','ne','sw','se']){const h=document.createElement('button');h.type='button';h.dataset.resize=edge;h.dataset.resizeBoard=key;h.tabIndex=-1;h.title=`Resize artboard (${edge})`;h.setAttribute('aria-label',h.title);handles.append(h);}wrapper.append(handles);}
+  if(artboard&&canEdit){const handles=document.createElement('div');handles.className='board-resizers';for(const edge of ['n','s','w','e','nw','ne','sw','se']){const h=document.createElement('button');h.type='button';h.dataset.resize=edge;h.dataset.resizeBoard=key;h.tabIndex=-1;h.title=`Resize artboard (${edge})`;h.setAttribute('aria-label',h.title);handles.append(h);}wrapper.append(handles);b.resizers=handles;}
   wrapper.hidden=pageId!=='all'&&page.id!==pageId;const nextId=page.root[page.root.indexOf(node.id)+1],next=boards.get(keyOf(page,nextId))?.wrapper;if(next)next.before(wrapper);else world.append(wrapper);paint(key);return b;
 }
 function drawingContext(target){const b=boards.get(target?.closest?.('[data-board]')?.dataset.board);if(b?.artboard)return b;const page=nodes.get(selected)?.page||visiblePages()[0]||scene.pages[0];return {page,node:null,offset:offsetForPage(scene.pages.indexOf(page))};}
@@ -937,9 +938,9 @@ function insertTemplate(template,drop) {
   if(!canEdit)return;
   const candidate=drop?.board?boards.get(drop.board):null,b=drop?candidate?.artboard?candidate:drawingContext(null):drawingContext(null);
   commitFields();stopTextEdit();setTool('select');
-  const r=template.nodes.find(n=>n.id===template.root).rect,area=stage.getBoundingClientRect(),origin=contextOrigin(b);
-  const x=(drop?drop.x-area.left:stage.clientWidth/2)-camera.x,y=(drop?drop.y-area.top:stage.clientHeight/2)-camera.y;
-  const made=instantiate(template,b.page,b.node?.id??null,x/camera.z-origin.x-(drop?0:r.w/2),y/camera.z-origin.y-(drop?0:r.h/2)),map=entries.get(b.page.id);
+  const r=template.nodes.find(n=>n.id===template.root).rect,area=stage.getBoundingClientRect();
+  const x=(drop?drop.x-area.left:stage.clientWidth/2)-camera.x,y=(drop?drop.y-area.top:stage.clientHeight/2)-camera.y,at=contextPoint(b,x/camera.z,y/camera.z);
+  const made=instantiate(template,b.page,b.node?.id??null,at.x-(drop?0:r.w/2),at.y-(drop?0:r.h/2)),map=entries.get(b.page.id);
   connectionCache.delete(b.page);
   b.page.nodes.push(...made.nodes);(b.node?b.node.children:b.page.root).push(made.root.id);for(const n of made.nodes)map.set(n.id,n);
   const key=keyOf(b.page,made.root.id);if(b.node)makeNode(b.page,made.root,b.content,keyOf(b.page,b.node.id));else mountRoot(b.page,made.root);refreshConnections(b.page);
@@ -949,7 +950,36 @@ $('#connect-symbol').addEventListener('click',()=>{if(!canEdit||!selected)return
 $('#edit-connection-label').addEventListener('click',()=>{const entry=nodes.get(selected),n=entry?.node.children?.map(id=>entries.get(entry.page.id).get(id)).find(n=>n.connectionLabel);if(n)startTextEdit(keyOf(entry.page,n.id),true);});
 const guides=[];
 function clearGuides(){for(const element of guides)element.remove();guides.length=0;}
-function moveChanges(){const page=nodes.get(selected).page,map=entries.get(page.id);return selectedRoots().map(id=>map.get(id)).filter(n=>!n.locked&&!n.bindings&&!n.connectionLabel).map(node=>({key:keyOf(page,node.id),before:copy(node),scale:childTransform(map.get(node.parent),map),world:nodeBounds(node,map)}));}
+function moveChanges(){const page=nodes.get(selected).page,map=entries.get(page.id);return selectedRoots().map(id=>map.get(id)).filter(n=>!n.locked&&!n.bindings&&!n.connectionLabel).map(node=>({key:keyOf(page,node.id),before:copy(node),scale:childTransform(map.get(node.parent),map),world:nodeBounds(node,map),pose:liveBasis(page,node)}));}
+// While motion is on the live layer elements are animated and the Paper's model is not, so a pointer displacement must become the change of the model value that
+// makes the layer follow the pointer ON SCREEN. `liveBasis` is that map for a layer's parent chain (runtime/geometry.js): the animated rotate and scale of every
+// ancestor with its canonical diagram scale, read from the elements' computed style. It is null when nothing above the layer is posed, and then the canonical
+// path below is used exactly as before. The model is never touched by the pose; only the pointer-to-model conversion knows about it.
+const livePose = element => element ? parsePose(getComputedStyle(element)) : parsePose();
+function liveBasis(page, node) {
+  if (!motion?.engaged) return null;
+  const map = entries.get(page.id), chain = [];
+  for (let parent = map.get(node.parent); parent; parent = map.get(parent.parent)) chain.push({ pose: livePose(dom.get(keyOf(page, parent.id))).linear, sx: parent.diagram ? parent.rect.w / parent.diagram.width : 1, sy: parent.diagram ? parent.rect.h / parent.diagram.height : 1 });
+  const basis = chainBasis(chain); return basis.posed && basis.inverse ? basis : null;
+}
+// An artboard's own pose, for resizing it; and a canvas point as a coordinate inside a drawing context, through the board's pose (origin: its top-left).
+function boardPose(b) { if (!motion?.engaged || !b?.artboard) return null; const basis = poseBasis(livePose(b.content).linear); return basis.posed && basis.inverse ? basis : null; }
+function contextPoint(b, wx, wy) {
+  const origin = contextOrigin(b), x = wx - origin.x, y = wy - origin.y;
+  if (!b.node || !b.artboard || !motion?.engaged) return { x, y, pose: null };
+  // A translation moves where the board is drawn even when it does not rotate or scale it, so a point always goes through the pose.
+  const pose = livePose(b.content), basis = poseBasis(pose.linear), usable = basis.posed && basis.inverse, local = apply(usable ? basis.inverse : IDENTITY, x - pose.tx, y - pose.ty);
+  return { x: local.x, y: local.y, pose: usable ? basis : null };
+}
+// An artboard's selection frame and resize handles are UI beside its content, so while motion poses the content they take the same pose (the same computed
+// translate, rotate and scale about the same top-left origin): outline, handles and their hit area then sit on the displayed artboard. Only a selected board has them.
+function syncBoardPose(b) {
+  const handles = b?.resizers; if (!handles) return;
+  const style = motion?.engaged && !b.wrapper.hidden && b.wrapper.classList.contains('board-selected') ? getComputedStyle(b.content) : null, next = style ? [style.translate, style.rotate, style.scale] : ['none', 'none', 'none'], key = next.join('|');
+  if (b.poseKey === key) return; b.poseKey = key;
+  for (const [name, value] of [['translate', next[0]], ['rotate', next[1]], ['scale', next[2]]]) handles.style[name] = value === 'none' ? '' : value;
+}
+const syncBoardPoses = () => { for (const b of boards.values()) syncBoardPose(b); };
 function snapDelta(g,event,dx,dy){
   clearGuides();let x=dx/camera.z,y=dy/camera.z;
   if(event.shiftKey){if(Math.abs(x)>Math.abs(y))y=0;else x=0;}
@@ -969,14 +999,13 @@ stage.addEventListener('pointerdown', e => {
   commitFields(); stopTextEdit(); closeMenu(); motion?.setEditing(true); queueMicrotask(syncEditing);
   const p = point(e), pan = spaceHeld || mode === 'hand';
   const resize=e.target.closest('[data-resize-board]');
-  if(resize&&!pan&&canEdit){const key=resize.dataset.resizeBoard,entry=nodes.get(key);if(entry.node.locked)return;const map=entries.get(entry.page.id),before=[entry.node,...(entry.node.children||[]).map(id=>map.get(id))].filter(Boolean).map(node=>({key:keyOf(entry.page,node.id),before:copy(node)}));gesture={kind:'resize',key,edge:resize.dataset.resize,start:p,before,pointerId:e.pointerId};stage.setPointerCapture(e.pointerId);e.preventDefault();return;}
+  if(resize&&!pan&&canEdit){const key=resize.dataset.resizeBoard,entry=nodes.get(key);if(entry.node.locked)return;const map=entries.get(entry.page.id),before=[entry.node,...(entry.node.children||[]).map(id=>map.get(id))].filter(Boolean).map(node=>({key:keyOf(entry.page,node.id),before:copy(node)}));gesture={kind:'resize',key,edge:resize.dataset.resize,start:p,before,pose:boardPose(boards.get(key)),pointerId:e.pointerId};stage.setPointerCapture(e.pointerId);e.preventDefault();return;}
   const handle = e.target.closest('[data-board-move]'), layer = e.target.closest('[data-node-key]');
   if(connectFrom && !pan){const target=hitSymbol(e.target);if(target===connectFrom)return;if(target&&connectNodes(connectFrom,target)){setTool('select');return;}setTool('select');return;}
   if (pan) gesture = { kind: 'pan', start: p, camera: { ...camera } };
   else if (mode !== 'select') {
-    const b=drawingContext(e.target),origin=contextOrigin(b);
-    const x=(p.x-camera.x)/camera.z-origin.x,y=(p.y-camera.y)/camera.z-origin.y;
-    gesture={kind:'draw',key:null,tool:mode,context:b,layer:layer?.dataset.nodeKey||null,text:mode==='text'?textAt(e.clientX,e.clientY):null,source:mode==='connector'?hitSymbol(e.target):null,lastClient:{x:e.clientX,y:e.clientY},start:p,origin:{x,y}};
+    const b=drawingContext(e.target),at=contextPoint(b,(p.x-camera.x)/camera.z,(p.y-camera.y)/camera.z),x=at.x,y=at.y;
+    gesture={kind:'draw',pose:at.pose,key:null,tool:mode,context:b,layer:layer?.dataset.nodeKey||null,text:mode==='text'?textAt(e.clientX,e.clientY):null,source:mode==='connector'?hitSymbol(e.target):null,lastClient:{x:e.clientX,y:e.clientY},start:p,origin:{x,y}};
   } else if (handle || layer) {
     const key = handle ? handle.dataset.boardMove : (e.metaKey||e.ctrlKey?layer.dataset.nodeKey:hitSymbol(layer)), node = nodes.get(key).node;
     if(e.shiftKey){selectNode(key,{add:true});stage.focus({preventScroll:true});e.preventDefault();return;}
@@ -999,11 +1028,12 @@ stage.addEventListener('pointermove', e => {
   gesture.moved = true;
   if (gesture.kind === 'pan') { camera.x = bound(gesture.camera.x + dx); camera.y = bound(gesture.camera.y + dy); paintCamera(); }
   else if(gesture.kind==='marquee'){const s=stage.getBoundingClientRect(),x=Math.min(p.x,gesture.start.x),y=Math.min(p.y,gesture.start.y),w=Math.abs(dx),h=Math.abs(dy);Object.assign(gesture.marquee.style,{left:`${x}px`,top:`${y}px`,width:`${w}px`,height:`${h}px`});gesture.box={left:s.left+x,top:s.top+y,right:s.left+x+w,bottom:s.top+y+h};}
-  else if(gesture.kind==='resize'){for(const item of gesture.before)Object.assign(nodes.get(item.key).node,copy(item.before));const entry=nodes.get(gesture.key);resizeArtboard(entry.page,entry.node.id,gesture.before[0].before,gesture.edge,dx/camera.z,dy/camera.z);for(const item of gesture.before)paint(item.key);}
+  else if(gesture.kind==='resize'){for(const item of gesture.before)Object.assign(nodes.get(item.key).node,copy(item.before));const entry=nodes.get(gesture.key);resizeArtboard(entry.page,entry.node.id,gesture.before[0].before,gesture.edge,dx/camera.z,dy/camera.z,gesture.pose);for(const item of gesture.before)paint(item.key);}
   else if (gesture.kind === 'draw') {
     if (!gesture.key) gesture.key = newNode(gesture.context, gesture.origin.x, gesture.origin.y);
     let ax=dx/camera.z,ay=dy/camera.z;
     if(e.shiftKey&&gesture.tool!=='stroke'){if(gesture.tool==='connector'){const angle=Math.round(Math.atan2(ay,ax)/(Math.PI/4))*Math.PI/4,length=Math.hypot(ax,ay);ax=Math.cos(angle)*length;ay=Math.sin(angle)*length;}else{const side=Math.max(Math.abs(ax),Math.abs(ay));ax=Math.sign(ax||1)*side;ay=Math.sign(ay||1)*side;}}
+    if (gesture.pose) { const local = apply(gesture.pose.inverse, ax, ay); ax = local.x; ay = local.y; }
     const node = nodes.get(gesture.key).node, x = gesture.origin.x + ax, y = gesture.origin.y + ay;
     if (node.type === 'text') return;
     if (node.type === 'stroke') node.points.push({ x, y, p: e.pressure || .5 });
@@ -1012,12 +1042,26 @@ stage.addEventListener('pointermove', e => {
     node.rect = { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
     if (node.type === 'connector') node.points = [{ x: gesture.origin.x - minX, y: gesture.origin.y - minY }, { x: x - minX, y: y - minY }];
     paint(gesture.key);
-  } else if (gesture.kind === 'node') {
-    if(gesture.duplicatePending){gesture.duplicatePending=false;if(duplicateSelection(0)){gesture.duplicateAction=history.pop();updateHistory();gesture.key=selected;gesture.changes=moveChanges();}}
-    const delta=snapDelta(gesture,e,dx,dy);
-    for(const item of gesture.changes){const node=nodes.get(item.key).node,x=bound(item.before.rect.x+delta.x/(item.scale.sx||1)),y=bound(item.before.rect.y+delta.y/(item.scale.sy||1));moveLayer(node,x-node.rect.x,y-node.rect.y);paint(item.key);}
-  }
+  } else if (gesture.kind === 'node') moveNodes(gesture, e, dx, dy);
 });
+// One step of a layer drag. The pointer's displacement, in visible design units, becomes each layer's change in ITS parent's coordinates: the canonical diagram scale
+// as always, or the inverse of the animated ancestors' map while motion poses them (so the layer follows the pointer on screen, with no jump at either end).
+// Snapping and guides compare model edges, which a posed ancestor no longer shows where they are: while a layer's parents are posed the drag follows the pointer exactly.
+function moveNodes(g, e, dx, dy) {
+  if (g.duplicatePending) { g.duplicatePending = false; if (duplicateSelection(0)) { g.duplicateAction = history.pop(); updateHistory(); g.key = selected; g.changes = moveChanges(); } }
+  if (g.changes.some(item => item.pose)) {
+    clearGuides(); const visible = { x: dx / camera.z, y: dy / camera.z };
+    if (e.shiftKey) { if (Math.abs(visible.x) > Math.abs(visible.y)) visible.y = 0; else visible.x = 0; }
+    for (const item of g.changes) {
+      const local = item.pose ? apply(item.pose.inverse, visible.x, visible.y) : { x: visible.x / (item.scale.sx || 1), y: visible.y / (item.scale.sy || 1) };
+      const node = nodes.get(item.key).node, x = bound(item.before.rect.x + local.x), y = bound(item.before.rect.y + local.y); moveLayer(node, x - node.rect.x, y - node.rect.y); paint(item.key);
+    }
+    return;
+  }
+  const delta = snapDelta(g, e, dx, dy);
+  for (const item of g.changes) { const node = nodes.get(item.key).node, x = bound(item.before.rect.x + delta.x / (item.scale.sx || 1)), y = bound(item.before.rect.y + delta.y / (item.scale.sy || 1)); moveLayer(node, x - node.rect.x, y - node.rect.y); paint(item.key); }
+}
+
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(name, finishGesture);
 // Middle button (wheel click) pans while held over the canvas in both modes, Edit and Inspect.
 // It is taken in the window's capture phase, before Inspection's own document handlers, only over the owned
@@ -1292,7 +1336,7 @@ const motionHost = {
   // Explicit Try navigation uses the editor's own Page and camera actions; the toggle itself never does.
   navigate: (id, rootId) => { if (!scene.pages.some(p => p.id === id)) return; showPage(id); if (rootId !== undefined) { const b = boards.get(id + ':' + rootId); if (b) fit([b.viewRect]); } },
   panTo: (p, n) => { const r = dom.get(p + ':' + n)?.getBoundingClientRect(), s = stage.getBoundingClientRect(); if (!r) return; camera.y = bound(camera.y + s.top + 56 - r.top); paintCamera(); saveView(); },
-  frame: () => presenceUI?.needsPaint?.() && presenceUI.paint(),
+  frame: () => { syncBoardPoses(); if (presenceUI?.needsPaint?.()) presenceUI.paint(); },
 };
 motion = createMotion(motionHost);
 motion.bindControls({ toggle: $('#play-toggle'), replay: $('#motion-replay'), reset: $('#motion-reset'), reduce: $('#motion-reduce'), scrub: $('#motion-scrub'), ms: $('#motion-ms'), readout: $('#motion-readout'), status: $('#motion-status') });
@@ -1467,14 +1511,15 @@ function renderMotion() {
     pin.addEventListener('change', () => motionEdit(prev => pin.checked ? withRecord(prev, 'sticky', { id: uniqueId(prev?.sticky, 'pin'), page: pid, node: nid }) : withoutRecord(prev, 'sticky', pinned.id)));
     parts.push(mk('label', { class: 'check' }, pin, document.createTextNode('Pin to the top while the page scrolls')));
   }
-  // A top-level artboard can be the authored version of its Page for a range of window widths.
+  // A top-level artboard can be declared as the responsive version of its Page for a range of window widths: metadata for whoever implements the design.
+  // The editor itself shows every artboard as authored and never swaps or fits them.
   if (entry.page.root.includes(nid) && isArtboard(entry.node)) {
     const variant = (preview?.variants || []).find(v => v.page === pid && v.root === nid), use = mk('input', { type: 'checkbox', checked: !!variant });
     use.addEventListener('change', () => motionEdit(prev => use.checked ? withRecord(prev, 'variants', { id: uniqueId(prev?.variants, 'variant'), page: pid, root: nid, label: (entry.node.name || 'Artboard').slice(0, 40) }) : withoutRecord(prev, 'variants', variant.id)));
-    parts.push(mk('label', { class: 'check' }, use, document.createTextNode('Use as a preview variant of this Page')));
+    parts.push(mk('label', { class: 'check' }, use, document.createTextNode('Declare as a responsive version of this Page')));
     if (variant) {
       const range = (label, key) => { const input = mk('input', { class: 'field', type: 'number', min: '0', max: '10000', step: '1', placeholder: key === 'minWidth' ? '0' : 'any', value: variant[key] ?? '' }); input.setAttribute('aria-label', label); input.addEventListener('change', () => motionEdit(prev => { const r = prev.variants.find(v => v.id === variant.id); if (input.value === '') delete r[key]; else r[key] = Math.round(Number(input.value)); return prev; })); return mk('label', { text: label }, input); };
-      parts.push(mk('div', { class: 'motion-card' }, mk('div', { class: 'row' }, range('Shown from px wide', 'minWidth'), range('up to px wide', 'maxWidth')), mk('p', { class: 'note', text: 'Play picks the variant for the window width. A width outside every range shows the nearest one, scaled to fit.' })));
+      parts.push(mk('div', { class: 'motion-card' }, mk('div', { class: 'row' }, range('Shown from px wide', 'minWidth'), range('up to px wide', 'maxWidth')), mk('p', { class: 'note', text: 'For whoever builds this design: the window widths this artboard is meant for. A width outside every range uses the nearest one. The editor still shows every artboard as it is; nothing here swaps or scales them.' })));
     }
   }
   body_.replaceChildren(...parts);

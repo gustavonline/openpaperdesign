@@ -86,10 +86,10 @@ test('pinning and variants are offered only where they can apply, and edit the m
   h.pick(page, 'D hero headline'); assert.ok(pin(), 'a direct child of an artboard can be pinned'); h.pick(page, 'Details navigation'); assert.equal(pin(), undefined, 'a nested layer cannot');
   h.pick(page, 'D sticky glass navigation'); let box = pin().children[0]; box.checked = true; box.fire('change'); assert.equal(h.state.scene.preview.sticky.length, 1); assert.equal(previewProblem(h.state.scene.preview, h.state.scene), null);
   h.pick(page, 'D sticky glass navigation'); box = pin().children[0]; assert.equal(box.checked, true); box.checked = false; box.fire('change'); assert.equal(h.state.scene.preview, undefined, 'removing the last record leaves no model');
-  const root = h.pick(page, 'Landing · desktop'), use = h.body.all().find(e => e.tag === 'label' && /Use as a preview variant/.test(e.textContent)).children[0]; use.checked = true; use.fire('change');
+  const root = h.pick(page, 'Landing · desktop'), use = h.body.all().find(e => e.tag === 'label' && /Declare as a responsive version/.test(e.textContent)).children[0]; use.checked = true; use.fire('change');
   assert.deepEqual(h.state.scene.preview.variants[0], {id: 'variant-1', page: page.id, root: root.id, label: 'Landing · desktop'}); h.pick(page, 'Landing · desktop');
   const min = h.field('Shown from px wide'), max = h.field('up to px wide'); min.value = '900'; min.fire('change'); assert.equal(h.state.scene.preview.variants[0].minWidth, 900); max.value = '1600'; max.fire('change'); assert.equal(h.state.scene.preview.variants[0].maxWidth, 1600);
   max.value = '100'; max.fire('change'); assert.match(h.messages.at(-1), /below its minWidth/); assert.equal(h.state.scene.preview.variants[0].maxWidth, 1600, 'refused: unchanged');
   max.value = ''; max.fire('change'); assert.equal('maxWidth' in h.state.scene.preview.variants[0], false);
-  h.pick(page, 'D hero headline'); assert.equal(h.body.all().find(e => e.tag === 'label' && /Use as a preview variant/.test(e.textContent)), undefined, 'only a top-level artboard can be a variant');
+  h.pick(page, 'D hero headline'); assert.equal(h.body.all().find(e => e.tag === 'label' && /Declare as a responsive version/.test(e.textContent)), undefined, 'only a top-level artboard can be a variant');
 });

@@ -23,6 +23,8 @@ const frames = globalThis;
 // host: {scene(), preview() -> a validated model or null, pageShown(pageId), nodeEl(pageId, nodeId) -> the live element or null, rootEl(pageId, nodeId) -> the live
 //        element of that layer's artboard, layerBox(pageId, nodeId) -> {y, h, rootH} in artboard units, keyOf(pageId, nodeId), nodeText(pageId, nodeId),
 //        stage (the canvas viewport element), camera() -> {z}, selectedKeys() -> Set, navigate(pageId, rootId?), panTo(pageId, nodeId), frame?()}
+// frame() is the editor's "the pose on screen changed" hook (selection frames and presence follow the displayed poses): called on each clock frame, when a pose is
+// set (seek, pause, rebind, reset) and, for an artboard's own event effect, on each frame while that one effect runs. Nothing else ever asks for a frame.
 export function createMotion(host) {
   const states = new Map(), trail = [], cleanups = [], entries = [], textTargets = new Map(), transientText = new Map(), held = new Set();
   const ends = new Map(), loops = new Set(), stickies = [], scrolled = [];
@@ -30,7 +32,9 @@ export function createMotion(host) {
   let timeline = [], timelineMs = 0, stopped = false, frame = 0, noticeTimer = null, notice = '';
   // The facts that decide what may move (see reconcile()). `engaged` is "motion is on": the layers carry their effects; off, they are exactly the artwork.
   let engaged = false, userPaused = false, editing = false, suppressed = null, visible = true, reduced = !!system?.matches, userChose = false, frozen = false, playing = false, pressed = null;
-  let ui = {}, dirtyQueued = false;
+  let ui = {}, dirtyQueued = false, pumping = 0;
+  let quiet = false;
+  const refresh = () => { if (!quiet) host.frame?.(); };
   const blocked = () => !!globalThis.document?.hidden || !visible || editing;
 
   const on = (target, type, fn, options) => { target.addEventListener(type, fn, options); cleanups.push(() => target.removeEventListener(type, fn, options)); };
@@ -54,7 +58,7 @@ export function createMotion(host) {
   }
   function seek(at) {
     const t = Math.round(Math.max(0, Math.min(bound(), Number.isFinite(at) ? at : 0)));
-    hold(t); readTime(); return t;
+    hold(t); readTime(); refresh(); return t;
   }
   function tick() {
     frame = 0;
@@ -78,6 +82,7 @@ export function createMotion(host) {
     if (timeline.length) hold(Math.min(bound(), Math.round(time())));
     frozen = true;
     for (const e of entries) if (e.kind === 'event' && e.animation.playState === 'running') { held.add(e); e.animation.pause(); }
+    refresh();
   }
   function thaw() {
     frozen = false;
@@ -110,9 +115,10 @@ export function createMotion(host) {
   // ---- Bindings: effects on the live layer elements.
   function teardown() {
     for (const e of entries) e.cancel(); entries.length = 0; timeline = []; scrolled.length = 0; ends.clear(); loops.clear(); held.clear();
+    frames.cancelAnimationFrame?.(pumping); pumping = 0;
     for (const undo of cleanups.splice(0)) undo();
     for (const s of stickies.splice(0)) if (s.el) s.el.style.marginTop = '';
-    frames.cancelAnimationFrame?.(frame); frame = 0;
+    frames.cancelAnimationFrame?.(frame); frame = 0; refresh();
   }
   function restoreText() { for (const [key, target] of textTargets) { const el = host.nodeEl(target.page, target.node); if (el && el.textContent !== host.nodeText(target.page, target.node)) el.textContent = host.nodeText(target.page, target.node); } textTargets.clear(); transientText.clear(); }
   // A state's alternate text, applied to the live layer. `suppressed` is a layer being typed into: it shows its own text, whatever the state says.
@@ -128,7 +134,9 @@ export function createMotion(host) {
   }
   const textFor = key => (engaged && key !== suppressed && transientText.has(key)) ? transientText.get(key) : null;
 
-  function bind({keepTime = null} = {}) {
+  // One rebind is one pose notification, however many effects it sets.
+  function bind(options) { quiet = true; try { bindEffects(options); } finally { quiet = false; refresh(); } }
+  function bindEffects({keepTime = null} = {}) {
     teardown(); frozen = blocked() || userPaused;
     const preview = host.preview();
     for (const record of preview?.animations || []) {
@@ -137,8 +145,8 @@ export function createMotion(host) {
       const animation = target.animate(waapiFrames(record), {duration: record.durationMs, delay: record.delayMs || 0, easing: easingCss(record.easing), iterations: record.iterations === 'infinite' ? Infinity : (record.iterations || 1), direction: record.direction || 'normal', fill: 'both'});
       animation.pause(); animation.currentTime = 0;
       const type = record.trigger.type, end = (record.delayMs || 0) + record.durationMs * (record.iterations === 'infinite' ? 1 : (record.iterations || 1));
-      const e = {record, animation, target, end, type, dir: null, kind: 'event', cancel() { try { animation.cancel(); } catch { /* Already gone. */ } }}; entries.push(e);
-      e.snap = atEnd => { held.delete(e); animation.pause(); animation.currentTime = atEnd ? end : 0; e.dir = atEnd; };
+      const e = {record, animation, target, end, type, dir: null, kind: 'event', own: host.rootEl?.(record.page, record.node) === target, cancel() { try { animation.cancel(); } catch { /* Already gone. */ } }}; entries.push(e);
+      e.snap = atEnd => { held.delete(e); animation.pause(); animation.currentTime = atEnd ? end : 0; e.dir = atEnd; refresh(); };
       const sourceId = record.trigger.source ?? record.node;
       if (type === 'load') { e.kind = 'load'; timeline.push(animation); ends.set(animation, end); if (record.iterations === 'infinite') loops.add(animation); e.rest = () => e.snap(record.iterations !== 'infinite'); }
       else if (type === 'scroll') {
@@ -173,6 +181,7 @@ export function createMotion(host) {
     if (!scrolled.length && !stickies.length) return;
     const top = host.stage.getBoundingClientRect().top, z = host.camera().z || 1, offsetOf = root => { const r = root?.getBoundingClientRect?.(); return r ? (top - r.top) / z : 0; };
     for (const e of scrolled) e.apply(offsetOf(e.root));
+    if (scrolled.length) refresh();
     for (const s of stickies) { const y = offsetOf(s.root), natural = s.box.y, push = Math.min(Math.max(0, y + s.top - natural), Math.max(0, s.box.rootH - natural - s.box.h)); s.el.style.marginTop = push > 0 ? `${push}px` : ''; }
   }
   // An event-driven effect goes toward what its trigger wants now. During an edit it waits (the pose is held); frozen or reduced it shows the end state at once.
@@ -181,6 +190,12 @@ export function createMotion(host) {
     const want = e.want(); if (!initial && e.dir === want) return;
     if (initial || reduced || frozen) { e.snap(want); return; }
     e.dir = want; e.animation.playbackRate = want ? 1 : -1; e.animation.play(); held.delete(e);
+    if (e.own) pump();
+  }
+  // An artboard's own hover, focus, reveal or state effect runs without the clock, yet its selection frame must follow it: one frame at a time, only while that effect runs.
+  function pump() {
+    if (pumping || !host.frame) return;
+    pumping = frames.requestAnimationFrame(() => { pumping = 0; if (stopped) return; refresh(); if (entries.some(e => e.own && e.kind === 'event' && e.animation.playState === 'running')) pump(); });
   }
   function setState(id, value) {
     if (states.get(id) === value) return; states.set(id, value);
