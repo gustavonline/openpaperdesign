@@ -2,6 +2,8 @@
 import {randomBytes} from 'node:crypto';
 import {isIP} from 'node:net';
 import {PaperError,ID,validatePaper} from './library.mjs';
+import {verifyResource} from './handoff.mjs';
+import {HANDOFF_LIMITS,HANDOFF_VERSION} from '../runtime/handoff-model.js';
 import {VERSION} from './runtime.mjs';
 import {extractInvitation,findInvitationLink,normalizeCode,validCode} from '../runtime/access-code.js';
 const MAX=28*1024*1024;
@@ -67,10 +69,28 @@ export async function joinInvitation(value,suppliedCode){
       if(name==='paper_read'){if(result.paper)validatePaper(result.paper,{read:true});return {...result,shared:true,summary:{name:result.name,pages:result.pages||result.paper?.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length}))}};}
       return result;
     },
+    // The handoff source archives of the invited Paper, through the same scoped route the editor uses. The manifest is read first so the bytes are proven against it here too.
+    async handoffRead(){const read=await call('paper_read',{includePaper:true});return {revision:read.revision,handoff:read.paper?.handoff??null,summary:read.handoff||null};},
+    async handoffDownload(resourceId){
+      if(typeof resourceId!=='string'||!/^[a-z0-9][a-z0-9-]{0,39}$/.test(resourceId))throw new PaperError(400,'Choose a source archive id from the Paper handoff');
+      const full=await call('paper_read',{includePaper:true}),resource=full.paper?.handoff?.version===HANDOFF_VERSION?(full.paper.handoff.resources||[]).find(r=>r.id===resourceId):null;
+      if(!resource)throw new PaperError(404,'This Paper has no source archive with that id');
+      const {response,bytes}=await send(`/api/handoff?paper=${paperId}&resource=${encodeURIComponent(resourceId)}`);
+      if(!response.ok){let message='The source archive could not be downloaded.';try{message=JSON.parse(bytes).error||message}catch{}throw new PaperError(response.status===401?401:response.status,message);}
+      verifyResource(bytes,resource,message=>{throw new PaperError(502,`The downloaded source archive was refused: ${message}`)});
+      return {resource,bytes};
+    },
+    async handoffAttach(bytes,name){
+      if(role!=='edit')throw new PaperError(403,'This invitation is view-only');
+      if(!Buffer.isBuffer(bytes)||bytes.length>HANDOFF_LIMITS.resourceBytes)throw new PaperError(413,`A source archive must fit within ${HANDOFF_LIMITS.resourceBytes/1048576} MB`);
+      const {response,bytes:body}=await send(`/api/handoff?paper=${paperId}&name=${encodeURIComponent(name)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:bytes});
+      let data;try{data=JSON.parse(body)}catch{throw new PaperError(502,'The invited Paper returned an unreadable response.')}
+      if(!response.ok)throw new PaperError(response.status,data.error||'The source archive was refused.');return data;
+    },
     async api(path,options){
-      const target=new URL(path,origin),api={access:['GET'],updates:['GET'],paper:['GET','PUT'],feedback:['GET','PUT'],presence:['GET','POST'],assets:['POST']},method=options.method||'GET',resource=target.pathname.slice(5);
+      const target=new URL(path,origin),api={access:['GET'],updates:['GET'],paper:['GET','PUT'],feedback:['GET','PUT'],presence:['GET','POST'],assets:['POST'],handoff:['GET','POST']},method=options.method||'GET',resource=target.pathname.slice(5),extra=resource==='handoff'?['resource','name']:[];
       let allowed=false;
-      if(target.pathname.startsWith('/api/'))allowed=api[resource]?.includes(method)&&target.searchParams.getAll('paper').length===1&&target.searchParams.get('paper')===paperId&&[...target.searchParams.keys()].every(k=>k==='paper');
+      if(target.pathname.startsWith('/api/'))allowed=api[resource]?.includes(method)&&target.searchParams.getAll('paper').length===1&&target.searchParams.get('paper')===paperId&&[...target.searchParams.keys()].every(k=>k==='paper'||extra.includes(k))&&extra.every(k=>target.searchParams.getAll(k).length<=1);
       else if(method==='GET'&&target.pathname.startsWith('/Paper/'+paperId+'/')){const relative=decodeURIComponent(target.pathname.slice(('/Paper/'+paperId+'/').length));allowed=['paper.json','DESIGN.md','feedback.json'].includes(relative)||relative.startsWith('assets/');}
       if(target.origin!==origin||!allowed||/[\\#]/.test(path)||/(?:^|\/)(?:\.\.|%2e)/i.test(path))throw new PaperError(403,'Only this invited Paper is available.');
       const {response,bytes}=await send(path,options);if(response.ok&&method==='GET'&&['/api/paper','/Paper/'+paperId+'/paper.json'].includes(target.pathname)){const data=JSON.parse(bytes);validatePaper(data.paper||data,{read:true});}return {status:response.status,headers:Object.fromEntries(['content-type','content-disposition','etag'].flatMap(key=>response.headers.has(key)?[[key,response.headers.get(key)]]:[])),body:bytes.toString('base64')};

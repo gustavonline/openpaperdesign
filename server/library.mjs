@@ -4,6 +4,8 @@ import { randomBytes, createHash } from 'node:crypto';
 import os from 'node:os';
 import { connectionErrors, resolveConnections, isArtboard, PAPER_FORMAT, isPaperFormat } from '../runtime/diagram-model.js';
 import { previewProblem } from '../runtime/preview-model.js';
+import { handoffProblem } from '../runtime/handoff-model.js';
+import { verifyStored } from './handoff.mjs';
 
 export const MAX_PAPER_BYTES = 20 * 1024 * 1024;
 export const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -67,6 +69,7 @@ export function validatePaper(paper, { read = false } = {}) {
     fail(new Set(paper.symbols.map(s=>s.id)).size === paper.symbols.length, 'Duplicate Scratchpad identity');
   }
   const preview = previewProblem(paper.preview, paper, { tolerateNewer: read }); fail(!preview, preview);
+  const handoff = handoffProblem(paper.handoff, { tolerateNewer: read }); fail(!handoff, handoff);
   return paper;
 }
 export function blankPaper(name = 'Untitled Paper', width = 1440, height = 900) {
@@ -75,17 +78,17 @@ export function blankPaper(name = 'Untitled Paper', width = 1440, height = 900) 
   fail([width, height].every(n => Number.isInteger(n) && n >= 16 && n <= 10000), 'Artboard sizes must be whole pixels from 16 to 10000');
   return validatePaper({format:PAPER_FORMAT,version:1,name,pages:[{id:randomBytes(8).toString('hex'),name:'Page 1',next_id:2,root:[1],nodes:[{id:1,name:'Artboard 1',type:'frame',clip:true,rect:{x:0,y:0,w:width,h:height},style:{fills:[{type:'solid',color:'#ffffff'}],stroke:null,stroke_width:1,corner_radius:0,opacity:1},visible:true,locked:false,children:[]}]}],assets:{}});
 }
-async function noLink(target, optional = false) {
+export async function noLink(target, optional = false) {
   try { const st = await fs.lstat(target); if (st.isSymbolicLink()) throw new PaperError(400, 'Linked paths are not supported'); return st; }
   catch (error) { if (optional && error.code === 'ENOENT') return null; throw error; }
 }
-async function syncDir(directory) {
+export async function syncDir(directory) {
   let handle;
   try { handle = await fs.open(directory, 'r'); await handle.sync(); }
   catch (error) { if (!(process.platform === 'win32' && ['EISDIR','EPERM','EINVAL'].includes(error.code))) throw error; }
   finally { await handle?.close(); }
 }
-async function writeExclusive(file, bytes) {
+export async function writeExclusive(file, bytes) {
   const handle = await fs.open(file, 'wx', 0o600);
   try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
 }
@@ -184,6 +187,7 @@ export class PaperLibrary {
       authorize();
       const current = await this.read(id,kind);
       if (current.revision !== expected) throw new PaperError(409,'Paper changed elsewhere; no overwrite performed');
+      if (kind === 'paper' && document.handoff) await verifyStored(folder, document.handoff);
       const file = path.join(folder,`${kind}.json`); let previous;
       try { previous = await fs.readFile(file); } catch(error) { if(error.code!=='ENOENT')throw error; }
       await this.atomic(folder,`${kind}.json`,bytes,previous,authorize);

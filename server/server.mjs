@@ -19,6 +19,8 @@ import { complete, protocolError } from './mcp.mjs';
 import {createHome, homeResource, isHomeResource, HOME_URI, HOME_MIME, personalWorkspace, rememberWorkspace,dataHome} from './home.mjs';
 import {createUI} from './ui.mjs';
 import {joinInvitation} from './invitation.mjs';
+import {attachResource,readResource,downloadHeaders,saveArchive} from './handoff.mjs';
+import {HANDOFF_LIMITS,handoffSummary} from '../runtime/handoff-model.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const RUNTIME = path.resolve(HERE,'../runtime');
@@ -28,9 +30,9 @@ const ICONS=await Promise.all(['icon.svg','icon-dark.svg'].map(async(file,i)=>({
 const SERVER_INFO={name:'openpaperdesign',title:'OpenPaperDesign',version:VERSION,icons:ICONS};
 const inside = (root,target) => target===root || target.startsWith(root+path.sep);
 const client = req => /^[a-zA-Z0-9_-]{1,80}$/.test(req.headers['x-paper-client']||'') ? req.headers['x-paper-client'] : '';
-function paperId(url) {
+function paperId(url,extra=[]) {
   const keys=[...url.searchParams.keys()],ids=url.searchParams.getAll('paper');
-  if(keys.some(k=>k!=='paper')||ids.length!==1||!ID.test(ids[0]))throw new PaperError(400,'Choose exactly one valid Paper');
+  if(keys.some(k=>k!=='paper'&&!extra.includes(k))||extra.some(k=>url.searchParams.getAll(k).length>1)||ids.length!==1||!ID.test(ids[0]))throw new PaperError(400,'Choose exactly one valid Paper');
   return ids[0];
 }
 async function projectWorkspace(workspace){
@@ -42,6 +44,7 @@ async function importPaper(library,bytes,type){
   if(type!=='application/json')return importBundle(library,bytes);
   if(bytes.length>MAX_PAPER_BYTES)throw new PaperError(413,'Paper JSON is too large');
   const paper=validatePaper(JSON.parse(bytes));
+  if(paper.handoff?.resources?.length)throw new PaperError(400,'This JSON references source archives. Open a .paper.zip with its handoff files instead.');
   if(Object.keys(paper.assets).length||paper.pages.some(p=>p.nodes.some(n=>n.style?.fills?.some(f=>f.type==='image'))))throw new PaperError(400,'This JSON references separate images. Open a .paper.zip with its assets instead.');
   const made=await library.create({name:paper.name});
   try{const current=await library.read(made.id);await library.save(made.id,Buffer.from(JSON.stringify(paper)),current.revision);return made;}catch(error){await fs.rm(made.path,{recursive:true,force:true});throw error;}
@@ -140,6 +143,12 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
         if(req.method==='POST'){const args=JSON.parse(await readBody(req,1024));if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['role','network','internet','newLink','label','retry','invitationId','expiry','protect'].includes(k)))throw new PaperError(400,'Invalid sharing options');if(args.retry===true){if(typeof args.invitationId!=='string')throw new PaperError(400,'Choose an invitation');return json(res,200,await sharing.retry(id,args.invitationId));}return json(res,201,await sharing.create(id,args.role,args.network??false,args.internet??false,{newLink:args.newLink??false,label:args.label??'',...(args.expiry!==undefined?{expiry:args.expiry}:{}),...(args.protect!==undefined?{protect:args.protect}:{})}));}
       }
       if(pathname==='/api/assets' && req.method==='POST')return json(res,201,await library.addAsset(paperId(url),await readBody(req,5*1024*1024)));
+      // Handoff source archives: an explicit upload (POST) and a download-only read of an archive named by this Paper's current manifest (GET). Never served as a page.
+      if(pathname==='/api/handoff'){
+        const id=paperId(url,['resource','name']);
+        if(req.method==='GET'){const {resource,bytes}=await readResource(library,id,url.searchParams.get('resource'));res.writeHead(200,downloadHeaders(resource,bytes));res.end(bytes);return;}
+        if(req.method==='POST')return json(res,201,await attachResource(library,id,await readBody(req,HANDOFF_LIMITS.resourceBytes),{name:url.searchParams.get('name')||''}));
+      }
       if(pathname==='/api/papers'){
         if(req.method==='GET')return json(res,200,{papers:await library.list()});
         if(req.method==='POST'){if(url.search)throw new PaperError(400,'Unexpected query');const raw=await readBody(req,4096);const args=raw.length?JSON.parse(raw):{};if(!args||typeof args!=='object'||Array.isArray(args))throw new PaperError(400,'Expected Paper options');const created=await library.create(args);return json(res,201,{id:created.id,name:created.name,href:created.href});}
@@ -225,13 +234,14 @@ export const TOOLS=[
   tool('paper_open','Select the active workspace for Paper MCP tools. Omit workspace for personal Papers. Display the native plugin app with paper_home; do not navigate the returned localhost URL in a browser.',{workspace:{...string,description:'Absolute existing project folder; omit for the personal library. Never the plugin installation.'}}),
   tool('paper_list','List saved Papers in the opened workspace.',{}),
   tool('paper_create','Create a saved Paper with optional dimensions. Show it in the native plugin app using paper_home action open with its workspaceId/paperId; do not open the internal URL in a browser.',{name:string,width:{type:'integer',minimum:16,maximum:10000},height:{type:'integer',minimum:16,maximum:10000}}),
-  tool('paper_read','Read revision, file paths, page summary and notes. Set includePaper only when the complete layer JSON is needed.',{paperId:string,includePaper:{type:'boolean'}},['paperId']),
+  tool('paper_read','Read revision, file paths, page summary, notes and the handoff summary. Set includePaper only when the complete layer JSON is needed; set fullDesign when DESIGN.md is longer than the 8000 characters shown.',{paperId:string,includePaper:{type:'boolean'},fullDesign:{type:'boolean'}},['paperId']),
   tool('paper_save','Save artwork with its read revision; an open view updates live, so do not reopen it to refresh. Supply paper JSON or an edited sourceFile inside the workspace; stale edits are refused.',{paperId:string,revision:string,paper:{type:'object'},sourceFile:string},['paperId','revision']),
   tool('paper_read_feedback','Read this Paper’s saved comments, guides and measurements, with their independent revision.',{paperId:string},['paperId']),
   tool('paper_save_feedback','Save the complete feedback workspace with its read revision; preserve unrelated feedback.',{paperId:string,revision:string,workspace:{type:['object','null']}},['paperId','revision','workspace']),
   tool('paper_add_asset','Copy a PNG/JPEG/WebP into this Paper. Supply base64 or a workspace sourceFile; then add returned asset/path to paper.assets and save the Paper.',{paperId:string,base64:string,sourceFile:string},['paperId']),
   tool('paper_activity','Show your current activity and optional work area. Empty status clears it. Temporary, not saved artwork.',{paperId:string,status:{type:'string',maxLength:120},pageId:string,nodeId:{type:'integer'},rect:{type:'object',properties:{x:{type:'number'},y:{type:'number'},w:{type:'number'},h:{type:'number'}},required:['x','y','w','h'],additionalProperties:false}},['paperId','status']),
   tool('paper_write_note','Update DESIGN.md or CONTEXT.md with its read revision.',{paperId:string,file:{type:'string',enum:['DESIGN.md','CONTEXT.md']},revision:string,text:string},['paperId','file','revision','text']),
+  tool('paper_handoff','The source archives a Paper’s author deliberately attached for a recipient (for example an advanced reference site, fonts and licences). read lists the handoff; download saves one archive by its resource id into a destination folder you choose (never replaces a file, never extracted or run); attach (author/editor) stores a ZIP and returns the resource to add to paper.handoff in paper_save.',{action:{type:'string',enum:['read','download','attach']},paperId:string,resource:string,destination:{...string,description:'Absolute existing folder in your own project for download. The archive is saved there under a name the server chooses.'},sourceFile:{...string,description:'Absolute path of the ZIP to attach.'}},['action','paperId']),
   tool('paper_package','Export a complete portable .paper.zip or import one as a new Paper. Files must be inside the selected workspace. Export never replaces an existing file.',{action:{type:'string',enum:['export','import']},paperId:string,file:string},['action','file']),
   {...tool('paper_notion','Connect the official Notion account, list accessible pages, save/update a Paper, or open a cloud snapshot as a new local Paper. Login completes in the browser. Save is explicit; remote changes are never silently overwritten.',{action:{type:'string',enum:['status','connect','disconnect','pages','save','open','autosync']},paperId:string,parentId:string,pageId:string,title:string,query:string,cursor:string,newCopy:{type:'boolean'},enabled:{type:'boolean'}},['action']),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true}},
 ];
@@ -244,6 +254,32 @@ export async function serveStdio() {
     if(!apps.has(root)){if(!openingApps.has(root))openingApps.set(root,connectWorkspace(root,agentClient).then(app=>{apps.set(root,app);return app}).finally(()=>openingApps.delete(root)));return openingApps.get(root);}return apps.get(root);
   };
   const home=createHome(getApp);
+  // paper_handoff works the same for the owner's Paper and for an invited one; only where the bytes come from differs. Files are chosen by the caller, names by the server.
+  const handoffTool=async args=>{
+    const owner=!joined;
+    if(!['read','download','attach'].includes(args.action))throw new PaperError(400,'Choose read, download or attach');
+    if(owner){if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');if(typeof args.paperId!=='string'||!ID.test(args.paperId))throw new PaperError(400,'Choose a Paper');await active.library.folder(args.paperId);}
+    else if(args.paperId!==joined.descriptor.paperId)throw new PaperError(403,'This invitation opens one Paper only.');
+    if(args.action==='read'){
+      if(!owner)return joined.handoffRead();
+      const {paper,revision}=await active.library.read(args.paperId),summary=handoffSummary(paper.handoff),problems=[];
+      for(const resource of paper.handoff?.version===1?paper.handoff.resources||[]:[])try{await readResource(active.library,args.paperId,resource.id);}catch(error){problems.push({resource:resource.id,problem:error.message});}
+      return {revision,handoff:paper.handoff??null,summary,...(summary?{verified:!problems.length,problems}:{})};
+    }
+    if(args.action==='download'){
+      if(args.sourceFile!==undefined)throw new PaperError(400,'download takes a resource and a destination folder');
+      const destination=await projectWorkspace(args.destination),{resource,bytes}=owner?await readResource(active.library,args.paperId,args.resource):await joined.handoffDownload(args.resource);
+      if(!(await fs.stat(destination)).isDirectory())throw new PaperError(400,'The destination must be a folder');
+      return {...await saveArchive(destination,resource,bytes),resource:resource.id,files:resource.entries.length,note:'Saved as an archive. Nothing was extracted or run. Unpack it in your own implementation project with your host’s normal approval and follow the entry point and support notes in the handoff.'};
+    }
+    if(args.destination!==undefined)throw new PaperError(400,'attach takes a sourceFile');
+    if(!owner&&joined.descriptor.role!=='edit')throw new PaperError(403,'This invitation is view-only');
+    if(typeof args.sourceFile!=='string'||!path.isAbsolute(args.sourceFile)||!/\.zip$/i.test(args.sourceFile))throw new PaperError(400,'Choose the absolute path of a .zip file');
+    const source=await fs.realpath(args.sourceFile);if(owner?!inside(active.library.workspace,source):inside(PLUGIN_REAL,source))throw new PaperError(400,owner?'The source archive must be inside this workspace':'Choose a file outside the plugin installation');
+    const info=await fs.stat(source);if(!info.isFile()||info.size>HANDOFF_LIMITS.resourceBytes)throw new PaperError(400,`The source archive must be a file within ${HANDOFF_LIMITS.resourceBytes/1048576} MB`);
+    const bytes=await fs.readFile(source),name=path.basename(source);
+    return owner?attachResource(active.library,args.paperId,bytes,{name}):joined.handoffAttach(bytes,name);
+  };
   const uiKey=randomBytes(32).toString('hex'),ui=createUI(uiKey,home,id=>guests.get(id));
   const rawCall=async(name,args={},peerId='agent-mcp')=>{
     if(!TOOLS.some(t=>t.name===name))throw new PaperError(400,'Unknown tool');
@@ -260,6 +296,7 @@ export async function serveStdio() {
       await rememberWorkspace(root);active=await getApp(root);joined=null;
       return {url:`${active.url}/home.html`,apiBase:active.url,workspace:active.library.workspace,storageRoot:active.library.root,version:VERSION,serverVersion:active.version??VERSION};
     }
+    if(name==='paper_handoff')return handoffTool(args);
     if(joined)return joined.tool(name,args);
     if(!active)throw new PaperError(400,'Call paper_open with the selected project folder first');
     const save=(...values)=>active.save?active.save(...values):active.library.save(...values);
@@ -281,7 +318,7 @@ export async function serveStdio() {
     if(name==='paper_create'){const made=await active.library.create(args);return {...made,url:`${active.url}/?paper=${made.id}`};}
     if(name==='paper_read'){
       const read=await active.library.read(args.paperId),folder=await active.library.folder(args.paperId),notes=await active.library.notes(args.paperId),feedback=await active.library.read(args.paperId,'feedback');
-      return {revision:read.revision,path:path.join(folder,'paper.json'),folder,assetsDir:path.join(folder,'assets'),historyDir:path.join(folder,'.history'),feedback:{path:path.join(folder,'feedback.json'),revision:feedback.revision,exists:!!await fs.stat(path.join(folder,'feedback.json')).catch(()=>null)},summary:{name:read.paper.name,pages:read.paper.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length,artboards:p.nodes.filter(n=>p.root.includes(n.id)&&isArtboard(n)).length}))},notes:Object.fromEntries(Object.entries(notes).map(([name,note])=>[name,{...note,text:note.text.slice(0,8000),truncated:note.text.length>8000,path:path.join(folder,name)}])),...(args.includePaper?{paper:read.paper}:{})};
+      return {revision:read.revision,...(read.paper.handoff?{handoff:handoffSummary(read.paper.handoff)}:{}),path:path.join(folder,'paper.json'),folder,assetsDir:path.join(folder,'assets'),historyDir:path.join(folder,'.history'),feedback:{path:path.join(folder,'feedback.json'),revision:feedback.revision,exists:!!await fs.stat(path.join(folder,'feedback.json')).catch(()=>null)},summary:{name:read.paper.name,pages:read.paper.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length,artboards:p.nodes.filter(n=>p.root.includes(n.id)&&isArtboard(n)).length}))},notes:Object.fromEntries(Object.entries(notes).map(([name,note])=>[name,args.fullDesign&&name==='DESIGN.md'?{...note,truncated:false,path:path.join(folder,name)}:{...note,text:note.text.slice(0,8000),truncated:note.text.length>8000,path:path.join(folder,name)}])),...(args.includePaper?{paper:read.paper}:{})};
     }
     if(name==='paper_read_feedback')return active.library.read(args.paperId,'feedback');
     if(name==='paper_save_feedback')return save(args.paperId,Buffer.from(JSON.stringify(args.workspace)),args.revision,'feedback',peerId);

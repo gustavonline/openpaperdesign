@@ -362,6 +362,10 @@ body:not(.left-open) #presence-roster,body:not(.right-open) #presence-roster{pad
 #motion-run{display:grid;gap:8px;margin-bottom:10px}#motion-run .row{display:flex;gap:6px;flex-wrap:wrap}#motion-run .btn{height:26px;padding:0 8px;font-size:12px}#motion-run .btn[aria-pressed=true]{background:var(--selected);color:var(--accent-ink)}
 #motion-run .motion-time{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--text-2)}#motion-run .motion-time input{width:96px;height:26px;font-size:12px;font-variant-numeric:tabular-nums}
 #motion-run input[type=range]{width:100%;accent-color:var(--accent)}#motion-readout{font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums;min-height:14px}#motion-status{margin:0;min-height:16px}
+/* Source handoff (Design tab): a stored, downloadable archive; nothing here opens or runs it. */
+.design-handoff details>summary{display:flex;align-items:center;height:32px;padding:0 14px;gap:7px;cursor:pointer}.handoff{display:grid;gap:6px;padding:0 14px 12px;font-size:12px;line-height:1.45}.handoff .note{margin:0}.handoff label{color:var(--text-2);font-size:11px}.handoff .field{width:100%}
+.handoff-summary{display:grid;gap:3px}.handoff-summary b{font-weight:600}.handoff-edit{display:grid;gap:4px;margin-top:6px}.handoff-edit .btn{justify-self:start;height:26px;padding:0 8px;font-size:12px;margin-top:4px}
+.handoff-file{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center;padding:4px 0;border-top:1px solid var(--line)}.handoff-file .meta{color:var(--text-2);font-size:11px;font-variant-numeric:tabular-nums;grid-column:1/-1}.handoff-file .btn{height:24px;padding:0 8px;font-size:12px}
 /* Motion (inspector) */
 #motion-section{padding:12px 14px;border-top:1px solid var(--line)}#motion-section h3{margin:0 0 8px}#motion-body{display:grid;gap:10px;font-size:12px}
 .motion-card{display:grid;gap:6px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--field)}.motion-card .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.motion-card label{display:grid;gap:2px;font-size:11px;color:var(--text-2)}

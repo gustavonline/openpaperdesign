@@ -51,6 +51,7 @@ export function previewSchema() {
 export const COPIES = [
   {source: 'skills/paper/references/collaboration.md', copies: ['skills/paper-design/references/collaboration.md', 'skills/paper-copy/references/collaboration.md', 'skills/paper-diagram/references/collaboration.md', 'runtime/collaboration.md']},
   {source: 'skills/paper/references/motion.md', copies: ['skills/paper-design/references/motion.md', 'runtime/motion.md']},
+  {source: 'skills/paper/references/handoff.md', copies: ['runtime/handoff.md']},
   {generated: () => JSON.stringify(previewSchema(), null, 2) + '\n', source: 'skills/paper/references/preview-model.schema.json', copies: ['skills/paper-design/references/preview-model.schema.json', 'runtime/preview-model.schema.json']},
 ];
 export async function syncDocs({write = false} = {}) {

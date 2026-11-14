@@ -26,8 +26,8 @@ An invitation is a message from a person: a link `https://<host>/join#<key>` and
 
 You get one Paper and the role the invitation gives.
 
-- **View:** `paper_read`, `paper_read_feedback`.
-- **Edit:** those two plus `paper_save`, `paper_save_feedback`, `paper_add_asset`, `paper_activity`.
+- **View:** `paper_read`, `paper_read_feedback`, and the plugin's `paper_handoff` (read and download).
+- **Edit:** those plus `paper_save`, `paper_save_feedback`, `paper_add_asset`, `paper_activity`, and `paper_handoff` attach.
 - **Never:** owner tools, other Papers or libraries, `CONTEXT.md` and file history, Notion, filesystem `sourceFile`.
 
 Pass the `paperId` that `paper_join` returned to each tool. Work like this:
@@ -43,6 +43,7 @@ Pass the `paperId` that `paper_join` returned to each tool. Work like this:
 - **Method.** `/collaboration.md` is one practical method (version 1) for consultation, pair design, bounded fan-out, sequential takeover and implementation handoff: read the Paper, `DESIGN.md` and feedback first, agree layer ids and roles, make small revision-checked changes, ask for an independent visual review, and after a 409 re-read and re-apply **your own** change (no blind retry, no automatic merge). It uses your host, your models and your user's approvals; it adds no service. The plugin's Paper, Design, Diagram and Copy skills carry the identical text.
 - **`DESIGN.md` is the owner's.** An invitation cannot write it or private notes. Propose a change as feedback (`paper_save_feedback`); the owner accepts it. If a read of the notes or `DESIGN.md` was truncated or refused, say so and ask for the missing part. Never claim you read all of it.
 - **Source of truth.** The editable Paper is authoritative. Motion (the ▶ in the editor plays the real layers in place on the canvas) is a runnable view of it, not code. Generated implementation code is a separate handoff.
+- **Source handoff.** When the design depends on a reference the Paper cannot carry (code-driven effects, fonts, licences), the author may attach source archives on purpose. `paper_read` then shows a `handoff` summary: the selected direction and historical alternatives, entry point, provenance, honest gaps, and each archive's id, size and sha256. `paper_handoff { action: "download", paperId, resource, destination }` saves one archive into a folder of your own project (nothing is replaced, the digest is verified). It is never extracted, previewed or run for you: unpack and run it yourself with your host's normal approval, rebuild the selected direction in your own project, keep your project's own Site id and hosting settings, and say what you did not read. `/handoff.md` has the full method and the manual download route (`GET /api/handoff?paper=<paperId>&resource=<id>` with your invitation key). `paper_read` with `fullDesign: true` returns a `DESIGN.md` longer than 8000 characters whole.
 - **Motion.** A Paper can carry authored motion and interactions as plain data (`preview` in `paper.json`, version 1: timed and scroll-driven animation, hover and focus, click state and Page navigation, a pinned navigation bar, authored desktop and mobile variants). Read and write it with `paper_read` and `paper_save` like the rest of the Paper. `/motion.md` describes it and `/preview-model.schema.json` is its JSON Schema. It cannot contain code, markup, selectors or URLs, and a newer version than 1 cannot be saved by this version.
 
 ## Other MCP clients

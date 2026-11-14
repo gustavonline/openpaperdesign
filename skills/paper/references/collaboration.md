@@ -12,7 +12,7 @@ Name the mode before you start, so nobody mistakes advice for work on the canvas
 - **Pair design.** You and another contributor (a person or an agent) both change the same Paper. Agree who owns what first (section 3).
 - **Bounded fan-out.** Your user asks for alternatives. Use a small number (three unless your user says otherwise, and never more than your host allows), each in its own clearly named artboard or Page, none touching what the others make. Then one synthesis is chosen by the person who asked; you do not merge alternatives yourselves.
 - **Sequential takeover.** Another contributor continues where you stopped. Leave a hand-off (section 7) rather than a trail of guesses.
-- **Implementation handoff.** The Paper is the brief for someone building it elsewhere. Carry the whole contract (section 6), and say plainly what you did not verify.
+- **Implementation handoff.** The Paper is the brief for someone building it elsewhere. Carry the whole contract (section 6), and say plainly what you did not verify. When the design depends on a reference the Paper cannot carry (code-driven effects, fonts and licences), attach it deliberately as a source handoff (`handoff.md`: one archive, the selected direction and its historical alternatives, entry point, provenance, honest gaps) rather than faking it or linking to files you do not provide; the recipient downloads it through the same invitation and rebuilds in their own project.
 
 ## 2. Read before you touch anything
 

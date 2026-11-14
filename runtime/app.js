@@ -4,6 +4,7 @@ import {setupPresence} from './presence.js?v=2a7d7c240b0d';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
 import { createMotion } from './play.js?v=97f5531536d6';
+import { handoffProblem, withResource, withoutResource, withFields, HANDOFF_LIMITS } from './handoff-model.js?v=dff204719b9f';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
@@ -409,6 +410,7 @@ function applyHistory(action, reverse) {
   if(action.kind==='nodes'){for(const change of action.changes)applyNode(change.key,reverse?change.before:change.after);populateInspector();renderTree();return;}
   if (action.kind === 'name') { scene.name = reverse ? action.before : action.after; showTitle(); return; }
   if (action.kind === 'preview') { const value = reverse ? action.before : action.after; if (value === undefined) delete scene.preview; else scene.preview = copy(value); renderMotion(); motion?.dirty(); return; }
+  if (action.kind === 'handoff') { const value = reverse ? action.before : action.after; if (value === undefined) delete scene.handoff; else scene.handoff = copy(value); renderHandoff(); return; }
   if (action.kind === 'pages') {
     const was = pageId, result = applyPageAction(scene, action, reverse); buildScene();
     // Undo and redo bring the page in question back into view (a rename keeps whatever is shown); a vanished page falls to its neighbour.
@@ -1295,6 +1297,12 @@ const motionHost = {
 motion = createMotion(motionHost);
 motion.bindControls({ toggle: $('#play-toggle'), replay: $('#motion-replay'), reset: $('#motion-reset'), reduce: $('#motion-reduce'), scrub: $('#motion-scrub'), ms: $('#motion-ms'), readout: $('#motion-readout'), status: $('#motion-status') });
 onSurfaceDispose(() => { motion?.destroy(); });
+$('#handoff-attach').addEventListener('click', () => $('#handoff-file').click());
+$('#handoff-file').addEventListener('change', event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) attachHandoff(file); });
+$('#handoff-direction').addEventListener('change', event => { const value = event.target.value; handoffEdit(handoff => withFields(handoff, { direction: value })); });
+$('#handoff-source').addEventListener('change', event => { const value = event.target.value; handoffEdit(handoff => withFields(handoff, { source: value })); });
+$('#handoff-gaps').addEventListener('change', event => { const value = event.target.value; handoffEdit(handoff => withFields(handoff, { gaps: value })); });
+$('#handoff-entry').addEventListener('change', event => { const [resource, entryPath] = event.target.value ? event.target.value.split('\n') : []; handoffEdit(handoff => withFields(handoff, { entry: resource ? { resource, path: entryPath } : null })); });
 $('#motion-try').addEventListener('click', () => { const entry = selection.size === 1 ? nodes.get(selected) : null; if (entry) motion.tryLayer(entry.page.id, entry.node.id); });
 // Whether anything that edits is in progress: a gesture that changes artwork (a pan only moves the camera), a text edit, or a focused inspector field. Effects are held at their
 // current pose for exactly that long.
@@ -1316,6 +1324,63 @@ function motionEdit(change) {
   if (JSON.stringify(next) === JSON.stringify(before)) return true;
   if (next === undefined) delete scene.preview; else scene.preview = next;
   pushHistory({ kind: 'preview', before, after: next === undefined ? undefined : copy(next) }); renderMotion(); motion?.dirty(); return true;
+}
+// The author's source handoff: one change to paper.handoff, checked before it is kept, one undo step, saved like any other edit. The archive bytes were already stored by the upload.
+function handoffEdit(change) {
+  if (!canEdit) { message('This Paper is view-only, so the handoff can’t be changed.'); return false; }
+  const before = scene.handoff === undefined ? undefined : copy(scene.handoff), next = change(before === undefined ? undefined : copy(before)), problem = handoffProblem(next);
+  if (problem) { message(problem); renderHandoff(); return false; }
+  if (JSON.stringify(next) === JSON.stringify(before)) return true;
+  if (next === undefined) delete scene.handoff; else scene.handoff = next;
+  pushHistory({ kind: 'handoff', before, after: next === undefined ? undefined : copy(next) }); renderHandoff(); return true;
+}
+const sizeLabel = bytes => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+async function downloadHandoff(resource) {
+  const status = $('#handoff-status');
+  try {
+    status.textContent = `Preparing ${resource.name}…`;
+    const response = await fetch(`/api/handoff${paperQuery}&resource=${encodeURIComponent(resource.id)}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `The archive could not be downloaded (${response.status}).`);
+    const blob = await response.blob(); if (blob.size !== resource.bytes) throw new Error('The downloaded archive does not match its recorded size.');
+    const where = await download(new Blob([await blob.arrayBuffer()], { type: 'application/octet-stream' }), resource.name); status.textContent = where === 'host' ? `${resource.name} was handed to the app to save.` : `${resource.name} was downloaded. It was not opened or run.`;
+  } catch (error) { status.textContent = error.message; }
+}
+async function attachHandoff(file) {
+  const status = $('#handoff-status');
+  try {
+    if (!canEdit) throw new Error('This Paper is view-only.'); if (!/\.zip$/i.test(file.name)) throw new Error('Choose a .zip file.'); if (file.size > HANDOFF_LIMITS.resourceBytes) throw new Error(`A source archive must fit within ${HANDOFF_LIMITS.resourceBytes / 1048576} MB.`);
+    status.textContent = `Checking ${file.name}…`;
+    const response = await fetch(`/api/handoff${paperQuery}&name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { ...clientHeaders, 'Content-Type': 'application/octet-stream' }, body: file }), data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `The archive was refused (${response.status}).`);
+    const direction = $('#handoff-direction').value.trim() || 'Selected';
+    if (handoffEdit(handoff => withResource(handoff, data.resource, { direction }))) status.textContent = `${data.resource.name} is attached: ${data.resource.entries.length} files. It is stored and downloadable by anyone with this Paper; it is never opened or run here.`;
+  } catch (error) { status.textContent = error.message; }
+}
+function renderHandoff() {
+  const handoff = scene?.handoff, section = $('#handoff-section'), supported = handoff && handoff.version === 1;
+  section.hidden = !(handoff || canEdit); if (section.hidden) return;
+  const summary = $('#handoff-summary'), files = $('#handoff-files'), edit = $('#handoff-edit');
+  summary.replaceChildren(); files.replaceChildren(); edit.hidden = !canEdit;
+  if (handoff && !supported) { summary.append(mk('p', { class: 'note', text: `This Paper’s handoff is version ${handoff.version}, which this version cannot show or change.` })); edit.hidden = true; return; }
+  const line = (label, value) => value ? mk('div', {}, mk('b', { text: `${label}: ` }), document.createTextNode(value)) : null;
+  if (handoff) {
+    const history = (handoff.alternatives || []).map(a => `${a.label} (${a.status})`).join(', '), entry = handoff.entrypoint;
+    summary.append(...[line('Selected', handoff.selected.label), line('Historical or alternative', history), line('Entry point', entry ? `${entry.path}${entry.run ? ` · ${entry.run}` : ''}` : ''), line('Source', handoff.provenance?.source), line('Licence', handoff.provenance?.license), line('Not carried by the Paper', (handoff.support?.gaps || []).join(' · '))].filter(Boolean));
+    for (const resource of handoff.resources || []) {
+      const kinds = ['font', 'license', 'script', 'page', 'style'].map(role => [role, resource.entries.filter(e => e.role === role).length]).filter(([, n]) => n).map(([role, n]) => `${n} ${role}${n > 1 ? 's' : ''}`).join(' · ');
+      const row = mk('div', { class: 'handoff-file' }, mk('span', { text: resource.name, title: resource.sha256 }), mk('button', { type: 'button', class: 'btn', text: 'Download', 'aria-label': `Download ${resource.name}` }));
+      row.querySelector('button').addEventListener('click', () => downloadHandoff(resource));
+      if (canEdit) { const remove = mk('button', { type: 'button', class: 'btn', text: 'Remove', title: 'Stop sharing this archive with the Paper', 'aria-label': `Remove ${resource.name} from the handoff` }); remove.addEventListener('click', () => handoffEdit(h => { const next = withoutResource(h, resource.id); return next.resources.length || next.alternatives?.length || next.provenance || next.support || next.reference ? next : undefined; })); row.append(remove); }
+      row.append(mk('span', { class: 'meta', text: `${sizeLabel(resource.bytes)} · ${resource.entries.length} files${kinds ? ` · ${kinds}` : ''} · sha256 ${resource.sha256.slice(0, 12)}…` }));
+      files.append(row);
+    }
+  } else summary.append(mk('p', { class: 'note', text: 'Nothing is attached. Attach a ZIP only when the design depends on source this Paper cannot carry.' }));
+  if (!canEdit) return;
+  const direction = $('#handoff-direction'), entry = $('#handoff-entry'), source = $('#handoff-source'), gaps = $('#handoff-gaps');
+  if (document.activeElement !== direction) direction.value = handoff?.selected?.label || ''; if (document.activeElement !== source) source.value = handoff?.provenance?.source || ''; if (document.activeElement !== gaps) gaps.value = (handoff?.support?.gaps || []).join('\n');
+  const options = [mk('option', { value: '', text: 'None chosen' })];
+  for (const resource of handoff?.resources || []) for (const e of resource.entries.filter(item => item.role === 'page')) options.push(mk('option', { value: `${resource.id}\n${e.path}`, text: e.path }));
+  entry.replaceChildren(...options); entry.value = handoff?.entrypoint ? `${handoff.entrypoint.resource}\n${handoff.entrypoint.path}` : ''; entry.disabled = options.length < 2; direction.disabled = source.disabled = gaps.disabled = !handoff;
 }
 const mk = (tag, props = {}, ...kids) => { const node = document.createElement(tag); for (const [key, value] of Object.entries(props)) { if (key === 'text') node.textContent = value; else if (key === 'class') node.className = value; else if (key.startsWith('aria-') || key === 'title' || key === 'type') node.setAttribute(key, value); else node[key] = value; } node.append(...kids); return node; };
 const MOTION_LABELS = { opacity: 'Opacity', x: 'Move X', y: 'Move Y', scale: 'Scale', rotate: 'Rotate °', blur: 'Blur', backdropBlur: 'Glass blur', color: 'Text colour', background: 'Background' };
@@ -1881,6 +1946,7 @@ async function renderDesign() {
     compare.replaceChildren(...parts);
   }
   $('#design-guide').hidden = !designText; $('#design-missing').hidden = !!designText;
+  renderHandoff();
 }
 
 // Inspection: loaded once the canvas has painted, so its native toolbar (with its own drag, dock and

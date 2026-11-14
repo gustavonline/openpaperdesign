@@ -5,6 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomBytes, createHash, timingSafeEqual} from 'node:crypto';
 import {PaperError, ID, MAX_PAPER_BYTES, imageBytes} from './library.mjs';
+import {attachResource, readResource, downloadHeaders} from './handoff.mjs';
+import {HANDOFF_LIMITS, handoffSummary} from '../runtime/handoff-model.js';
 import {json, readBody, staticFile} from './http.mjs';
 import {complete, protocolError} from './mcp.mjs';
 import {hasCloudflared,quickTunnel} from './tunnel.mjs';
@@ -83,7 +85,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
   function writable(grant){if(!valid(grant)){const reason=grant.ended||(live(grant)?'revoked':'expired');throw new PaperError(401,END[reason],{reason});}if(grant.role!=='edit')throw new PaperError(403,'This invitation is view-only');}
   function budget(grant){writable(grant);const recent=grant.writes.filter(t=>t>now()-60000);if(recent.length>=30)throw new PaperError(429,'Too many saves. Wait a minute, then retry.');recent.push(now());grant.writes=recent;}
   const clientFor=(grant,req)=>{const prefix=`g-${grant.id}-`,id=CLIENT(req);return prefix+(id.startsWith(prefix)?id.slice(prefix.length):id).slice(0,50);};
-  function scoped(grant,url){const ids=url.searchParams.getAll('paper'),invites=url.searchParams.getAll('invite');if(ids.length!==1||ids[0]!==grant.paperId||[...url.searchParams.keys()].some(k=>k!=='paper'&&k!=='invite')||invites.length>1||invites.length&&invites[0]!==grant.id)throw new PaperError(403,'This invitation opens one Paper only');}
+  function scoped(grant,url,extra=[]){const ids=url.searchParams.getAll('paper'),invites=url.searchParams.getAll('invite');if(ids.length!==1||ids[0]!==grant.paperId||[...url.searchParams.keys()].some(k=>k!=='paper'&&k!=='invite'&&!extra.includes(k))||extra.some(k=>url.searchParams.getAll(k).length>1)||invites.length>1||invites.length&&invites[0]!==grant.id)throw new PaperError(403,'This invitation opens one Paper only');}
   // Sessions of an ended invitation are remembered (hash only) so a guest is told whether it expired or was stopped.
   function revoke(id,reason=null){const grant=grants.get(id);if(!grant)return;reason??=live(grant)?'revoked':'expired';grant.ended=reason;grants.delete(id);byHash.delete(digest(grant.token));
     presence?.removeScope(grant.id);
@@ -100,7 +102,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
     const protocol=req.headers['mcp-protocol-version'],invalid=protocolError(request,protocol);if(invalid)return json(res,400,{jsonrpc:'2.0',id:request.id??null,error:invalid});
     if(request.id===undefined){res.writeHead(202);res.end();return;}
     const schema=(name,description,properties={},required=[])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false}});
-    const tools=[schema('paper_read','Read this invited Paper and its revisions. includePaper returns the full editable JSON.',{includePaper:{type:'boolean'}})];
+    const tools=[schema('paper_read','Read this invited Paper and its revisions. includePaper returns the full editable JSON; fullDesign returns DESIGN.md untruncated. A handoff summary is included when the author attached one.',{includePaper:{type:'boolean'},fullDesign:{type:'boolean'}})];
     tools.push(schema('paper_read_feedback','Read this Paper’s saved feedback and its independent revision.'));
     if(grant.role==='edit')tools.push(
       schema('paper_save','Save this Paper with its read revision; conflicts are refused.',{paper:{type:'object'},revision:{type:'string'}},['paper','revision']),
@@ -121,7 +123,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
         let value;
         if(name==='paper_activity'){if(typeof args.status!=='string')throw new PaperError(400,'Supply a status');value={agent:presence.activity(grant.paperId,grant.id,who,{status:args.status,pageId:args.pageId??null,nodeId:args.nodeId??null,rect:args.rect??null})};}
         else
-        if(name==='paper_read'){const data=await library.read(grant.paperId),allNotes=await library.notes(grant.paperId),notes={'DESIGN.md':allNotes['DESIGN.md']};value={paperId:grant.paperId,name:data.paper.name,revision:data.revision,role:grant.role,notes:Object.fromEntries(Object.entries(notes).map(([k,v])=>[k,{...v,text:v.text.slice(0,8000),truncated:v.text.length>8000}])),...(args.includePaper?{paper:data.paper}:{pages:data.paper.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length}))})};}
+        if(name==='paper_read'){const data=await library.read(grant.paperId),allNotes=await library.notes(grant.paperId),notes={'DESIGN.md':allNotes['DESIGN.md']};value={paperId:grant.paperId,name:data.paper.name,revision:data.revision,role:grant.role,...(data.paper.handoff?{handoff:handoffSummary(data.paper.handoff)}:{}),notes:Object.fromEntries(Object.entries(notes).map(([k,v])=>[k,args.fullDesign?{...v,truncated:false}:{...v,text:v.text.slice(0,8000),truncated:v.text.length>8000}])),...(args.includePaper?{paper:data.paper}:{pages:data.paper.pages.map(p=>({id:p.id,name:p.name,layers:p.nodes.length}))})};}
         else if(name==='paper_read_feedback')value=await library.read(grant.paperId,'feedback');
         else if(name==='paper_add_asset'){budget(grant);value=await library.addAsset(grant.paperId,imageBytes(args.base64),()=>writable(grant));}
         else {budget(grant);const feedback=name==='paper_save_feedback',bytes=Buffer.from(JSON.stringify(feedback?args.workspace:args.paper));if(bytes.length>GUEST_BYTES)throw new PaperError(413,'Shared Papers must fit within 5 MB');value=await library.save(grant.paperId,bytes,args.revision,feedback?'feedback':'paper',peer?.id||`g-${grant.id}-agent`,()=>writable(grant));}
@@ -188,6 +190,12 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
       if(pathname==='/api/assets'&&req.method==='POST'){
         scoped(grant,url);if(req.headers.origin!==requestOrigin)throw new PaperError(403,'Use the Paper editor to upload');budget(grant);
         return json(res,201,await library.addAsset(grant.paperId,await readBody(req,GUEST_BYTES),()=>writable(grant)));
+      }
+      // Handoff source archives. Download: any live invitation of this Paper, only an archive its current manifest names, never an inline or page type. Attach: edit only.
+      if(pathname==='/api/handoff'){
+        scoped(grant,url,['resource','name']);
+        if(req.method==='GET'){const {resource,bytes}=await readResource(library,grant.paperId,url.searchParams.get('resource'));if(!valid(grant))throw gone();res.writeHead(200,downloadHeaders(resource,bytes));res.end(bytes);return;}
+        if(req.method==='POST'){if(req.headers.origin!==requestOrigin)throw new PaperError(403,'Use the Paper editor or the plugin to attach a source archive');budget(grant);return json(res,201,await attachResource(library,grant.paperId,await readBody(req,HANDOFF_LIMITS.resourceBytes),{name:url.searchParams.get('name')||''},()=>writable(grant)));}
       }
       if(!['GET','HEAD'].includes(req.method))throw new PaperError(403,'Owner controls are unavailable through an invitation');
       if(pathname.startsWith('/Paper/')){

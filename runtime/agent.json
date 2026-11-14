@@ -107,6 +107,14 @@
     "designGuide": "DESIGN.md is curated by the owner. An invitation cannot write it or private notes; propose a change as feedback and the owner accepts it. If a read was truncated or refused, say so and ask for the missing part.",
     "sourceOfTruth": "The editable Paper is authoritative. Motion played in place on the canvas is a runnable view of it, not code. Generated implementation code is a separate handoff."
   },
+  "handoff": {
+    "markdown": "/handoff.md",
+    "manifestVersion": 1,
+    "tool": "paper_handoff (plugin): read, download, attach. Download saves one archive named by the Paper's current manifest into a folder of your own project; the file name is chosen by the server, nothing is replaced and the sha256 is verified.",
+    "manualDownload": "GET <origin>/api/handoff?paper=<paperId>&resource=<id> with Authorization: Bearer <key> (and X-Paper-Code when protected). Download only; X-Paper-Sha256 is the digest to verify. MCP does not carry the bytes.",
+    "readFirst": "paper_read shows a handoff summary (selected direction, historical alternatives, entry point, provenance, gaps, archives with sha256). paper_read fullDesign:true returns DESIGN.md whole.",
+    "neverDoes": "Extract, preview, execute or host an archive, fetch its reference URL, or expose any other file of the Paper's folder. Run it yourself with your host's normal approval, in your own project, keeping your own Site id and hosting settings."
+  },
   "motion": {
     "previewModelVersion": 1,
     "markdown": "/motion.md",
