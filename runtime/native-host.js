@@ -2,7 +2,7 @@ import {compatibleWorkspace,WORKSPACE_API,PAPER_DOCUMENT_VERSION} from './worksp
 import {createScope} from './native-scope.js';
 import {downloadContents,base64} from './native-download.js';
 import {findInvitationLink} from './access-code.js';
-const VERSION='0.7.0-preview.29',pending=new Map();let sequence=0,scope,current,activeTransport,booted=false,input,output,invoked,handled=false,navigating=false,queued,downloadMode;
+const VERSION='0.7.0-preview.30',pending=new Map();let sequence=0,scope,current,activeTransport,booted=false,input,output,invoked,handled=false,navigating=false,queued,downloadMode;
 const invocation=new Promise(resolve=>invoked=resolve),nativeFetch=globalThis.fetch.bind(globalThis),nativeAdd=globalThis.addEventListener.bind(globalThis);
 const sharedViews=new Map();
 function rpc(method,params={}){return new Promise((resolve,reject)=>{const id=`paper-native-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(Object.assign(new Error('Paper did not respond. Try again.'),{timedOut:true}));},method==='tools/call'?90000:method==='ui/download-file'?300000:15000);pending.set(id,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id,method,params},'*');});}

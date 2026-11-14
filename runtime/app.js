@@ -3,7 +3,7 @@ import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLea
 import {setupPresence} from './presence.js?v=2a7d7c240b0d';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
-import { createMotion } from './play.js?v=6170a9f023fd';
+import { createMotion } from './play.js?v=c0c7b10e35f4';
 import { IDENTITY, apply, parsePose, chainBasis, poseBasis } from './geometry.js?v=18dc3d2b4478';
 import { handoffProblem, directionProblem, withResource, withoutResource, withFields, HANDOFF_LIMITS } from './handoff-model.js?v=65d2e50b9d5f';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
@@ -1469,7 +1469,7 @@ function renderHandoff() {
 }
 const mk = (tag, props = {}, ...kids) => { const node = document.createElement(tag); for (const [key, value] of Object.entries(props)) { if (key === 'text') node.textContent = value; else if (key === 'class') node.className = value; else if (key.startsWith('aria-') || key === 'title' || key === 'type') node.setAttribute(key, value); else node[key] = value; } node.append(...kids); return node; };
 const MOTION_LABELS = { opacity: 'Opacity', x: 'Move X', y: 'Move Y', scale: 'Scale', rotate: 'Rotate °', blur: 'Blur', backdropBlur: 'Glass blur', color: 'Text colour', background: 'Background' };
-const TRIGGER_LABELS = { load: 'When played', 'scroll-in': 'On scroll into view', scroll: 'With scroll position', hover: 'On hover', focus: 'On focus', state: 'When a state is set' };
+const TRIGGER_LABELS = { load: 'When played', 'scroll-in': 'Scrolled into view (simulated by panning)', scroll: 'Scroll-linked (simulated by panning)', hover: 'On hover', focus: 'On focus', state: 'When a state is set' };
 function renderMotion() {
   const box = $('#motion-section'), body_ = $('#motion-body'), entry = selection.size === 1 ? nodes.get(selected) : null, tryButton = $('#motion-try');
   const p = scene?.preview, any = !!(p && ((p.animations?.length || 0) + (p.texts?.length || 0) + (p.sticky?.length || 0) + (p.interactions?.length || 0)));
@@ -1550,7 +1550,7 @@ function renderMotion() {
   if (parent && entry.page.root.includes(parent.id) && isArtboard(parent)) {
     const pinned = mine(preview?.sticky)[0], pin = mk('input', { type: 'checkbox', checked: !!pinned });
     pin.addEventListener('change', () => motionEdit(prev => pin.checked ? withRecord(prev, 'sticky', { id: uniqueId(prev?.sticky, 'pin'), page: pid, node: nid }) : withoutRecord(prev, 'sticky', pinned.id)));
-    parts.push(mk('label', { class: 'check' }, pin, document.createTextNode('Pin to the top while the page scrolls')));
+    parts.push(mk('label', { class: 'check' }, pin, document.createTextNode('Pin to the top (simulated by panning the canvas)')));
   }
   // A top-level artboard can be declared as the responsive version of its Page for a range of window widths: metadata for whoever implements the design.
   // The editor itself shows every artboard as authored and never swaps or fits them.

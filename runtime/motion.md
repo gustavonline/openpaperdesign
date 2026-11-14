@@ -37,8 +37,8 @@ Responsiveness is **authored**, not computed. A Page can have several top-level 
 | type | when it plays | extra fields |
 |---|---|---|
 | `load` | with the timeline (Play, Replay, the time controls) | none |
-| `scroll-in` | once, when the layer scrolls into view | `threshold` 0–1 (default .25) |
-| `scroll` | follows the scroll position: progress runs from 0 at `from` to 1 at `to` | `from`, `to` in design pixels, `to > from` |
+| `scroll-in` | once, when the layer comes into view as the canvas is panned or zoomed (a simulation; see “On the canvas and in a real website”) | `threshold` 0–1 (default .25) |
+| `scroll` | follows how far the artboard has been panned past the top of the canvas viewport: progress runs from 0 at `from` to 1 at `to` (a simulation of a scroll position) | `from`, `to` in design pixels, `to > from` |
 | `hover` / `focus` | forward on pointer enter / focus, back on leave / blur | optional `source` (another layer on the same Page) |
 | `state` | forward while the state is `is`, back when it is not | `state`, `is` |
 
@@ -67,7 +67,7 @@ These rules are the runtime's, not a guess. The only thing that differs between 
 - `{"type": "scroll-to", "node": <id on the same Page>}`
 - `{"type": "back"}`: return to where it came from.
 
-`states`: each has 2–8 distinct short `values` and an `initial`. `texts` swap a **text layer's** text while a state has a value (1–300 characters, plain text). `sticky` pins a layer that is a direct child of a top-level artboard while the page scrolls (`top` 0–200 px), like a navigation bar.
+`states`: each has 2–8 distinct short `values` and an `initial`. `texts` swap a **text layer's** text while a state has a value (1–300 characters, plain text). `sticky` pins a layer that is a direct child of a top-level artboard at the top of the canvas viewport while the artboard is panned past it (`top` 0–200 px), like a navigation bar: a canvas simulation of a sticky header, not real sticky layout.
 
 ## Playing, time and reduced motion
 
@@ -76,6 +76,14 @@ Motion runs **on the normal Edit canvas**, on the editor's own layers: one small
 The Motion section holds Replay, a scrubber, an exact field (type whole milliseconds, 0 to 3,600,000, then Enter), **Reduce motion** and **Reset to artwork**; they drive the `load` animations on one shared clock. The time shown is the time of the frame on screen: pausing freezes everything at a whole millisecond, and entering that time again gives the same frame, loops included. Loops never end, so with them the time runs past the timeline's length (the scrubber covers the first cycle; the readout and the field show the real time); without loops it stops at the end. Pressing Play never replays an entrance that is already over. The clock controls the `load` timeline; `hover`, `focus`, `scroll-in` and `state` effects are local event progress and do not rewind with it. Pause, hidden, offscreen and an edit gesture in progress freeze them too (a change made while frozen shows its end state at once), and only what was moving continues on resume; hidden, offscreen and editing are separate, nothing continues until all clear, and a pause by the person always stays. While you drag, resize or type, motion holds the pose without a jump, and the edit's coordinates, Undo and the saved Paper are the authored ones: animated poses, state text, pin offsets, time and state are never saved. A Page with no `load` animation has no clock: no frame loop runs and the time field, scrubber and Replay are disabled (Play/Pause, Reduce motion and Reset keep working for its hover, focus, reveal and state effects). With several Pages the clock is ONE shared clock: going to another Page (Try interaction, Back, or choosing it) re-attaches the effects of the Pages now shown to the same clock, keeping the person's pause, the declared local states and the time, clamped only to the new finite bound; the time controls follow whether the shown Pages have a load animation. Back returns to the previous Page under the current clock, not to an old saved time or old local effects. **Play never restarts a finite timeline that has finished** (it says so); **Replay** does, and so does typing a time. The time control has one bound for every load timeline: with a loop it is 3,600,000 ms and motion pauses exactly there and says so (Replay starts again); a timeline of finite animations ends at its own end, which may be later than 3,600,000 ms (60,000 ms x 100 repeats), and the field's limit is that end. Nothing runs while idle, hidden, offscreen or being edited. **Reduced motion** (the system setting, or the one "Reduce motion" control) shows every state without moving: timelines rest on their last frame (a loop on its first), and hover, focus, reveal and state changes are instant. There is no audio.
 
 A new revision of the Paper (a collaborator's save, undo) rebinds the effects to the new layers keeping the clock, still-valid state and pause. If the invitation ends, motion is removed from the canvas.
+
+## On the canvas and in a real website
+
+The canvas shows what this data can honestly show: timed entrances and loops, hover, focus, design states, and click actions through **Try interaction**. A frame with no records stays still; nothing is animated to make Play look busy. `scroll`, `scroll-in` and `sticky` are driven by **panning or zooming the canvas**, which is camera navigation, not a scrolling document: they show a representative effect and are not evidence of real scrolling, sticky positioning or reflow. Records already saved with those triggers keep working unchanged.
+
+Real website behaviour is checked in the project's own browser preview (for example its localhost site): document scrolling, fixed and sticky composition, scroll choreography, responsive reflow at real widths, Canvas/WebGL or other JavaScript, forms, data and navigation. A localhost address belongs to its owner's computer and an invitation does not forward it. A recipient builds and runs that preview from the shared source and run instructions (`handoff.md`), or the owner shares a preview on purpose.
+
+For each behaviour a recipient must reproduce, the Paper's `DESIGN.md` or the handoff's `support` notes should say, where it applies: the **trigger**, the **target** layer, the **timing and easing** (or the scroll range), the **breakpoint** it applies at, what **reduced motion** does, its **status** (shown on the canvas, or implemented only in the website), and which **Page, artboard and source revision** it belongs to. Write only what is true of this design.
 
 ## Exports and handoff
 

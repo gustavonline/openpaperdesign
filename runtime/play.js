@@ -80,6 +80,9 @@ export function createMotion(host) {
   // The load clock exists only where a load animation targets a layer on a shown Page. It is read from the validated model, not from the bound timeline, so the timed
   // controls are right BEFORE motion is on (typing a time then starts a paused timed frame) and follow Page and revision changes (dirty() repaints them).
   const hasClock = () => (host.preview()?.animations || []).some(a => a.trigger.type === 'load' && host.pageShown(a.page) && !!host.nodeEl(a.page, a.node));
+  // Motion on the Page(s) shown now. A Paper may animate only another Page, or none: the toggle then says what is true here instead of looking broken or doing nothing quietly.
+  const pageHasMotion = () => { const p = host.preview(); return !!p && [...(p.animations || []), ...(p.texts || []), ...(p.sticky || [])].some(r => host.pageShown(r.page) && !!host.nodeEl(r.page, r.node)); };
+  const NOTHING_HERE = 'Nothing on the Page shown has authored motion, so nothing here will move. The Paper has motion on another Page.';
   const hasMotion = () => { const p = host.preview(); return !!(p && ((p.animations?.length || 0) + (p.texts?.length || 0) + (p.sticky?.length || 0) > 0)); };
 
   // ---- What may move is decided here, from facts. `userPaused`: the person paused (or the time control's limit was reached). `blocked()`: the document is hidden,
@@ -113,7 +116,7 @@ export function createMotion(host) {
   function paintToggle() {
     const t = ui.toggle; if (!t) return;
     const label = playing ? 'Pause motion' : 'Play motion', motionOn = hasMotion(), clockOn = motionOn && hasClock();
-    t.setAttribute('aria-pressed', String(playing)); t.setAttribute('aria-label', label); t.setAttribute('title', motionOn ? label : 'This Paper has no motion yet. Add some from a layer’s Motion section.'); t.disabled = !motionOn;
+    t.setAttribute('aria-pressed', String(playing)); t.setAttribute('aria-label', label); t.setAttribute('title', !motionOn ? 'This Paper has no motion yet. Select a layer and add some in its Motion section.' : !pageHasMotion() ? `${label}. ${NOTHING_HERE}` : playing ? label : `${label}: show this Page’s authored effects on the canvas. Nothing is saved.`); t.disabled = !motionOn;
     t.querySelector?.('use')?.setAttribute('href', playing ? '#i-pause' : '#i-play');
     if (ui.reset) ui.reset.disabled = !motionOn && !engaged;
     // Replay, the scrubber and the time field act on the load clock only: with no load animation on the shown Pages there is nothing for them to do.
@@ -224,6 +227,7 @@ export function createMotion(host) {
   function engage({paused = false} = {}) {
     if (engaged || stopped) return; engaged = true; userPaused = paused; states.clear(); for (const [id, value] of initialStates(host.preview())) states.set(id, value);
     bind(); paintToggle();
+    if (hasMotion() && !pageHasMotion()) say(NOTHING_HERE);
   }
   // Back to exactly the artwork: every effect cancelled, texts and pins taken off, local state forgotten.
   function disengage() {
