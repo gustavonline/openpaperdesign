@@ -69,7 +69,14 @@ export function createPlayer(host) {
     on(pageSelect, 'change', () => go(pageSelect.value));
     on(viewSelect, 'change', () => { viewport = viewSelect.value; lockedRoot = null; build(); });
     on(replay, 'click', () => { seek(0); resume(); });
-    on(toggle, 'click', () => { if (playing) pause(); else resume(); });
+    // Pressing the button with the mouse, a finger or a pen first moves focus, and a focused time field commits (and pauses) on that focus change, BEFORE the
+    // click arrives. The click must do what the button said when it was pressed, not what it says after the field changed it: the press records the intent
+    // (Pause or Play) in the capture phase, ahead of the blur, and the pointer click uses it once. A keyboard activation has no press (its click has detail 0),
+    // and focus has already settled by then, so it follows the state as it is. A cancelled press forgets its intent.
+    let pressed = null;
+    on(toggle, 'pointerdown', () => { pressed = playing ? 'pause' : 'play'; }, {capture: true});
+    on(toggle, 'pointercancel', () => { pressed = null; });
+    on(toggle, 'click', event => { const intent = event?.detail > 0 ? pressed : null; pressed = null; if (intent ? intent === 'pause' : playing) pause(); else resume(); });
     on(scrub, 'input', () => { const at = Number(scrub.value); pause(); seek(at); });
     // The exact entry: Enter, leaving the field or the browser's own change commit it; anything that is not a plain whole or decimal number in range is refused.
     bindKey(msInput, event => { if (event.key !== 'Enter') return false; event.preventDefault(); event.stopPropagation(); commitTime(); return true; });

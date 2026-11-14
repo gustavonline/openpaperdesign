@@ -554,3 +554,58 @@ test('at the time control’s limit Play pauses exactly there and says so: the d
   // Below the limit nothing changes: a long run still reports its real time.
   const long = mount(t); long.env.advance(650217); long.player.pause(); assert.equal(long.player.snapshot.time, 650217); const lf = long.live().map(frameOf); long.player.seek(650217); assert.deepEqual(long.live().map(frameOf), lf);
 });
+
+// ---- Sixth finding: a draft in the exact time field, then a click on the visible Pause. The pointer press moves focus, the field commits (and pauses) on that
+// ---- change BEFORE the click, and the click used to see "paused" and resume. These replay the browser's order of events on the real player; the real order in a
+// ---- browser (pointerdown, change/blur, pointerup, click) is the lead's Firefox repro.
+function press(m, button, {field = null, order = 'change-blur', detail = 1} = {}) {
+  button.fire('pointerdown');
+  if (field) { if (order === 'blur-change') { field.fire('blur'); field.fire('change'); } else { field.fire('change'); field.fire('blur'); } }
+  button.fire('pointerup'); button.fire('click', {detail});
+}
+const toggleOf = m => m.env.elements.find(e => e.className === 'play-toggle' && e.parentNode);
+
+test('a draft in the time field, then a pointer click on the visible Pause, pauses at the typed time and stays paused', t => {
+  for (const order of ['change-blur', 'blur-change']) {
+    const m = mount(t), {env} = m, field = msField(m), orb = loopsOf(m)[0], toggle = toggleOf(m); assert.equal(toggle.textContent, 'Pause'); assert.equal(m.player.snapshot.playing, true);
+    field.focus(); field.value = '1000'; press(m, toggle, {field, order});
+    assert.equal(m.player.snapshot.playing, false, `${order}: the Pause the person clicked paused`); assert.equal(toggle.textContent, 'Play'); assert.ok(m.live().every(a => !a.running), 'nothing is running'); assert.equal(orb.currentTime, 1000, 'held at the typed time');
+    env.advance(130); assert.equal(orb.currentTime, 1000, 'and it does not drift afterwards'); assert.equal(m.player.snapshot.time, 1000); assert.equal(field.value, '1000'); assert.equal(env.frames.size, 0);
+  }
+});
+
+test('a pointer click does what the button said when it was pressed, in every combination, and ordinary Play, Pause, Replay and Enter keep their meaning', t => {
+  const m = mount(t), {env} = m, field = msField(m), orb = loopsOf(m)[0], toggle = toggleOf(m), replay = env.elements.find(e => e.attrs['aria-label'] === 'Replay from the start');
+  // Ordinary: playing → click Pause pauses; paused → click Play plays from the held time.
+  env.advance(500); press(m, toggle); assert.equal(m.player.snapshot.playing, false); assert.equal(orb.currentTime, 500); press(m, toggle); assert.equal(m.player.snapshot.playing, true); assert.equal(orb.currentTime, 500); assert.equal(orb.running, true);
+  // A draft while PAUSED, then a click on Play: the field commits (already paused), the click plays from the typed time.
+  press(m, toggle); field.focus(); field.value = '2500'; press(m, toggle, {field}); assert.equal(m.player.snapshot.playing, true, 'Play was pressed: it plays'); assert.equal(orb.currentTime, 2500); assert.equal(orb.running, true); env.advance(100); assert.equal(orb.currentTime, 2600);
+  // A draft while playing, then Replay: the commit pauses, Replay starts over from zero and plays (its meaning does not depend on the toggle).
+  field.focus(); field.value = '4000'; replay.fire('pointerdown'); field.fire('change'); field.fire('blur'); replay.fire('click', {detail: 1}); assert.equal(orb.currentTime, 0); assert.equal(orb.running, true); assert.equal(m.player.snapshot.playing, true);
+  // Enter commits exactly as before and leaves it paused at the typed time; the next Play click resumes from there.
+  field.focus(); field.value = '3000'; m.player.key({key: 'Enter', target: field, preventDefault() {}, stopPropagation() {}}); assert.equal(orb.currentTime, 3000); assert.equal(m.player.snapshot.playing, false); press(m, toggle); assert.equal(orb.running, true); assert.equal(orb.currentTime, 3000);
+  // A draft, then the keyboard: Tab away (blur commits and pauses), then Enter on the button, whose click has no press (detail 0) and follows the state as it is: Play.
+  field.focus(); field.value = '1500'; field.fire('change'); field.fire('blur'); assert.equal(m.player.snapshot.playing, false); toggle.fire('click', {detail: 0}); assert.equal(m.player.snapshot.playing, true, 'keyboard activation of the button that now says Play plays'); assert.equal(orb.currentTime, 1500);
+  // And Space/Enter on a button that says Pause pauses (no press, live state).
+  toggle.fire('click', {detail: 0}); assert.equal(m.player.snapshot.playing, false);
+});
+
+test('a cancelled press forgets its intent, an intent is used once, and a click with no press follows the live state', t => {
+  const m = mount(t), {env} = m, toggle = toggleOf(m), orb = loopsOf(m)[0], field = msField(m);
+  // Press while playing, the browser cancels it (a scroll or a drag away), then something pauses, then a click with detail 1 but no new press: live state (paused → plays).
+  toggle.fire('pointerdown'); toggle.fire('pointercancel'); m.player.pause(); toggle.fire('click', {detail: 1}); assert.equal(m.player.snapshot.playing, true, 'no remembered intent: the paused Play button plays');
+  // The intent is consumed by the click: a second click is its own press-less click.
+  toggle.fire('pointerdown'); toggle.fire('click', {detail: 1}); assert.equal(m.player.snapshot.playing, false, 'the pressed Pause paused'); toggle.fire('click', {detail: 1}); assert.equal(m.player.snapshot.playing, true, 'a second click without a press follows the state');
+  // Reduced motion and paused-preview event policies are untouched: with a draft then Pause under reduced motion nothing runs.
+  const r = mount(t, {reduced: true}), rf = msField(r); rf.focus(); rf.value = '700'; rf.fire('change'); rf.fire('blur'); assert.equal(r.player.snapshot.playing, false); assert.equal(loopsOf(r)[0].currentTime, 700); assert.equal(r.env.animations.filter(a => a.running).length, 0);
+  // After the press, paused events still show their end state at once (the frozen policy).
+  m.player.pause(); const cta = m.byNode(m.named('D primary CTA')), hover = hoverOf(m); cta.fire('pointerenter'); assert.deepEqual([hover.running, hover.currentTime], [false, hover.end]);
+});
+
+test('the intent capture is owned by the lifecycle: one capture-phase press listener on the button, removed with everything else, and no double dispatch with the key guard', t => {
+  const m = mount(t), toggle = toggleOf(m), {env} = m; const downs = toggle.listeners.get('pointerdown') || []; assert.equal(downs.length, 1, 'one press listener'); assert.equal(toggle.listeners.get('click')?.length, 1);
+  m.player.setViewport('390'); assert.equal((toggle.listeners.get('pointerdown') || []).length, 1, 'a rebuild does not stack listeners'); assert.equal(toggle.listeners.get('click').length, 1);
+  // Space or Enter on the focused button: the guard hands the key to Play (not a handler of its own), the default click then arrives once with detail 0.
+  let handled = 0; const e = {key: 'Enter', target: toggle, preventDefault() { handled++; }, stopPropagation() {}}; assert.equal(m.player.key(e), false); assert.equal(handled, 0, 'Play does not act on the key itself: no double dispatch with the browser’s click');
+  m.player.destroy(); assert.equal(env.added, env.removed); assert.equal((toggle.listeners.get('pointerdown') || []).length, 0); assert.equal((toggle.listeners.get('click') || []).length, 0);
+});
