@@ -224,10 +224,6 @@ export function fitCamera(rects, area, {maxZoom = 1, limit = 1e6} = {}) {
 }
 // A Page with nothing to show: 100%, with the origin at the top-left of the usable canvas, the same every time.
 export const emptyCamera = area => ({x: area.left + 24, y: area.top + 24, z: 1});
-// Whether the Home control has a real destination: the viewer's OWN Home. The owner (browser or app) has theirs; a recipient inside the local plugin
-// app reaches that app's own Home, never the sender's. A recipient in a plain browser has no Home of their own: the sender's server is not
-// theirs, so there is none to offer (no guess about whether a plugin exists).
-export const homeRoute = ({shared, inPaperSurface}) => (!shared || inPaperSurface) ? 'own' : 'none';
 
 // ---- Images (#18): import by drop, copy image, save image. Every action starts from the stored original and reauthorizes through the
 // caller's own scoped fetch; the picture on screen (or its cached copy) is never the source.

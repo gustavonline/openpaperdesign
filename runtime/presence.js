@@ -140,6 +140,8 @@ export function setupPresence(host){
   window.addEventListener('pagehide',depart);const heartbeat=setInterval(changed,6000),expiry=setInterval(paint,1000);changed();
   return {
     receive,paint,changed,snapshotToken,
+    // Motion moves layers on the canvas; the chips that follow layer bounds repaint with each clock frame only while someone's presence or an effect is actually shown.
+    needsPaint(){return !stopped&&(peers.size>0||marks.size>0||animations.size>0);},
     clearEffects,
     disconnect(){connection++;updates++;clearEffects();commits=[];peers.clear();paint();},
     documentChanged(before,after,{beforeRevision,revision,animate=true}={}){

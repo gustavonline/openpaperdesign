@@ -1,6 +1,6 @@
 # Motion and interactions: the preview model (version 1)
 
-A Paper can say how it **moves** and what it **does** when played, without becoming code. That lives in `paper.json` under `preview` as plain data. The editable layers stay the source of truth; Play (the small ▶ in the editor) builds a scrolling preview of one authored artboard and runs this data with a trusted player. Read and write it with the tools you already have: `paper_read` returns it inside the whole Paper, `paper_save` saves the whole Paper with it. There is no new tool. The machine-readable structure is `preview-model.schema.json` (also served at `/preview-model.schema.json`); the server also checks every reference, which a schema cannot.
+A Paper can say how it **moves** and what it **does** when played, without becoming code. That lives in `paper.json` under `preview` as plain data. The editable layers stay the source of truth; the small ▶ in the editor animates the real layers in place on the Edit canvas and runs this data with the product's own bounded player. Read and write it with the tools you already have: `paper_read` returns it inside the whole Paper, `paper_save` saves the whole Paper with it. There is no new tool. The machine-readable structure is `preview-model.schema.json` (also served at `/preview-model.schema.json`); the server also checks every reference, which a schema cannot.
 
 ## What it is not
 
@@ -28,7 +28,7 @@ Every list is optional. Every record has an `id` of 1–40 letters, digits, `-` 
 
 ## Variants: the authored responsive designs
 
-Responsiveness is **authored**, not computed. A Page can have several top-level artboards (a 1440 desktop and a 390 mobile, say), each its own editable layout. A variant says which artboard Play shows for which window width: `root` (a top-level artboard), optional `minWidth` and `maxWidth` in whole pixels. Play shows the variant whose range holds the window's width (the largest `minWidth` if several do); a width outside every range shows the nearest one, scaled down only to fit, and Play says so. With no variants, Play shows the Page's first top-level artboard. Animations and interactions are attached to layers of a particular artboard, so each variant carries its own.
+Responsiveness is **authored**, not computed. A Page can have several top-level artboards (a 1440 desktop and a 390 mobile, say), each its own editable layout. A variant says which artboard serves which window width (the editor keeps showing every artboard; variants are data for whoever implements the design): `root` (a top-level artboard), optional `minWidth` and `maxWidth` in whole pixels. The variant whose range holds the width wins (the largest `minWidth` if several do); a width outside every range uses the nearest one. With no variants the Page's first top-level artboard is the one. Animations and interactions are attached to layers of a particular artboard, so each variant carries its own.
 
 ## Animations
 
@@ -36,7 +36,7 @@ Responsiveness is **authored**, not computed. A Page can have several top-level 
 
 | type | when it plays | extra fields |
 |---|---|---|
-| `load` | with the timeline (Play, Replay, the scrubber) | none |
+| `load` | with the timeline (Play, Replay, the time controls) | none |
 | `scroll-in` | once, when the layer scrolls into view | `threshold` 0–1 (default .25) |
 | `scroll` | follows the scroll position: progress runs from 0 at `from` to 1 at `to` | `from`, `to` in design pixels, `to > from` |
 | `hover` / `focus` | forward on pointer enter / focus, back on leave / blur | optional `source` (another layer on the same Page) |
@@ -48,10 +48,10 @@ Timing: `durationMs` 1–60000, `delayMs` 0–60000, `easing` one of `linear`, `
 
 ## Interactions
 
-`on` is `click` (and Enter or Space on the layer, which Play makes focusable). `actions` (1–4), each one of:
+`on` is `click`. In the editor a click selects as it always does; the actions are tried with **Try interaction** in the selected layer's Motion inspector. `actions` (1–4), each one of:
 
 - `{"type": "navigate", "page": "<pageId>", "root": <optional artboard id>}`: show that Page (its variant for the width), or exactly that artboard.
-- `{"type": "set-state", "state": "mode", "value": "together"}`: local to this Play session, never saved.
+- `{"type": "set-state", "state": "mode", "value": "together"}`: local to the motion session, never saved.
 - `{"type": "scroll-to", "node": <id on the same Page>}`
 - `{"type": "back"}`: return to where it came from.
 
@@ -59,14 +59,16 @@ Timing: `durationMs` 1–60000, `delayMs` 0–60000, `easing` one of `linear`, `
 
 ## Playing, time and reduced motion
 
-Play has its own scroll container and is a modal dialog: wheel, pinch and pointer belong to it while it is open, the editor behind it is inert, Tab and Shift+Tab stay inside it (toolbar, time field, preview, interactive layers), and Escape closes it. It never moves the editor's camera, selection, Page or draft, and nothing done while playing is saved. Play, Pause, Replay, a scrubber and an exact field (type whole milliseconds, 0 to 3,600,000, then Enter) drive the `load` animations on one shared clock. The time shown is the time of the frame on screen: pausing freezes everything at a whole millisecond, and entering that time again gives the same frame, loops included. Loops never end, so with them the time runs past the timeline's length (the scrubber covers the first cycle; the readout and the field show the real time); without loops it stops at the end. Pressing Play never replays an entrance that is already over. The clock controls the `load` timeline; `hover`, `focus`, `scroll-in` and `state` effects are local event progress and do not rewind with it. Pause, hidden and offscreen freeze them too (a change made while frozen shows its end state at once), and only what was moving continues on resume. A Page with no `load` animation has no clock: no frame loop runs and the time controls are disabled. The time control has one bound for every load timeline: with a loop it is 3,600,000 ms and Play pauses exactly there and says so (Replay starts again); a timeline of finite animations ends at its own end, which may be later than 3,600,000 ms (60,000 ms x 100 repeats), and the field's limit is that end. Hidden and offscreen are separate: nothing continues until both clear, and a pause by the person always stays. Hover, focus, scroll and state effects are event-driven. Nothing runs while idle, hidden or offscreen. **Reduced motion** (the system setting, or the one "Reduce motion" control) shows every state without moving: timelines rest on their last frame (a loop on its first), and hover, focus, reveal and state changes are instant. There is no audio.
+Motion runs **on the normal Edit canvas**, on the editor's own layers: one small Play/Pause toggle (the ▶ beside the Paper title) starts it and pauses it, with no window, copy, overlay, lock or second page. Camera, zoom, Page, selection, panels and tools are untouched, autoplay is not required, and nothing is saved. A normal click, drag, wheel, pinch or key keeps its editor meaning; hover is passive; a layer's `focus` effect follows its selection; click actions run only from **Try interaction** (a button in the selected layer's Motion inspector); `scroll`, `scroll-in` and `pin` follow where the artboard sits relative to the canvas viewport, so panning or zooming the canvas drives them. Every shown artboard stays shown (variants are data for an implementer, not a swap in the editor).
 
-Resizing the window (or a panel) makes Play pick the authored variant for the new width and rescale to fit, keeping the paused time or playing clock, local state and scroll place. A new revision of the Paper (a collaborator's save) rebuilds Play from it, keeping the Page, scroll place, still-valid state and time, and says so. If the invitation ends, Play closes at once.
+The Motion section holds Replay, a scrubber, an exact field (type whole milliseconds, 0 to 3,600,000, then Enter), **Reduce motion** and **Reset to artwork**; they drive the `load` animations on one shared clock. The time shown is the time of the frame on screen: pausing freezes everything at a whole millisecond, and entering that time again gives the same frame, loops included. Loops never end, so with them the time runs past the timeline's length (the scrubber covers the first cycle; the readout and the field show the real time); without loops it stops at the end. Pressing Play never replays an entrance that is already over. The clock controls the `load` timeline; `hover`, `focus`, `scroll-in` and `state` effects are local event progress and do not rewind with it. Pause, hidden, offscreen and an edit gesture in progress freeze them too (a change made while frozen shows its end state at once), and only what was moving continues on resume; hidden, offscreen and editing are separate, nothing continues until all clear, and a pause by the person always stays. While you drag, resize or type, motion holds the pose without a jump, and the edit's coordinates, Undo and the saved Paper are the authored ones: animated poses, state text, pin offsets, time and state are never saved. A Page with no `load` animation has no clock: no frame loop runs and the time controls are disabled. The time control has one bound for every load timeline: with a loop it is 3,600,000 ms and motion pauses exactly there and says so (Replay starts again); a timeline of finite animations ends at its own end, which may be later than 3,600,000 ms (60,000 ms x 100 repeats), and the field's limit is that end. Nothing runs while idle, hidden, offscreen or being edited. **Reduced motion** (the system setting, or the one "Reduce motion" control) shows every state without moving: timelines rest on their last frame (a loop on its first), and hover, focus, reveal and state changes are instant. There is no audio.
+
+A new revision of the Paper (a collaborator's save, undo) rebinds the effects to the new layers keeping the clock, still-valid state and pause. If the invitation ends, motion is removed from the canvas.
 
 ## Exports and handoff
 
-The PNG and JPEG image exports, the HTML file export and the Paper preview (`.html`, a static page viewer) draw the **editable layers as they are in Edit**; motion is never applied or captured, and nothing Play does leaks into the Paper. The `.paper.zip` keeps the preview model with the Paper. The player is not exported: this version has no standalone live-HTML export, so generated implementation code remains a separate handoff from the authoritative Paper (see `collaboration.md`).
+The PNG and JPEG image exports, the HTML file export and the Paper preview (`.html`, a static page viewer) draw the **editable layers as they are in Edit**; motion is never applied or captured, and nothing motion does leaks into the Paper. The `.paper.zip` keeps the preview model with the Paper. The player is not exported and an export is never a transient animated frame: this version has no standalone live-HTML export, so generated implementation code remains a separate handoff from the authoritative Paper (see `collaboration.md`).
 
 ## Older Papers and newer versions
 
-A Paper with no `preview` is unchanged and plays as a plain scrolling preview. A `preview.version` newer than 1 still opens and lists, but this version cannot save over it (nothing newer is dropped or rewritten): update OpenPaperDesign, or remove the preview.
+A Paper with no `preview` is unchanged and has nothing to play. A `preview.version` newer than 1 still opens and lists, but this version cannot save over it (nothing newer is dropped or rewritten): update OpenPaperDesign, or remove the preview.

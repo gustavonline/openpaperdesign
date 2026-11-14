@@ -35,7 +35,7 @@ function layout(W, left, right) {
   // Right bar box and where its controls sit.
   if (right) { out.rightBox = [W - P, W]; const end = W - OPEN_PAD_RIGHT[1]; out.rightControls = [end - r.content, end]; assert.ok(r.content + OPEN_PAD_RIGHT[0] + OPEN_PAD_RIGHT[1] <= P, `${W}: the right cluster fits its own panel header`); }
   else { const box = r.content + 2 * FLOAT_PAD + 2 * BORDER; out.rightBox = [W - 5 - box, W - 5]; const end = W - 5 - BORDER - FLOAT_PAD; out.rightControls = [end - r.content, end]; assert.equal(box, compact(W) ? rcompact : rfull, `${W}: the declared floating width is the real one`); }
-  const rext = right ? P : (compact(W) ? rcompact : rfull) + 5, fixed = 4 * ibtn + GAP * 3;
+  const rext = right ? P : (compact(W) ? rcompact : rfull) + 5, fixed = 3 * ibtn + GAP * 2;
   if (left) { out.leftBox = [0, P]; out.leftControls = [OPEN_PAD_LEFT_BAR, P - OPEN_PAD_LEFT_BAR]; out.title = P - 2 * OPEN_PAD_LEFT_BAR - fixed - GAP; }
   else {
     const titleHidden = W <= titleHideAtOrBelow && right; let width = titleHidden ? fixed + 2 * FLOAT_PAD + 2 * BORDER : Math.min(P - 10, W - rext - 11);
@@ -50,8 +50,8 @@ const states = W => W < 1024 ? [[false, false], [true, false], [false, true]] : 
 test('the declared sizes are what the model assumes', () => {
   assert.equal(ibtn, 26); assert.equal(panel, 240); assert.deepEqual([panelMin, panelCap], [200, 240]); assert.deepEqual([rfull, rcompact], [234, 136]); assert.deepEqual([levelFull, levelCompact, shareCompact, compactBelow, panelShrinkBelow, titleHideAtOrBelow], [44, 40, 28, 520, 480, 430]);
   assert.ok(sharePad === 6 && /<span>Share<\/span>/.test(html), 'Share is an icon plus a word that the compact tier hides'); assert.match(css, /@media\(max-width:519px\)\{[^\n]*?\.share-button span\{display:none\}#zoom-out,#zoom-in\{display:none\}/);
-  for (const id of ['go-home', 'home', 'play-toggle', 'left-toggle']) assert.match(html, new RegExp(`id="${id}"`), `${id} is in the left bar`); for (const id of ['export', 'zoom-out', 'zoom', 'zoom-in', 'zoom-fit', 'right-toggle']) assert.match(html, new RegExp(`id="${id}"`), `${id} is in the right bar`);
-  for (const id of ['go-home', 'home', 'play-toggle', 'left-toggle', 'zoom-out', 'zoom-in', 'zoom-fit', 'right-toggle']) assert.match(html, new RegExp(`id="${id}" class="ibtn`), `${id} is a ${ibtn}px icon button`);
+  for (const id of ['home', 'play-toggle', 'left-toggle']) assert.match(html, new RegExp(`id="${id}"`), `${id} is in the left bar`); assert.doesNotMatch(html, /go-home|i-home/, 'the house control is gone'); for (const id of ['export', 'zoom-out', 'zoom', 'zoom-in', 'zoom-fit', 'right-toggle']) assert.match(html, new RegExp(`id="${id}"`), `${id} is in the right bar`);
+  for (const id of ['home', 'play-toggle', 'left-toggle', 'zoom-out', 'zoom-in', 'zoom-fit', 'right-toggle']) assert.match(html, new RegExp(`id="${id}" class="ibtn`), `${id} is a ${ibtn}px icon button`);
 });
 
 test('from 350 to 1920 px, in every panel state, no control overlaps another, none leaves the window, and every hit target is finite', () => {

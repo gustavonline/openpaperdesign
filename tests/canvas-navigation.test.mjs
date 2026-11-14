@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
-import {fitCamera, emptyCamera, homeRoute} from '../runtime/editing-model.js';
+import {fitCamera, emptyCamera} from '../runtime/editing-model.js';
 
 const area = {left: 64, top: 56, w: 900, h: 600}, project = (camera, rect) => ({left: rect.x * camera.z + camera.x, top: rect.y * camera.z + camera.y, right: (rect.x + rect.w) * camera.z + camera.x, bottom: (rect.y + rect.h) * camera.z + camera.y});
 
@@ -31,19 +31,18 @@ test('a Page with nothing to show gets one fixed, sensible camera every time', (
   assert.notDeepEqual(emptyCamera({...area, left: area.left + 240}), first, 'it follows the open panels');
 });
 
-test('Home is only offered where the viewer has their own: never the sender\'s', () => {
-  assert.equal(homeRoute({shared: false, inPaperSurface: false}), 'own', 'owner in a browser');
-  assert.equal(homeRoute({shared: false, inPaperSurface: true}), 'own', 'owner in the app');
-  assert.equal(homeRoute({shared: true, inPaperSurface: true}), 'own', 'a recipient inside their own plugin app reaches that app\'s own Home');
-  assert.equal(homeRoute({shared: true, inPaperSurface: false}), 'none', 'a recipient in a plain browser has none');
+test('there is no separate house control: All Papers lives in the Paper menu, and stays hidden from a recipient who has no Home of their own', async () => {
+  const html = await fs.readFile(new URL('../runtime/index.html', import.meta.url), 'utf8'), app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /go-home|i-home/); assert.doesNotMatch(app, /go-home|homeRoute/, 'no dead wiring');
+  assert.match(html, /<button id="home" class="ibtn" type="button" title="Paper menu"[^>]*aria-controls="project-menu"><svg class="icon"><use href="#i-grid"\/><\/svg><\/button>/); assert.match(html, /<button type="button" role="menuitem" data-action="home">All Papers<\/button>/);
+  // The existing boundaries: a plain-browser recipient has neither the Paper menu's Home nor the menu button; a recipient in their own plugin app keeps the menu (their own Home).
+  assert.match(app, /if \(access\.shared\) \{ for \(const item of document\.querySelectorAll\(inPaperSurface\?'\[data-action="new"\],\.owner-only':'\[data-action="home"\],\[data-action="new"\],\.owner-only'\)\) item\.hidden = true; \}/); assert.match(app, /if\(access\.shared&&!inPaperSurface\)\$\('#home'\)\.hidden=true;/);
 });
 
-test('the markup puts Zoom to fit beside the zoom control and a Home control top-left, and both panels share one width', async () => {
+test('the markup puts Zoom to fit beside the zoom control and both panels share one width', async () => {
   const html = await fs.readFile(new URL('../runtime/index.html', import.meta.url), 'utf8'), css = await fs.readFile(new URL('../runtime/canvas.css', import.meta.url), 'utf8'), app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
   const zoom = html.slice(html.indexOf('<span class="zoom">'), html.indexOf('</span>', html.indexOf('<span class="zoom">')));
   assert.match(zoom, /id="zoom-out"[\s\S]*id="zoom"[\s\S]*id="zoom-in"[\s\S]*id="zoom-fit" class="ibtn" type="button" data-zoom="fit" title="Zoom to fit \(⇧1\)" aria-label="Zoom to fit"/, 'the fit command sits in the zoom group, labelled');
-  assert.match(html, /<div id="left-bar"[^>]*>\s*<button id="go-home" class="ibtn" type="button" title="Home: all your Papers" aria-label="Home: all your Papers">/);
-  assert.match(app, /\$\('#go-home'\)\.hidden=homeRoute\(\{shared:!!access\.shared,inPaperSurface\}\)==='none';/); assert.match(app, /\$\('#go-home'\)\.addEventListener\('click', \(\) => \{ void goHome\(\); \}\);/);
   assert.match(app, /if \(kind === 'fit'\) fitAll\(\); else if \(kind === 'selection'\) fitSelection\(\); else if \(kind === '100'\) zoomCenter\(1 \/ camera\.z\);/, '100% stays its own command');
   for (const rule of [/--panel-w:240px/, /body\.left-open\{--lw:var\(--panel-w\)\}body\.right-open\{--rw:var\(--panel-w\)\}/, /#left-panel\{left:0;width:var\(--panel-w\)/, /#right-panel\{right:0;width:var\(--panel-w\)/, /#left-bar\{left:0;width:var\(--panel-w\)/, /#right-bar\{right:0;width:var\(--panel-w\)/]) assert.match(css, rule);
   assert.doesNotMatch(css, /#right-panel\{[^}]*width:\d+px|#right-bar\{[^}]*width:\d+px|--rw:(?!0px)\d+px/, 'no separate hard-coded right width');

@@ -1,13 +1,13 @@
 import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
-import {setupPresence} from './presence.js?v=ad47b40267f6';
+import {setupPresence} from './presence.js?v=2a7d7c240b0d';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
-import { createPlayer } from './play.js?v=ec1ea5f9592e';
+import { createMotion } from './play.js?v=97f5531536d6';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=1e9319fbe599';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=5dd9feb00f24';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -36,8 +36,6 @@ body.classList.toggle('shared-paper', !!access.shared); body.classList.toggle('r
 if (access.shared) { const badge = document.createElement('span'); badge.className = 'access-badge'; badge.textContent = canEdit ? 'Can edit' : 'View only'; if (access.expiresAt !== undefined) badge.title = describeExpiry(access.expiresAt); $('#left-toggle').before(badge); }
 if (access.shared) { for (const item of document.querySelectorAll(inPaperSurface?'[data-action="new"],.owner-only':'[data-action="home"],[data-action="new"],.owner-only')) item.hidden = true; }
 if(access.shared&&!inPaperSurface)$('#home').hidden=true;
-// Home is the viewer's OWN Home: the owner's, or a recipient's own local plugin Home. A recipient in a plain browser has none, and the sender's server is never theirs.
-$('#go-home').hidden=homeRoute({shared:!!access.shared,inPaperSurface})==='none';
 if(!canEdit)for(const item of document.querySelectorAll('[data-action="rename"],#undo,#redo'))item.hidden=true;
 if (!canEdit) { for (const field of form.querySelectorAll('input,textarea,select')) field.disabled = true; $('[data-action="rename"]').disabled = true; $('#title-text').disabled = true; }
 const sharingUI=setupSharing({paperId,access,closeMenu,getPaperName:()=>scene?.name||'Untitled Paper',notify:message,onCancel:()=>{if(inspectionHost.stableMode==='edit')setTool('select');else inspectionHost.api?.resetInspect();}});
@@ -56,7 +54,7 @@ const selection = new Set();
 let inspection = false, inspectMode = false, spaceHeld = false, mode = 'select', leaving = false;
 let pending = false, saving = null, saveError = null, conflict = false, lastSaved = '';
 const entries = new Map(), nodes = new Map(), dom = new Map(), boards = new Map();
-let presenceUI,libraryUI, connectFrom = null, refreshingConnections = false;
+let presenceUI,libraryUI, connectFrom = null, refreshingConnections = false, motion = null;
 let pageRename = null;
 const connectionCache = new WeakMap();
 const history = [], future = [], expanded = new Set(), shownChildren = new Map();
@@ -81,7 +79,7 @@ function redraw() {
   world.style.transform = `translate(${camera.x}px,${camera.y}px) scale(${camera.z})`;
   world.style.setProperty('--zoom', camera.z);
   $('#zoom').textContent = `${Math.round(camera.z * 100)}%`;
-  paintBackground();presenceUI?.paint();
+  paintBackground();presenceUI?.paint();motion?.cameraChanged();
 }
 // Canvas view (per project, this browser only): None / Dots / Grid as a CSS background that follows the
 // camera, plus an optional canvas colour. Never part of the scene, its artwork or exports.
@@ -152,7 +150,7 @@ function styleNode(node, element) {
   Object.assign(element.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px`, opacity: String(s.opacity ?? 1), display: node.visible === false ? 'none' : '', borderRadius: node.type === 'ellipse' ? '50%' : `${s.corner_radius || 0}px`, transform: node.rotation ? `rotate(${node.rotation}deg)` : '' });
   element.style.border = s.stroke && !isVector(node) ? `${s.stroke_width || 1}px solid ${s.stroke}` : '';
   if (node.type === 'text') {
-    if (!element.isContentEditable) element.textContent = node.text || '';
+    if (!element.isContentEditable) element.textContent = motion?.textFor(element.dataset.nodeKey) ?? (node.text || '');
     Object.assign(element.style, { background: 'transparent', color: fillColor(node), fontSize: `${node.font_size || 14}px`, fontWeight: text.bold ? '700' : '400', fontStyle: text.italic ? 'italic' : 'normal', lineHeight: String(text.line_height || 1.2), letterSpacing: `${text.letter_spacing || 0}px`, textAlign: node.align || 'left' });
   } else {
     element.style.backgroundColor = isVector(node) ? 'transparent' : node.style?.fills?.find(f => f.type === 'solid')?.color || 'transparent';
@@ -194,6 +192,7 @@ function makeNode(page, node, parentElement, boardKey) {
   let childHost=element;
   if(node.diagram){childHost=document.createElement('div');childHost.className='symbol-content';element.append(childHost);styleNode(node,element);}
   for (const child of node.children || []) makeNode(page, entries.get(page.id).get(child), childHost, boardKey);
+  motion?.dirty();
   return element;
 }
 function offsetForPage(index) {
@@ -226,6 +225,7 @@ function layoutBoards() {
   const width=Math.max(...extents.map(r=>r.w))+240;let top=0;
   pageOffsets=extents.map((r,i)=>{if(i&&i%3===0)top+=Math.max(...extents.slice(i-3,i).map(r=>r.h))+240;return {x:(i%3)*width-r.x,y:top-r.y};});
   for (const [key, b] of boards) { b.offset = offsetForPage(scene.pages.indexOf(b.page)); b.wrapper.hidden = pageId !== 'all' && b.page.id !== pageId; paint(key); }
+  motion?.dirty();
 }
 function buildScene() {
   presenceUI?.clearEffects();
@@ -235,6 +235,7 @@ function buildScene() {
   for (const page of scene.pages) for (const rootId of page.root) mountRoot(page,entries.get(page.id).get(rootId));
   layoutBoards();
   libraryUI?.render();
+  motion?.dirty();
 }
 
 // Root wrappers position artboards and free layers alike; only actual artboards have paper chrome.
@@ -324,7 +325,7 @@ function selectMany(keys, {reveal=false,primary=null}={}) {
   for(const key of selection){dom.get(key)?.classList.add('selected');boards.get(key)?.name.setAttribute('aria-pressed','true');if(selection.size===1&&!nodes.get(key).node.locked)boards.get(key)?.wrapper.classList.add('board-selected');}
   if(selected&&reveal)revealOnCanvas(selected);
   populateInspector();
-  libraryUI?.selectionChanged();presenceUI?.changed();
+  libraryUI?.selectionChanged();presenceUI?.changed();motion?.selectionChanged();
   if (selected && body.classList.contains('left-open') && !$('#layer-search').value) revealInTree(selected); else renderTree();
 }
 function selectNode(key,{reveal=false,add=false}={}){const keys=add?[...selection]:[];if(key&&nodes.has(key)){const i=keys.indexOf(key);if(add&&i>=0)keys.splice(i,1);else keys.push(key);}selectMany(keys,{reveal,primary:key});}
@@ -407,7 +408,7 @@ function applyHistory(action, reverse) {
   if (!action.kind) { applyNode(action.key, reverse ? action.before : action.after); populateInspector(); renderTree(); return; }
   if(action.kind==='nodes'){for(const change of action.changes)applyNode(change.key,reverse?change.before:change.after);populateInspector();renderTree();return;}
   if (action.kind === 'name') { scene.name = reverse ? action.before : action.after; showTitle(); return; }
-  if (action.kind === 'preview') { const value = reverse ? action.before : action.after; if (value === undefined) delete scene.preview; else scene.preview = copy(value); renderMotion(); return; }
+  if (action.kind === 'preview') { const value = reverse ? action.before : action.after; if (value === undefined) delete scene.preview; else scene.preview = copy(value); renderMotion(); motion?.dirty(); return; }
   if (action.kind === 'pages') {
     const was = pageId, result = applyPageAction(scene, action, reverse); buildScene();
     // Undo and redo bring the page in question back into view (a rename keeps whatever is shown); a vanished page falls to its neighbour.
@@ -768,7 +769,8 @@ function applyField(node, target) {
 }
 form.addEventListener('submit', e => e.preventDefault());
 let cancelling = false, liveEdit = false;
-form.addEventListener('focusin', () => { liveEdit = false; if (selected) fieldBefore = { key: selected, node: copy(nodes.get(selected).node) }; });
+form.addEventListener('focusout', () => queueMicrotask(syncEditing));
+form.addEventListener('focusin', () => { syncEditing(); liveEdit = false; if (selected) fieldBefore = { key: selected, node: copy(nodes.get(selected).node) }; });
 form.addEventListener('input', e => {
   if (!canEdit||!selected || !['text', 'color', 'color-picker', 'x', 'y', 'w', 'h', 'font_size','line_height','letter_spacing','opacity','corner_radius','rotation','stroke_width','stroke_color'].includes(e.target.name)) return;
   const { node } = nodes.get(selected); if (applyField(node, e.target)) { liveEdit = true; paint(selected); queueSave(); }
@@ -818,14 +820,14 @@ function startTextEdit(key, selectAll = false) {
   if (selected !== key) selectNode(key);
   const before = copy(entry.node);
   element.contentEditable = 'plaintext-only'; if (element.contentEditable !== 'plaintext-only') element.contentEditable = 'true';
-  element.focus({ preventScroll: true }); textEdit = key; textCancel = false;
+  element.focus({ preventScroll: true }); textEdit = key; textCancel = false; syncEditing();
   if (selectAll) { const range = document.createRange(); range.selectNodeContents(element); getSelection().removeAllRanges(); getSelection().addRange(range); }
   let editedHeight=before.rect.h;
   const fitText=()=>{element.style.height='auto';editedHeight=Math.max(before.rect.h,Math.ceil(element.scrollHeight));element.style.height=editedHeight+'px';};
   element.addEventListener('input',fitText);
   element.addEventListener('blur', () => {
     element.removeEventListener('input',fitText);
-    textEdit = null; element.contentEditable = 'false';
+    textEdit = null; element.contentEditable = 'false'; queueMicrotask(syncEditing);
     if (!textCancel) {entry.node.text = element.innerText.replace(/\n$/, '');entry.node.rect.h=editedHeight;}
     textCancel = false; paint(key); if (entry.node.text !== before.text||entry.node.rect.h!==before.rect.h) record(key, before, copy(entry.node)); populateInspector();
   }, { once: true });
@@ -835,7 +837,7 @@ function stopTextEdit() { if (textEdit) dom.get(textEdit)?.blur(); }
 
 // Pointer gestures on the canvas.
 function cancelGesture(){
-  const g=gesture;if(!g)return;gesture=null;
+  const g=gesture;if(!g)return;gesture=null;queueMicrotask(syncEditing);
   clearGuides();g.marquee?.remove();
   if(g.kind==='resize')for(const item of g.before)applyNode(item.key,item.before);
   else if(g.kind==='node'){for(const item of g.changes||[{key:g.key,before:g.before}])applyNode(item.key,item.before);if(g.duplicateAction)applyHistory(g.duplicateAction,true);}
@@ -845,7 +847,7 @@ function cancelGesture(){
 }
 function finishGesture() {
   if (!gesture) return;
-  const g = gesture; gesture = null;
+  const g = gesture; gesture = null; queueMicrotask(syncEditing);
   clearGuides();g.marquee?.remove();
   if (g.pointerId !== undefined && stage.hasPointerCapture(g.pointerId)) stage.releasePointerCapture(g.pointerId);
   if(g.kind==='resize'&&g.moved){pushHistory({kind:'nodes',changes:g.before.map(item=>({...item,after:copy(nodes.get(item.key).node)}))});populateInspector();}
@@ -962,7 +964,7 @@ function snapDelta(g,event,dx,dy){
 stage.addEventListener('pointerdown', e => {
   if (inspection || e.button !== 0 || e.target.isContentEditable) return;
   if (e.target.closest('[data-board-select]') && !spaceHeld) return;
-  commitFields(); stopTextEdit(); closeMenu();
+  commitFields(); stopTextEdit(); closeMenu(); motion?.setEditing(true); queueMicrotask(syncEditing);
   const p = point(e), pan = spaceHeld || mode === 'hand';
   const resize=e.target.closest('[data-resize-board]');
   if(resize&&!pan&&canEdit){const key=resize.dataset.resizeBoard,entry=nodes.get(key);if(entry.node.locked)return;const map=entries.get(entry.page.id),before=[entry.node,...(entry.node.children||[]).map(id=>map.get(id))].filter(Boolean).map(node=>({key:keyOf(entry.page,node.id),before:copy(node)}));gesture={kind:'resize',key,edge:resize.dataset.resize,start:p,before,pointerId:e.pointerId};stage.setPointerCapture(e.pointerId);e.preventDefault();return;}
@@ -984,6 +986,7 @@ stage.addEventListener('pointerdown', e => {
   else { selectNode(null); gesture = { kind: 'pan', start: p, camera: { ...camera } }; }
   presenceUI?.changed();
   if (gesture) { gesture.pointerId = e.pointerId; stage.setPointerCapture(e.pointerId); }
+  syncEditing();
   e.preventDefault(); stage.focus({ preventScroll: true });
 });
 stage.addEventListener('pointermove', e => {
@@ -1057,7 +1060,6 @@ function inspectionOwns(e) {
 }
 // While Play is open it owns every pointer, wheel and gesture over the whole window, scrolling natively; the editor's camera and tools take none of it.
 function overCanvas(e) {
-  if (playOpen) return false;
   const r = stage.getBoundingClientRect();
   return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom && !e.target.closest?.('#left-panel,#right-panel,#library-panel,.topbar,#rail,.menu,dialog,#status') && !inspectionOwns(e);
 }
@@ -1088,7 +1090,6 @@ function nudge(key, [x, y], step) {
   const before = copy(node); moveLayer(node,x*step,y*step); paint(key); record(key, before, copy(node)); populateInspector();
 }
 function onKey(e) {
-  if (playOpen) return;
   if(e.target.closest?.('[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset'))return;
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (mod && ['=', '+', '-', '0'].includes(e.key)) { e.preventDefault(); if (!inspection) e.key === '0' ? zoomCommand('100') : zoomCenter(e.key === '-' ? 1 / 1.2 : 1.2); return; }
@@ -1130,7 +1131,7 @@ document.addEventListener('keydown', onKey);
 window.addEventListener('keydown', e => {
   if(e.key==='Escape'&&e.target.matches?.('#page-search,#layer-search')){e.preventDefault();e.stopImmediatePropagation();e.target.value='';e.target.id==='page-search'?renderPages():renderTree();return;}
   if (e.key === 'Escape') return; // One capture handler below owns cancellation in both modes.
-  if (playOpen || !inspector || inspection || editable(e.target) || e.target.closest?.('dialog,#layer-tree,[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset')) return;
+  if (!inspector || inspection || editable(e.target) || e.target.closest?.('dialog,#layer-tree,[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset')) return;
   if (e.target.closest?.('.paper-inspection-root') && !e.target.closest('#rail,.menu')) return;
   const mod = e.metaKey || e.ctrlKey;
   const design = (!mod && !e.altKey && e.key.length === 1) || (mod && /^[zyacdvxgbi]$/i.test(e.key)) || ['Escape', 'Delete', 'Backspace'].includes(e.key);
@@ -1269,46 +1270,42 @@ $('#page-menu').addEventListener('click', e => {
 });
 
 
-// ---- Play and Motion. Play is a separate, full-window preview with its own scroll container (play.js): opening and closing it never touches the camera,
-// the selection, the shown Page or an open draft, and nothing done while playing is written to the Paper. Motion is the inspector's small section for what the
-// selected layer does when played: it edits the Paper's preview model (preview-model.js) as ordinary, undoable changes.
-let player = null, playOpen = false, playReturn = null; const playInert = [];
-const playButton = $('#play-toggle');
-function playablePreview() { const problem = previewProblem(scene.preview, scene); return { preview: problem ? null : scene.preview || null, problem }; }
-function playPage() { if (pageId !== 'all' && scene.pages.some(p => p.id === pageId)) return pageId; return nodes.get(selected)?.page.id || scene.pages[0].id; }
-// A DOM copy of one root as drawn now, with the editor's own state removed. Only each layer's id marker is kept, and Play replaces even that.
-function playClone(pid, rootId) {
-  const page = scene.pages.find(p => p.id === pid), board = page && boards.get(keyOf(page, rootId)); if (!board) return null;
-  const clone = board.content.cloneNode(true);
-  for (const element of [clone, ...clone.querySelectorAll('*')]) { element.classList?.remove('selected'); element.removeAttribute('title'); element.removeAttribute('contenteditable'); for (const attr of [...element.attributes]) if (attr.name.startsWith('data-') && attr.name !== 'data-node-key') element.removeAttribute(attr.name); }
-  return clone;
+// ---- Motion, in place. The editor's own live layer elements are the artwork: one small Play/Pause toggle animates them where they are (play.js), on this same canvas,
+// with the same camera, Page, selection, panels and tools. Nothing is copied, covered, locked or made modal, nothing is saved, and the editor keeps every gesture
+// (see the contract at the top of play.js). Motion below is the inspector's section for what the selected layer does, with the optional time, replay, reduced-motion
+// and reset-to-artwork controls and the deliberate "Try interaction" for authored click actions.
+const motionHost = {
+  scene: () => scene,
+  preview: () => { if (!scene || previewProblem(scene.preview, scene)) return null; return scene.preview || null; },
+  pageShown: id => pageId === 'all' || pageId === id,
+  nodeEl: (p, n) => dom.get(p + ':' + n) || null,
+  keyOf: (p, n) => p + ':' + n,
+  nodeText: (p, n) => entries.get(p)?.get(n)?.text || '',
+  rootEl: (p, n) => { const map = entries.get(p); let node = map?.get(n); while (node && map.has(node.parent)) node = map.get(node.parent); return node ? boards.get(p + ':' + node.id)?.content || null : null; },
+  layerBox: (p, n) => { const map = entries.get(p), node = map?.get(n), root = node && map.get(node.parent); return root && !map.has(root.parent) ? { y: node.rect.y, h: node.rect.h, rootH: root.rect.h } : null; },
+  get stage() { return stage; },
+  camera: () => camera,
+  selectedKeys: () => selection,
+  currentPage: () => pageId,
+  // Explicit Try navigation uses the editor's own Page and camera actions; the toggle itself never does.
+  navigate: (id, rootId) => { if (!scene.pages.some(p => p.id === id)) return; showPage(id); if (rootId !== undefined) { const b = boards.get(id + ':' + rootId); if (b) fit([b.viewRect]); } },
+  panTo: (p, n) => { const r = dom.get(p + ':' + n)?.getBoundingClientRect(), s = stage.getBoundingClientRect(); if (!r) return; camera.y = bound(camera.y + s.top + 56 - r.top); paintCamera(); saveView(); },
+  frame: () => presenceUI?.needsPaint?.() && presenceUI.paint(),
+};
+motion = createMotion(motionHost);
+motion.bindControls({ toggle: $('#play-toggle'), replay: $('#motion-replay'), reset: $('#motion-reset'), reduce: $('#motion-reduce'), scrub: $('#motion-scrub'), ms: $('#motion-ms'), readout: $('#motion-readout'), status: $('#motion-status') });
+onSurfaceDispose(() => { motion?.destroy(); });
+$('#motion-try').addEventListener('click', () => { const entry = selection.size === 1 ? nodes.get(selected) : null; if (entry) motion.tryLayer(entry.page.id, entry.node.id); });
+// Whether anything that edits is in progress: a gesture that changes artwork (a pan only moves the camera), a text edit, or a focused inspector field. Effects are held at their
+// current pose for exactly that long.
+function syncEditing() { motion?.setEditing(!!(gesture && gesture.kind !== 'pan') || !!textEdit || liveEdit || form.contains(document.activeElement), { textKey: textEdit }); }
+// Exports and previews draw the authored artwork: the clone is taken from the live layers, so a state's alternate text and a pin's offset are taken off it.
+function canonicalClone(root) {
+  for (const el of [root, ...root.querySelectorAll('*')]) {
+    el.style.marginTop = ''; const key = el.dataset?.nodeKey; if (key && motion?.textFor(key) !== null && motion?.textFor(key) !== undefined) { const entry = nodes.get(key); if (entry) el.textContent = entry.node.text || ''; }
+  }
+  return root;
 }
-function openPlay() {
-  if (playOpen) return;
-  if (accessRevoked) { message('This invitation has ended, so Play is unavailable.'); return; }
-  commitFields(); stopTextEdit(); finishGesture(); closeMenu(); nativePinch = null;
-  const { preview, problem } = playablePreview(); playReturn = document.activeElement;
-  playOpen = true; body.classList.add('paper-play'); playButton.setAttribute('aria-pressed', 'true');
-  // Everything behind Play leaves the tab order and the pointer's reach (inert) until it closes; the toast stays announced. Play itself keeps focus inside.
-  for (const el of body.children) if (el !== $('#play') && el.id !== 'toast' && el.tagName !== 'SCRIPT' && !el.inert) { el.inert = true; playInert.push(el); }
-  player = createPlayer({ container: $('#play'), scene, preview, pageId: playPage(), cloneRoot: playClone, onClose: closePlay });
-  if (problem) message(`${problem} Playing without motion.`);
-  player.focus();
-}
-function closePlay() {
-  if (!playOpen) return;
-  player?.destroy(); player = null; playOpen = false; body.classList.remove('paper-play'); playButton.setAttribute('aria-pressed', 'false');
-  for (const el of playInert.splice(0)) el.inert = false;
-  const back = playReturn && document.contains(playReturn) ? playReturn : playButton; playReturn = null; back.focus?.({ preventScroll: true });
-}
-// The same authorized revision arrives while Play is open: Play rebuilds from it, keeping Page, scroll place, still-valid states and time.
-function refreshPlay() { if (!player) return; const { preview, problem } = playablePreview(); player.update(scene, preview); if (problem) message(`${problem} Playing without motion.`); }
-// While Play is open no other part of the page sees a key: not the editor, and not the native toolbar's own shortcuts either (this runs before they are
-// installed). Escape closes Play. Play's own controls still work: the guard hands the key to Play (Enter in the time field, Enter or Space on an
-// interactive layer) and then stops it, and every other key keeps its ordinary default effect (typing, arrows, Tab), because only propagation is stopped.
-window.addEventListener('keydown', e => { if (!playOpen) return; if (e.key === 'Escape') { e.preventDefault(); closePlay(); } else player?.key(e); e.stopImmediatePropagation(); }, true);
-playButton.addEventListener('click', () => { if (playOpen) closePlay(); else openPlay(); });
-onSurfaceDispose(() => { player?.destroy(); player = null; playOpen = false; for (const el of playInert.splice(0)) el.inert = false; });
 
 // One change to the preview model: checked against the Paper before it is kept, one undo step, saved like any other edit.
 function motionEdit(change) {
@@ -1318,14 +1315,19 @@ function motionEdit(change) {
   if (problem) { message(problem); renderMotion(); return false; }
   if (JSON.stringify(next) === JSON.stringify(before)) return true;
   if (next === undefined) delete scene.preview; else scene.preview = next;
-  pushHistory({ kind: 'preview', before, after: next === undefined ? undefined : copy(next) }); renderMotion(); return true;
+  pushHistory({ kind: 'preview', before, after: next === undefined ? undefined : copy(next) }); renderMotion(); motion?.dirty(); return true;
 }
 const mk = (tag, props = {}, ...kids) => { const node = document.createElement(tag); for (const [key, value] of Object.entries(props)) { if (key === 'text') node.textContent = value; else if (key === 'class') node.className = value; else if (key.startsWith('aria-') || key === 'title' || key === 'type') node.setAttribute(key, value); else node[key] = value; } node.append(...kids); return node; };
 const MOTION_LABELS = { opacity: 'Opacity', x: 'Move X', y: 'Move Y', scale: 'Scale', rotate: 'Rotate °', blur: 'Blur', backdropBlur: 'Glass blur', color: 'Text colour', background: 'Background' };
 const TRIGGER_LABELS = { load: 'When played', 'scroll-in': 'On scroll into view', scroll: 'With scroll position', hover: 'On hover', focus: 'On focus', state: 'When a state is set' };
 function renderMotion() {
-  const box = $('#motion-section'), body_ = $('#motion-body'), entry = selection.size === 1 ? nodes.get(selected) : null;
-  box.hidden = !entry; if (!entry) return;
+  const box = $('#motion-section'), body_ = $('#motion-body'), entry = selection.size === 1 ? nodes.get(selected) : null, tryButton = $('#motion-try');
+  const p = scene?.preview, any = !!(p && ((p.animations?.length || 0) + (p.texts?.length || 0) + (p.sticky?.length || 0) + (p.interactions?.length || 0)));
+  // The motion controls stay available whenever the Paper has motion; the authoring below needs a selected layer. Try interaction is only for a layer with a click action.
+  box.hidden = !entry && !any;
+  const clicks = entry ? motion.interactionsFor(entry.page.id, entry.node.id).length : 0;
+  tryButton.disabled = !clicks; tryButton.title = clicks ? 'Run this layer’s click actions on the canvas, once' : entry ? 'This layer has no click action to try' : 'Select a layer that has a click action to try it';
+  if (!entry) { body_.replaceChildren(); return; }
   const pid = entry.page.id, nid = entry.node.id, preview = scene.preview, problem = previewProblem(preview, scene), mine = list => (list || []).filter(r => r.page === pid && r.node === nid);
   if (problem) { body_.replaceChildren(mk('p', { class: 'note', text: `The preview model can’t be used: ${problem}. Fix it in paper.json (an agent can) to author motion here again.` })); return; }
   const parts = [];
@@ -1568,7 +1570,7 @@ async function paperPreview(limit=18*1024*1024){
     const roots=page.root.map(id=>nodes.get(keyOf(page,id))?.node).filter(Boolean),minX=Math.min(0,...roots.map(n=>n.rect.x)),minY=Math.min(0,...roots.map(n=>n.rect.y));
     const w=Math.max(1,...roots.map(n=>n.rect.x+n.rect.w))-minX,h=Math.max(1,...roots.map(n=>n.rect.y+n.rect.h))-minY;
     pageInfo.push({id:page.id,name:page.name||'Page',w,h});
-    for(const node of roots){const original=dom.get(keyOf(page,node.id));if(!original)continue;const clone=original.cloneNode(true);for(const element of [clone,...clone.querySelectorAll('*')]){element.classList?.remove('selected');element.removeAttribute('contenteditable');element.removeAttribute('title');for(const attr of [...element.attributes])if(attr.name.startsWith('data-'))element.removeAttribute(attr.name);}
+    for(const node of roots){const original=dom.get(keyOf(page,node.id));if(!original)continue;const clone=canonicalClone(original.cloneNode(true));for(const element of [clone,...clone.querySelectorAll('*')]){element.classList?.remove('selected');element.removeAttribute('contenteditable');element.removeAttribute('title');for(const attr of [...element.attributes])if(attr.name.startsWith('data-'))element.removeAttribute(attr.name);}
       Object.assign(clone.style,{position:'absolute',left:`${node.rect.x-minX}px`,top:`${node.rect.y-minY}px`,width:`${node.rect.w}px`,height:`${node.rect.h}px`});section.append(clone);
     }container.append(section);
   }
@@ -1616,7 +1618,7 @@ function buildExportClone(keys) {
   Object.assign(holder.style, {position: 'absolute', left: '0', top: '0', width: `${Math.ceil(maxX - minX)}px`, height: `${Math.ceil(maxY - minY)}px`});
   const clones = new Map(), keep = new Map();
   for (const b of roots) {
-    const clone = b.content.cloneNode(true), rootKey = keyOf(b.page, b.node.id); clones.set(rootKey, clone);
+    const clone = canonicalClone(b.content.cloneNode(true)), rootKey = keyOf(b.page, b.node.id); clones.set(rootKey, clone);
     Object.assign(clone.style, {position: 'absolute', left: `${b.node.rect.x - minX}px`, top: `${b.node.rect.y - minY}px`, width: `${b.node.rect.w}px`, height: `${b.node.rect.h}px`});
     holder.append(clone);
   }
@@ -1661,7 +1663,7 @@ async function exportArtboard(kind) {
   // An untransformed copy of the rendered artboard, off screen, with editor-only state removed.
   const holder = document.createElement('div'); holder.setAttribute('aria-hidden', 'true');
   Object.assign(holder.style, { position: 'fixed', left: '-100000px', top: '0', width: `${w}px`, height: `${h}px`, pointerEvents: 'none' });
-  const clone = b.content.cloneNode(true);
+  const clone = canonicalClone(b.content.cloneNode(true));
   for (const el of [clone, ...clone.querySelectorAll('*')]) {
     el.classList?.remove('selected'); el.removeAttribute('title'); el.removeAttribute('contenteditable');
     for (const attr of [...el.attributes]) if (attr.name.startsWith('data-')) el.removeAttribute(attr.name);
@@ -1699,7 +1701,6 @@ flyout.addEventListener('click', e => { const b = e.target.closest('[data-pick]'
 paintRail();
 
 // Paper menu (grid icon): real actions only. All Papers saves pending edits first.
-$('#go-home').addEventListener('click', () => { void goHome(); });
 $('#home').addEventListener('click', e => { const r = e.currentTarget.getBoundingClientRect(); toggleMenu($('#project-menu'), e.currentTarget, e.detail === 0, () => ({ x: r.left, y: r.bottom + 6 })); });
 $('#project-menu').addEventListener('click', e => {
   const item = e.target.closest('[data-action]'); if (!item || item.disabled) return;
@@ -1960,7 +1961,7 @@ const inspectionHost = {
 // keys that would start an Annotate drawing tool (removed from the toolbar) are not passed to Inspection.
 const ANNOTATE_KEYS = new Set(['2', 's', 'd', 'n', 't']);
 window.addEventListener('keydown', e => {
-  if (playOpen || !inspector || e.defaultPrevented || e.target.closest?.('[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset,#library-panel,#page-search,#layer-search')) return;
+  if (!inspector || e.defaultPrevented || e.target.closest?.('[data-sidebar-toggle],.sidebar-splitter,#sidebar-reset,#library-panel,#page-search,#layer-search')) return;
   if (e.key === 'Escape' && $('#sharing-dialog').open) {
     e.preventDefault(); e.stopImmediatePropagation(); $('#sharing-dialog').close();
     if (inspectionHost.stableMode === 'edit') setTool('select'); else inspectionHost.api?.resetInspect();
@@ -2030,7 +2031,7 @@ async function remotePaper(force = false,silent=false) {
     const keep = [...selection];
     const previous=scene,beforeRevision=revision;scene = next; revision = loaded.revision; lastSaved = JSON.stringify(scene); history.length = 0; future.length = 0;
     if (pageId !== 'all' && !scene.pages.some(p => p.id === pageId)) pageId = scene.pages[0].id;
-    selected = null; selection.clear();buildScene(); renderPages(); showTitle(); updateHistory(); refreshPlay();
+    selected = null; selection.clear();buildScene(); renderPages(); showTitle(); updateHistory();
     selectMany(keep.filter(key=>nodes.has(key)));
     designText = null; renderDesign(); paintCamera();if(loaded.presence)presenceUI?.receive(loaded.presence,presenceToken);else presenceUI?.receive({paperId,peers:[]},presenceToken);presenceUI?.documentChanged(previous,next,{beforeRevision,revision,animate:!force});return true;
   } catch (error) { if(!silent)message(`This Paper changed elsewhere, but couldn’t be reloaded (${error.message}).`);return false; }
@@ -2057,7 +2058,7 @@ async function remoteFeedback(silent=false) {
 function listenForChanges() {
   let events,timer,stopped=false,guideRevision,failures=0,polling=false;
   function revoked(reason){
-    closePlay(); playButton.disabled = true; playButton.title = 'This invitation has ended, so Play is unavailable.';
+    motion?.destroy(); $('#play-toggle').disabled = true; $('#play-toggle').title = 'This invitation has ended, so motion is unavailable.';
     // Only a reason the server gave is named; anything else (an older server, a dropped stream) is a neutral "ended".
     const known=knownEnd(reason);
     if(accessEndedReason){if(known&&accessEndedReason==='ended'){accessEndedReason=known;updateSaveState();}return;}

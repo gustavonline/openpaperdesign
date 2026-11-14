@@ -44,7 +44,7 @@ Before parallel work, write down (in your reply to your user, or as a note in fe
 ## 6. Source of truth: three different things
 
 - **The editable Paper** is authoritative for the design: layers and ids, components, assets with provenance and licences, layout and responsive artboards, states, and the preview model (motion and interactions).
-- **The runnable preview** (Play) is how that Paper moves and responds, produced from the Paper and its preview model. It is a check on the design, not code you can ship.
+- **The motion on the canvas** (the Play/Pause toggle and Try interaction) is how that Paper moves and responds, produced in place from the Paper and its preview model. It is a check on the design, not code you can ship.
 - **Generated implementation code** is something you write elsewhere from the Paper. It is a separate handoff, and it is never "production ready" because the Paper looks right. Say what you built, from which Paper revision, and what you did not check.
 
 A handoff carries: intent and audience, the components and their states, assets and where they came from, tokens (and the guide they come from), layout rules and the authored desktop and mobile variants, motion and interactions (and the reduced-motion behaviour), and what "done" means.

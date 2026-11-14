@@ -41,7 +41,7 @@ test('the method teaches the five modes, the read-first discipline, conflict rec
   // Whole-Paper conflict: re-read and re-apply, never blind retry or automerge.
   assert.match(text, /HTTP 409/); assert.match(text, /Re-apply \*\*your own\*\* contribution/); assert.match(text, /do not retry with the new revision and the old body, and do not merge automatically/);
   // Source of truth: three different things, and generated code is never called production ready.
-  assert.match(text, /\*\*The editable Paper\*\* is authoritative/); assert.match(text, /\*\*The runnable preview\*\* \(Play\)/); assert.match(text, /\*\*Generated implementation code\*\*/); assert.match(text, /never "production ready"/);
+  assert.match(text, /\*\*The editable Paper\*\* is authoritative/); assert.match(text, /\*\*The motion on the canvas\*\*/); assert.match(text, /\*\*Generated implementation code\*\*/); assert.match(text, /never "production ready"/);
   for (const carried of ['components and their states', 'assets and where they came from', 'authored desktop and mobile variants', 'motion and interactions', 'what "done" means']) assert.ok(text.includes(carried), carried);
   // The owner's guide, proposals as feedback, truncation honesty.
   assert.match(text, /cannot write the owner's `DESIGN\.md` or private notes, and there is no tool for it/); assert.match(text, /\*\*propose\*\* it: save the proposal as feedback \(`paper_save_feedback`\)/); assert.match(text, /The owner accepts it/);

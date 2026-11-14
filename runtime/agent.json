@@ -105,7 +105,7 @@
     ],
     "summary": "Read the Paper, DESIGN.md and feedback first; agree layer ids and roles; make small revision-checked changes; ask for an independent visual review; after a 409 re-read and re-apply your own change (no blind retry, no automatic merge). It uses your own host, models and your user's approvals and adds no service. The Paper, Design, Diagram and Copy skills carry the identical text.",
     "designGuide": "DESIGN.md is curated by the owner. An invitation cannot write it or private notes; propose a change as feedback and the owner accepts it. If a read was truncated or refused, say so and ask for the missing part.",
-    "sourceOfTruth": "The editable Paper is authoritative. Play is a runnable preview of it, not code. Generated implementation code is a separate handoff."
+    "sourceOfTruth": "The editable Paper is authoritative. Motion played in place on the canvas is a runnable view of it, not code. Generated implementation code is a separate handoff."
   },
   "motion": {
     "previewModelVersion": 1,

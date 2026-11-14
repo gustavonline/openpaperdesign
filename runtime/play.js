@@ -1,386 +1,300 @@
-// Play: the trusted product player for a Paper's preview model (preview-model.js).
+// Motion, in place: the trusted runtime for a Paper's preview model (preview-model.js) on the editor's own canvas.
 //
-// It builds a DOM copy of one authored artboard (a "variant") of one Page inside its OWN scroll container, then drives it from validated data with the
-// Web Animations API and ordinary events. It runs no script from the Paper, never turns a Paper string into code, a selector, a URL or a style
-// declaration, needs no iframe, network or host API, and never writes anything back into the Paper: whatever happens while playing (state, scroll,
-// hover, time) lives only here and is gone when Play closes.
+// There is no player window, copied artboard or second renderer. The existing, live layer elements ARE the artwork, and this module drives them from validated
+// data with the Web Animations API and ordinary events, as temporary presentation only: effects are animations on those elements (cancelled, they leave the
+// element exactly as the editor drew it), a state's alternate text and a pinned layer's offset are applied to them and taken off again, and nothing here ever
+// reaches the Paper, the camera, the selection, the tool or the history. It runs no script from the Paper and turns no Paper string into code, a selector, a URL or
+// a style declaration.
 //
-// Nothing runs while idle: animations are the browser's own and are paused when Play is hidden, offscreen or closed; the only frame loop is the small
-// time read-out, and it exists only while a timeline is actually playing and visible. Reduced motion (the system preference, or the one control)
-// shows every state without moving: timelines rest on their final frame (a loop on its first), and hover, focus, state and reveal changes are instant.
-import {resolveVariant, initialStates, timelineEnd, waapiFrames, easingCss} from './preview-model.js?v=78e8556c4950';
+// Ownership of input stays with the editor: nothing here listens for clicks, keys, wheel or drags, adds a tab stop, shield or overlay, or locks anything.
+// Hover is passive (enter and leave only); a layer's "focus" effect follows the editor's own selection; authored click actions run only from the deliberate
+// contextual "Try interaction" action (tryLayer); canvas-pan-derived effects (reveal on scroll, scroll-linked, pinned) are computed from where the artboard is
+// relative to the canvas viewport as the person pans. Edit gestures call setEditing(): the pose is held exactly where it was, without a jump, until they end.
+//
+// Nothing runs while idle: the only frame loop is the clock, only while a load timeline plays, visible and not being edited. Reduced motion (the system
+// preference or the one control) shows every state without moving.
+import {initialStates, waapiFrames, easingCss} from './preview-model.js?v=78e8556c4950';
 
-const VIEWPORTS = [['auto', 'Fit window'], ['1440', 'Desktop · 1440'], ['390', 'Mobile · 390']];
-const make = (tag, props = {}) => { const node = document.createElement(tag); for (const [key, value] of Object.entries(props)) { if (key === 'text') node.textContent = value; else if (key === 'class') node.className = value; else if (key === 'aria-label' || key === 'aria-live' || key === 'aria-pressed' || key === 'role' || key === 'title' || key === 'type') node.setAttribute(key, value); else node[key] = value; } return node; };
 const ms = value => `${Math.round(value)} ms`;
 // The longest time a person can ask for by number: an hour is far past anything an authored loop needs to be inspected at.
 export const MAX_TIME_MS = 3600000;
 const frames = globalThis;
 
-// host: {container, scene, preview, pageId, cloneRoot(pageId, rootId) -> element|null (design size, layers keep data-node-key), onClose()}
-export function createPlayer(host) {
-  let scene = host.scene, preview = host.preview || null, pageId = host.pageId, stopped = false;
-  const states = initialStates(preview), trail = [], cleanups = [], entries = [], originals = new Map();
-  const system = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-  let reduced = !!system?.matches, userChose = false, viewport = 'auto', playing = false, userPaused = false, visible = true, frame = 0, notice = '', noticeTimer = null, shown = null;
-  let timeline = [], timelineMs = 0, scrolled = [], nodeMap = new Map(), lockedRoot = null, sizeWatch = null, resizeFrame = 0, lastRoom = 0;
-  // One shared clock drives every timeline animation. A loop never ends, so the clock is allowed to run past the first cycle; `ends` is when each finite
-  // animation is over and `loops` are the ones that repeat forever.
-  const ends = new Map(), loops = new Set(), keyed = new Map(), handled = new WeakSet();
-  // What Play may do is decided in ONE place, reconcile(), from the facts: `userPaused` (the person paused, or the time control's limit was reached), the document
-  // being hidden, and the preview being offscreen. The visibility callbacks only record a fact and call reconcile(); none of them resumes anything itself, so
-  // clearing one blocker while another remains does nothing, whichever order they arrive in, and the intent to continue is simply "not paused by the person".
-  // `frozen` is the state reconcile() last applied. While frozen the load timeline is held on its clock AND every event-driven effect that was moving (a reveal,
-  // hover, focus or state transition) is held where it was; none starts, and a change made meanwhile shows its end state at once. `held` are the event effects
-  // that were running when it froze: only those continue, from where they stopped. This does not depend on there being a load timeline.
-  let frozen = false; const held = new Set(); const blocked = () => !!globalThis.document?.hidden || !visible;
-
-  // ---- The toolbar and the one scroll container. Everything here is created by Play and removed by Play.
-  const root = host.container; root.replaceChildren(); root.hidden = false; root.tabIndex = -1;
-  // Play behaves as a modal dialog: it covers the whole window, keeps focus inside (Tab and Shift+Tab wrap, see key()), and closes with Escape or Back to Edit.
-  root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true'); root.setAttribute('aria-label', 'Play preview');
-  const back = make('button', {type: 'button', class: 'play-back', text: 'Back to Edit'}), pageSelect = make('select', {class: 'field', 'aria-label': 'Page'}), viewSelect = make('select', {class: 'field', 'aria-label': 'Viewport width'});
-  const replay = make('button', {type: 'button', class: 'ibtn', 'aria-label': 'Replay from the start', title: 'Replay', text: '⟲'}), toggle = make('button', {type: 'button', class: 'play-toggle', text: 'Play'});
-  const scrub = make('input', {type: 'range', class: 'play-scrub', min: '0', max: '1', step: '1', value: '0', 'aria-label': 'Time in milliseconds'}), readout = make('output', {class: 'play-time'});
-  const msInput = make('input', {type: 'number', class: 'field play-ms', min: '0', max: String(MAX_TIME_MS), step: '1', value: '0', title: 'Type a time in milliseconds and press Enter', 'aria-label': 'Set time in milliseconds (exact)'});
-  const motion = make('button', {type: 'button', class: 'play-motion', 'aria-pressed': 'false', title: 'Show states without moving', text: 'Reduce motion'}), status = make('span', {class: 'play-status', role: 'status', 'aria-live': 'polite'});
-  for (const [value, label] of VIEWPORTS) viewSelect.append(make('option', {value, text: label}));
-  const bar = make('div', {class: 'play-bar', role: 'toolbar', 'aria-label': 'Play controls'});
-  bar.append(back, pageSelect, viewSelect, replay, toggle, scrub, msInput, readout, motion, status);
-  const scroller = make('div', {class: 'play-viewport', tabIndex: 0, role: 'region', 'aria-label': 'Preview, scrolls'}), scaler = make('div', {class: 'play-scaler'});
-  scroller.append(scaler); root.append(bar, scroller);
+// host: {scene(), preview() -> a validated model or null, pageShown(pageId), nodeEl(pageId, nodeId) -> the live element or null, rootEl(pageId, nodeId) -> the live
+//        element of that layer's artboard, layerBox(pageId, nodeId) -> {y, h, rootH} in artboard units, keyOf(pageId, nodeId), nodeText(pageId, nodeId),
+//        stage (the canvas viewport element), camera() -> {z}, selectedKeys() -> Set, navigate(pageId, rootId?), panTo(pageId, nodeId), frame?()}
+export function createMotion(host) {
+  const states = new Map(), trail = [], cleanups = [], entries = [], textTargets = new Map(), transientText = new Map(), held = new Set();
+  const ends = new Map(), loops = new Set(), stickies = [], scrolled = [];
+  const system = globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)');
+  let timeline = [], timelineMs = 0, stopped = false, frame = 0, noticeTimer = null, notice = '';
+  // The facts that decide what may move (see reconcile()). `engaged` is "motion is on": the layers carry their effects; off, they are exactly the artwork.
+  let engaged = false, userPaused = false, editing = false, suppressed = null, visible = true, reduced = !!system?.matches, userChose = false, frozen = false, playing = false, pressed = null;
+  let ui = {}, dirtyQueued = false;
+  const blocked = () => !!globalThis.document?.hidden || !visible || editing;
 
   const on = (target, type, fn, options) => { target.addEventListener(type, fn, options); cleanups.push(() => target.removeEventListener(type, fn, options)); };
-  const say = text => { notice = text; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => { notice = ''; if (!stopped) describe(); }, 4000); describe(); };
-  const describe = () => {
-    if (!shown) return;
-    const parts = [shown.implicit ? shown.label : `${shown.label} variant`, `${Math.round(shown.width)} px wide`];
-    if (shown.scale < 1) parts.push(`scaled to ${Math.round(shown.scale * 100)}% to fit`);
-    status.textContent = notice ? `${notice} · ${parts.join(' · ')}` : parts.join(' · ');
-  };
+  const say = text => { notice = text; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => { notice = ''; paintStatus(); }, 4000); paintStatus(); };
+  const paintStatus = () => { if (ui.status) ui.status.textContent = notice; };
 
-  // ---- Building one variant
-  function teardown() {
-    for (const entry of entries) entry.cancel(); entries.length = 0; timeline = []; scrolled = []; ends.clear(); loops.clear(); keyed.clear(); held.clear();
-    for (const undo of cleanups.splice(0)) undo();
-    frames.cancelAnimationFrame?.(frame); frame = 0;
-    for (const img of scaler.querySelectorAll?.('img') || []) img.removeAttribute('src');
-    scaler.replaceChildren(); originals.clear(); nodeMap = new Map();
-  }
-  function listen() {
-    on(back, 'click', () => host.onClose());
-    on(pageSelect, 'change', () => go(pageSelect.value));
-    on(viewSelect, 'change', () => { viewport = viewSelect.value; lockedRoot = null; build(); });
-    on(replay, 'click', () => { seek(0); resume(); });
-    // Pressing the button with the mouse, a finger or a pen first moves focus, and a focused time field commits (and pauses) on that focus change, BEFORE the
-    // click arrives. The click must do what the button said when it was pressed, not what it says after the field changed it: the press records the intent
-    // (Pause or Play) in the capture phase, ahead of the blur, and the pointer click uses it once. A keyboard activation has no press (its click has detail 0),
-    // and focus has already settled by then, so it follows the state as it is. A cancelled press forgets its intent.
-    let pressed = null;
-    on(toggle, 'pointerdown', () => { pressed = playing ? 'pause' : 'play'; }, {capture: true});
-    on(toggle, 'pointercancel', () => { pressed = null; });
-    on(toggle, 'click', event => { const intent = event?.detail > 0 ? pressed : null; pressed = null; if (intent ? intent === 'pause' : playing) pause(); else resume(); });
-    on(scrub, 'input', () => { const at = Number(scrub.value); pause(); seek(at); });
-    // The exact entry: Enter, leaving the field or the browser's own change commit it; anything that is not a plain whole or decimal number in range is refused.
-    bindKey(msInput, event => { if (event.key !== 'Enter') return false; event.preventDefault(); event.stopPropagation(); commitTime(); return true; });
-    on(msInput, 'change', () => commitTime());
-    on(msInput, 'blur', () => { if (msInput.value !== String(Math.round(time()))) commitTime(); });
-    on(motion, 'click', () => { userChose = true; setReduced(!reduced); });
-    // Escape closes; every other key stays inside Play, so the editor's own shortcuts never see it.
-    on(root, 'keydown', event => { key(event); });
-    if (system?.addEventListener) { const change = () => { if (!userChose) setReduced(system.matches); }; system.addEventListener('change', change); cleanups.push(() => system.removeEventListener('change', change)); }
-    const away = () => reconcile();
-    document.addEventListener('visibilitychange', away); cleanups.push(() => document.removeEventListener('visibilitychange', away));
-    if (typeof IntersectionObserver === 'function') {
-      const watch = new IntersectionObserver(items => { visible = items.some(item => item.isIntersecting); reconcile(); });
-      watch.observe(scroller); cleanups.push(() => watch.disconnect());
-    }
-  }
-  function collect(node, map = new Map()) {
-    const key = node.dataset?.nodeKey; if (key) map.set(Number(key.slice(key.lastIndexOf(':') + 1)), node);
-    for (const child of Array.from(node.children || [])) collect(child, map);
-    return map;
-  }
-
-  // The one decision about what Play shows: the width asked for (Fit window = the room there is; a fixed width is only ever as wide as the room), the authored
-  // variant for it (unless a click action chose an artboard, which stays chosen until another Page, another viewport choice or a different Page's root), and
-  // the scale that fits it. Build uses it, and so does a resize, so the two can never disagree.
-  const layoutScale = (width, room, designWidth) => Math.min(1, Math.min(width, room || width) / designWidth);
-  function decide() {
-    const room = scroller.clientWidth || root.clientWidth || 0, width = viewport === 'auto' ? Math.max(1, room || 1) : Number(viewport), page = scene.pages.find(p => p.id === pageId);
-    let variant = resolveVariant(preview, scene, pageId, width);
-    if (lockedRoot !== null && page?.root.includes(lockedRoot)) { const declared = (preview?.variants || []).find(v => v.page === pageId && v.root === lockedRoot); variant = {root: lockedRoot, id: declared?.id || null, label: declared?.label || page.nodes.find(n => n.id === lockedRoot)?.name || 'Artboard', implicit: !declared}; }
-    return {room, width, page, variant, rootNode: variant && page?.nodes.find(n => n.id === variant.root)};
-  }
-  // `fresh`: a build the person asked for (another Page or viewport) starts playing again; a rebuild of the same view (a revision, a resize) keeps their pause.
-  function build({keepTime = null, fresh = true} = {}) {
-    const before = focusMemory(); if (fresh) userPaused = false;
-    teardown(); frozen = blocked() || userPaused; listen(); pageSelect.replaceChildren(...scene.pages.map(p => make('option', {value: p.id, text: p.name || 'Page'}))); pageSelect.value = pageId; viewSelect.value = viewport;
-    const {width, room, page, variant, rootNode} = decide(), clone = rootNode && host.cloneRoot(pageId, rootNode.id);
-    if (!clone) { shown = null; status.textContent = 'This Page has nothing to play yet.'; scrub.max = '1'; readout.textContent = ''; refocus(before); return; }
-    const w = rootNode.rect.w, h = rootNode.rect.h, scale = layoutScale(width, room, w); lastRoom = room;
-    nodeMap = collect(clone); nodeMap.set(rootNode.id, clone);
-    // From here a layer is found by its own id; the editor's attribute is replaced by Play's, and no other attribute of the Paper is read.
-    for (const [id, node] of nodeMap) { delete node.dataset.nodeKey; node.dataset.playNode = String(id); }
-    Object.assign(clone.style, {position: 'absolute', left: '0', top: '0', width: `${w}px`, height: `${h}px`, transformOrigin: '0 0', transform: `scale(${scale})`});
-    Object.assign(scaler.style, {width: `${Math.round(w * scale)}px`, height: `${Math.round(h * scale)}px`, margin: '0 auto', position: 'relative', display: 'flex', flexDirection: 'column'});
-    // A layer pinned while the page scrolls is moved into a zero-height sticky strip, so the browser itself keeps it in place.
-    let used = 0;
-    const pinned = (preview?.sticky || []).filter(s => s.page === pageId && nodeMap.get(s.node)?.parentNode === clone).map(s => ({s, node: nodeMap.get(s.node), rect: page.nodes.find(n => n.id === s.node).rect})).sort((a, b) => a.rect.y - b.rect.y);
-    for (const {s, node, rect} of pinned) {
-      node.remove(); const strip = make('div', {class: 'play-sticky'}), inner = make('div', {class: 'play-sticky-inner'});
-      Object.assign(strip.style, {position: 'sticky', top: `${(s.top || 0) * scale}px`, height: '0', flex: 'none', marginTop: `${(rect.y - used) * scale}px`, zIndex: '5'});
-      Object.assign(inner.style, {position: 'absolute', left: '0', top: '0', width: `${w}px`, height: `${rect.h}px`, transformOrigin: '0 0', transform: `scale(${scale})`, pointerEvents: 'none'});
-      Object.assign(node.style, {left: `${rect.x}px`, top: '0', pointerEvents: 'auto'}); inner.append(node); strip.append(inner); scaler.append(strip); used = rect.y;
-    }
-    scaler.append(clone);
-    shown = {root: rootNode.id, variant: variant.id, label: variant.label, width, scale, implicit: !!variant.implicit};
-    Object.assign(root.dataset, {playPage: pageId, playRoot: String(rootNode.id), playVariant: variant.id || '', playScale: scale.toFixed(3), playWidth: String(Math.round(width))});
-    applyTexts(); wireAnimations(scale); wireInteractions(page); on(scroller, 'scroll', updateScroll, {passive: true});
-    timelineMs = timelineEnd(preview, pageId); scrub.max = String(Math.max(1, Math.round(timelineMs))); msInput.max = String(ceiling());
-    describe(); scroller.scrollTop = 0; updateScroll();
-    if (keepTime !== null) seek(keepTime);
-    applyMotionMode();
-    // Timed controls exist only where there is a timeline: with none (an older Paper, a click-only Page) there is no clock to run, so no frame loop is ever started.
-    for (const control of [toggle, replay, scrub, msInput]) { control.disabled = !timeline.length; if (!timeline.length) control.title = 'This Page has no timed motion'; }
-    if (reduced) { setPlaying(false); readTime(); } else reconcile();
-    refocus(before);
-  }
-
-  // ---- Text states: a layer shows the text of the state it is in, else its own.
-  function applyTexts() {
-    const rules = (preview?.texts || []).filter(t => t.page === pageId);
-    for (const rule of rules) { const node = nodeMap.get(rule.node); if (node && !originals.has(node)) originals.set(node, node.textContent); }
-    for (const [node, original] of originals) { const id = Number(node.dataset.playNode), rule = rules.find(t => t.node === id && states.get(t.state) === t.is); node.textContent = rule ? rule.text : original; }
-  }
-
-  // ---- Animations. Each is the browser's own; the trigger is a plain event or observer. `entry.cancel()` ends it and anything it watches.
-  function wireAnimations(scale) {
-    for (const record of (preview?.animations || []).filter(a => a.page === pageId && nodeMap.has(a.node))) {
-      const target = nodeMap.get(record.node); if (typeof target.animate !== 'function') continue;
-      const animation = target.animate(waapiFrames(record), {duration: record.durationMs, delay: record.delayMs || 0, easing: easingCss(record.easing), iterations: record.iterations === 'infinite' ? Infinity : (record.iterations || 1), direction: record.direction || 'normal', fill: 'both'});
-      animation.pause(); animation.currentTime = 0;
-      const entry = {record, animation, cancel() { try { animation.cancel(); } catch { /* Already gone. */ } }}; entries.push(entry);
-      const type = record.trigger.type, end = (record.delayMs || 0) + record.durationMs * (record.iterations === 'infinite' ? 1 : (record.iterations || 1));
-      entry.end = end; const snap = atEnd => { held.delete(entry); animation.pause(); animation.currentTime = atEnd ? end : 0; };
-      const still = () => reduced || frozen; // instant instead of moving
-      const source = () => nodeMap.get(record.trigger.source ?? record.node) || target;
-      if (type === 'load') { timeline.push(animation); ends.set(animation, end); if (record.iterations === 'infinite') loops.add(animation); entry.rest = () => snap(record.iterations !== 'infinite'); }
-      else if (type === 'scroll-in') {
-        entry.revealed = false; entry.rest = () => snap(entry.revealed);
-        const reveal = () => { if (entry.revealed) return; entry.revealed = true; if (still()) snap(true); else { animation.playbackRate = 1; animation.play(); } };
-        if (typeof IntersectionObserver === 'function') {
-          const seen = new IntersectionObserver(items => { if (items.some(item => item.isIntersecting)) { reveal(); seen.disconnect(); } }, {root: scroller, threshold: record.trigger.threshold ?? .25});
-          seen.observe(target); const stop = entry.cancel; entry.cancel = () => { seen.disconnect(); stop(); };
-        } else reveal();
-      } else if (type === 'scroll') {
-        entry.rest = () => {}; scrolled.push(entry);
-        entry.apply = () => { const {from, to} = record.trigger, p = Math.min(1, Math.max(0, (scroller.scrollTop / scale - from) / (to - from))); animation.pause(); animation.currentTime = (reduced ? (p >= .5 ? 1 : 0) : p) * record.durationMs; };
-      } else if (type === 'hover' || type === 'focus') {
-        const around = source(), enter = type === 'hover' ? 'pointerenter' : 'focusin', leave = type === 'hover' ? 'pointerleave' : 'focusout';
-        if (type === 'focus' && around.tabIndex < 0) around.tabIndex = 0;
-        entry.rest = () => snap(false);
-        const toward = forward => { if (still()) snap(forward); else { animation.playbackRate = forward ? 1 : -1; animation.play(); } };
-        on(around, enter, () => toward(true)); on(around, leave, () => toward(false));
-      } else if (type === 'state') {
-        entry.sync = animate => { const active = states.get(record.trigger.state) === record.trigger.is; if (still() || !animate) snap(active); else { animation.playbackRate = active ? 1 : -1; animation.play(); } };
-        entry.rest = () => entry.sync(false); entry.sync(false);
-      }
-    }
-  }
-  const updateScroll = () => { for (const entry of scrolled) entry.apply(); };
-
-  // ---- Interactions: a click (or Enter or Space on what is made focusable) runs a short list of validated actions.
-  function wireInteractions(page) {
-    for (const record of (preview?.interactions || []).filter(i => i.page === pageId && nodeMap.has(i.node))) {
-      const target = nodeMap.get(record.node), node = page.nodes.find(n => n.id === record.node);
-      target.tabIndex = 0; target.setAttribute('role', 'button'); target.setAttribute('aria-label', node?.name || 'Interactive layer'); target.style.cursor = 'pointer';
-      const run = () => { for (const action of record.actions) { if (stopped) return; perform(action); } };
-      on(target, 'click', event => { event.stopPropagation?.(); run(); });
-      bindKey(target, event => { if (event.key !== 'Enter' && event.key !== ' ') return false; event.preventDefault(); event.stopPropagation(); run(); return true; });
-    }
-  }
-  function perform(action) {
-    if (action.type === 'set-state') setState(action.state, action.value);
-    else if (action.type === 'navigate') { trail.push({pageId, scroll: scroller.scrollTop}); go(action.page, action.root); }
-    else if (action.type === 'back') { const previous = trail.pop(); if (previous) go(previous.pageId, undefined, previous.scroll); }
-    else if (action.type === 'scroll-to') { const target = nodeMap.get(action.node); if (target) scroller.scrollTo?.({top: scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top, behavior: reduced ? 'auto' : 'smooth'}); }
-  }
-  function setState(id, value) {
-    if (states.get(id) === value) return; states.set(id, value);
-    applyTexts(); for (const entry of entries) entry.sync?.(true);
-  }
-
-  // ---- The timeline: Play, pause, replay and a numeric seek, all on one shared clock, so the time shown is the time of the frame on screen.
-  // While playing the clock is the browser's own. Pausing freezes every animation at that clock rounded to a whole millisecond, and seeking to a whole
-  // millisecond holds every animation there, so seeking the time that is shown reproduces the paused frame exactly, loops and all. Loops keep running
-  // past the first cycle, so the time may be larger than the timeline's length; nothing is clamped to it or restarted when playing resumes.
-  function setPlaying(value) {
-    playing = value; toggle.textContent = value ? 'Pause' : 'Play'; toggle.setAttribute('aria-pressed', String(value));
-    if (value) { if (!frame) tick(); } else { frames.cancelAnimationFrame?.(frame); frame = 0; readTime(); }
-  }
-  // The clock is read from a loop when there is one (it never finishes), else from the animation that ends last.
+  // ---- Timing: one shared clock for every load animation, bounded by one policy (see bound()).
   const master = () => timeline.find(a => loops.has(a)) || timeline.reduce((best, a) => !best || ends.get(a) > ends.get(best) ? a : best, null);
   const time = () => { const m = master(); return m ? Number(m.currentTime) || 0 : 0; };
   const ended = () => timeline.length > 0 && timeline.every(a => !loops.has(a) && Number(a.currentTime) >= ends.get(a));
   const hold = at => { for (const a of timeline) { a.pause(); a.currentTime = at; } };
-  function readTime() {
-    const t = time(), whole = Math.round(t);
-    scrub.value = String(Math.min(Number(scrub.max), whole));
-    if (globalThis.document?.activeElement !== msInput) msInput.value = String(whole);
-    readout.textContent = !timelineMs ? '' : t > timelineMs ? `${whole} ms · loops run past ${Math.round(timelineMs)} ms` : `${whole} ms / ${Math.round(timelineMs)} ms`;
-  }
-  function tick() {
-    frame = 0;
-    if (stopped || !playing || document.hidden || !visible) return;
-    if (!timeline.length) { setPlaying(false); return; }
-    // The time control is bounded (MAX_TIME_MS). Where loops would run past it, Play stops exactly at the limit and says so: the time shown is then the time held,
-    // so typing it again reproduces the frame. It never clamps the display while animations go on, and it never resets a loop.
-    if (atLimit()) { hold(MAX_TIME_MS); userPaused = true; freeze(); setPlaying(false); say(`Paused at the ${MAX_TIME_MS} ms limit of the time control. Replay starts again.`); return; }
-    readTime(); if (ended()) { setPlaying(false); return; }
-    frame = frames.requestAnimationFrame(tick);
-  }
-  // The time control's bounds, one policy for every load timeline. Where loops run, the time stops at MAX_TIME_MS (they never end). A timeline of finite animations
-  // ends at its own end, and a valid one may be longer than MAX_TIME_MS (60,000 ms x 100 repeats), so its bound is its end: every time Play can show is then a time
-  // the control accepts. `ceiling` is the largest time the field takes at all.
+  // Where loops run, the time stops at MAX_TIME_MS (they never end). A timeline of finite animations ends at its own end, which a valid one may place beyond
+  // MAX_TIME_MS (60,000 ms x 100 repeats), so its bound is its end: every time shown is then a time the control accepts. `ceiling` is the most the field takes.
   const bound = () => loops.size ? MAX_TIME_MS : Math.ceil(timelineMs), ceiling = () => Math.max(MAX_TIME_MS, bound());
   const atLimit = () => loops.size > 0 && time() >= MAX_TIME_MS;
-  // Holds every timeline animation at one whole millisecond, never past the bound.
+  function readTime() {
+    const t = time(), whole = Math.round(t);
+    if (ui.scrub) ui.scrub.value = String(Math.min(Number(ui.scrub.max), whole));
+    if (ui.ms && globalThis.document?.activeElement !== ui.ms) ui.ms.value = String(whole);
+    if (ui.readout) ui.readout.textContent = !engaged || !timelineMs ? '' : t > timelineMs ? `${whole} ms · loops run past ${Math.round(timelineMs)} ms` : `${whole} ms / ${Math.round(timelineMs)} ms`;
+  }
   function seek(at) {
     const t = Math.round(Math.max(0, Math.min(bound(), Number.isFinite(at) ? at : 0)));
     hold(t); readTime(); return t;
   }
+  function tick() {
+    frame = 0;
+    if (stopped || !playing || globalThis.document?.hidden || !visible) return;
+    if (!timeline.length) { setPlaying(false); return; }
+    // At the limit Play stops exactly there and says so: the time shown is then the time held, so typing it again reproduces the frame. It never clamps the
+    // display while animations go on, and it never resets a loop.
+    if (atLimit()) { hold(MAX_TIME_MS); userPaused = true; freeze(); setPlaying(false); say(`Paused at the ${MAX_TIME_MS} ms limit of the time control. Replay starts again.`); return; }
+    readTime(); host.frame?.(); if (ended()) { setPlaying(false); return; }
+    frame = frames.requestAnimationFrame(tick);
+  }
+  // Plays what still has something to play. A finite animation that is already over stays where it is: the browser would rewind it to its start, replaying its entrance.
+  const playTimeline = () => { for (const a of timeline) if (loops.has(a) || (Number(a.currentTime) || 0) < ends.get(a)) a.play(); };
+  const hasMotion = () => { const p = host.preview(); return !!(p && ((p.animations?.length || 0) + (p.texts?.length || 0) + (p.sticky?.length || 0) > 0)); };
+
+  // ---- What may move is decided here, from facts. `userPaused`: the person paused (or the time control's limit was reached). `blocked()`: the document is hidden,
+  // the canvas is offscreen, or the person is in the middle of an edit. Callbacks only record a fact and call reconcile(); none resumes anything itself.
+  // While frozen the load timeline is held on its clock AND every event-driven effect that was moving is held where it was: none starts, and a change made
+  // meanwhile shows its end state at once (or, during an edit, waits). `held` are the effects that were running: only those continue, from where they stopped.
   function freeze() {
     if (timeline.length) hold(Math.min(bound(), Math.round(time())));
     frozen = true;
-    for (const entry of entries) { const type = entry.record.trigger.type; if (type === 'load' || type === 'scroll') continue; if (entry.animation.playState === 'running') { held.add(entry); entry.animation.pause(); } }
+    for (const e of entries) if (e.kind === 'event' && e.animation.playState === 'running') { held.add(e); e.animation.pause(); }
   }
   function thaw() {
     frozen = false;
-    for (const entry of held) { const a = entry.animation; if (entries.includes(entry) && !(a.playbackRate > 0 && Number(a.currentTime) >= entry.end)) a.play(); }
+    for (const e of held) { const a = e.animation; if (entries.includes(e) && !(a.playbackRate > 0 && Number(a.currentTime) >= e.end)) a.play(); }
     held.clear();
+    for (const e of entries) if (e.kind === 'event' && e.dir !== e.want()) settle(e);
   }
-  // The person pauses (the button, the slider, the field): everything Play owns is held exactly where it is until they play again.
-  function pause() { userPaused = true; freeze(); setPlaying(false); }
-  // Applies what the facts allow: held if the person paused or Play is hidden or offscreen; otherwise held effects continue from where they stopped and the load
-  // timeline plays on if it has anything left. Safe to call at any time and from any callback: it only ever moves toward what the facts say.
   function reconcile() {
-    if (stopped) return;
+    if (stopped || !engaged) return;
     if (blocked() || userPaused) { if (!frozen) freeze(); setPlaying(false); return; }
     if (reduced) return;
     thaw();
-    if (timeline.length && !ended() && !atLimit()) { playTimeline(); setPlaying(true); } else setPlaying(false);
+    if (timeline.length && !ended() && !atLimit()) { playTimeline(); setPlaying(true); }
+    else setPlaying(!timeline.length && hasMotion());
   }
-  // Plays what still has something to play. A finite animation that is already over stays where it is: the browser would rewind it to its start, which would replay its entrance.
-  function playTimeline() { for (const a of timeline) if (loops.has(a) || (Number(a.currentTime) || 0) < ends.get(a)) a.play(); }
+  function setPlaying(value) {
+    playing = value; paintToggle();
+    if (value) { if (timeline.length && !frame) tick(); } else { frames.cancelAnimationFrame?.(frame); frame = 0; readTime(); }
+  }
+  function paintToggle() {
+    const t = ui.toggle; if (!t) return;
+    const label = playing ? 'Pause motion' : 'Play motion';
+    t.setAttribute('aria-pressed', String(playing)); t.setAttribute('aria-label', label); t.setAttribute('title', hasMotion() ? label : 'This Paper has no motion yet. Add some from a layer’s Motion section.'); t.disabled = !hasMotion();
+    t.querySelector?.('use')?.setAttribute('href', playing ? '#i-pause' : '#i-play');
+    for (const control of [ui.replay, ui.reset, ui.scrub, ui.ms]) if (control) control.disabled = !hasMotion();
+    if (ui.reduce) ui.reduce.setAttribute('aria-pressed', String(reduced));
+    if (ui.reset) ui.reset.hidden = !engaged;
+  }
+
+  // ---- Bindings: effects on the live layer elements.
+  function teardown() {
+    for (const e of entries) e.cancel(); entries.length = 0; timeline = []; scrolled.length = 0; ends.clear(); loops.clear(); held.clear();
+    for (const undo of cleanups.splice(0)) undo();
+    for (const s of stickies.splice(0)) if (s.el) s.el.style.marginTop = '';
+    frames.cancelAnimationFrame?.(frame); frame = 0;
+  }
+  function restoreText() { for (const [key, target] of textTargets) { const el = host.nodeEl(target.page, target.node); if (el && el.textContent !== host.nodeText(target.page, target.node)) el.textContent = host.nodeText(target.page, target.node); } textTargets.clear(); transientText.clear(); }
+  // A state's alternate text, applied to the live layer. `suppressed` is a layer being typed into: it shows its own text, whatever the state says.
+  function applyTexts() {
+    const rules = (host.preview()?.texts || []).filter(t => host.pageShown(t.page));
+    for (const rule of rules) textTargets.set(host.keyOf(rule.page, rule.node), {page: rule.page, node: rule.node});
+    for (const [key, target] of textTargets) {
+      const el = host.nodeEl(target.page, target.node); if (!el || key === suppressed) continue;
+      const rule = rules.find(t => t.page === target.page && t.node === target.node && states.get(t.state) === t.is), text = rule ? rule.text : host.nodeText(target.page, target.node);
+      if (rule) transientText.set(key, rule.text); else transientText.delete(key);
+      if (el.textContent !== text) el.textContent = text;
+    }
+  }
+  const textFor = key => (engaged && key !== suppressed && transientText.has(key)) ? transientText.get(key) : null;
+
+  function bind({keepTime = null} = {}) {
+    teardown(); frozen = blocked() || userPaused;
+    const preview = host.preview();
+    for (const record of preview?.animations || []) {
+      if (!host.pageShown(record.page)) continue;
+      const target = host.nodeEl(record.page, record.node); if (!target || typeof target.animate !== 'function') continue;
+      const animation = target.animate(waapiFrames(record), {duration: record.durationMs, delay: record.delayMs || 0, easing: easingCss(record.easing), iterations: record.iterations === 'infinite' ? Infinity : (record.iterations || 1), direction: record.direction || 'normal', fill: 'both'});
+      animation.pause(); animation.currentTime = 0;
+      const type = record.trigger.type, end = (record.delayMs || 0) + record.durationMs * (record.iterations === 'infinite' ? 1 : (record.iterations || 1));
+      const e = {record, animation, target, end, type, dir: null, kind: 'event', cancel() { try { animation.cancel(); } catch { /* Already gone. */ } }}; entries.push(e);
+      e.snap = atEnd => { held.delete(e); animation.pause(); animation.currentTime = atEnd ? end : 0; e.dir = atEnd; };
+      const sourceId = record.trigger.source ?? record.node;
+      if (type === 'load') { e.kind = 'load'; timeline.push(animation); ends.set(animation, end); if (record.iterations === 'infinite') loops.add(animation); e.rest = () => e.snap(record.iterations !== 'infinite'); }
+      else if (type === 'scroll') {
+        e.kind = 'scroll'; e.root = host.rootEl(record.page, record.node); scrolled.push(e);
+        e.apply = y => { const {from, to} = record.trigger, p = Math.min(1, Math.max(0, (y - from) / (to - from))); animation.pause(); animation.currentTime = (reduced ? (p >= .5 ? 1 : 0) : p) * record.durationMs; };
+      } else if (type === 'scroll-in') {
+        e.seen = false; e.want = () => e.seen;
+        if (typeof IntersectionObserver === 'function') {
+          const watch = new IntersectionObserver(items => { if (items.some(item => item.isIntersecting) && !e.seen) { e.seen = true; settle(e); watch.disconnect(); } }, {root: host.stage, threshold: record.trigger.threshold ?? .25});
+          watch.observe(target); cleanups.push(() => watch.disconnect());
+        } else e.seen = true;
+      } else if (type === 'hover') {
+        e.hovered = false; e.want = () => e.hovered; const around = host.nodeEl(record.page, sourceId) || target;
+        on(around, 'pointerenter', () => { e.hovered = true; settle(e); }); on(around, 'pointerleave', () => { e.hovered = false; settle(e); });
+      } else if (type === 'focus') {
+        e.sourceKey = host.keyOf(record.page, sourceId); e.want = () => host.selectedKeys().has(e.sourceKey);
+      } else if (type === 'state') e.want = () => states.get(record.trigger.state) === record.trigger.is;
+      if (e.want) { e.rest = () => e.snap(e.want()); }
+      if (e.want) settle(e, true);
+    }
+    // Pinned layers: a direct child of an artboard that stays at the top of the canvas viewport while the artboard is panned past it.
+    for (const s of preview?.sticky || []) if (host.pageShown(s.page)) { const el = host.nodeEl(s.page, s.node), box = host.layerBox(s.page, s.node); if (el && box) stickies.push({el, box, top: s.top || 0, root: host.rootEl(s.page, s.node)}); }
+    timelineMs = Math.max(0, ...timeline.map(a => ends.get(a)));
+    applyTexts();
+    if (keepTime !== null && timeline.length) seek(Math.min(keepTime, bound()));
+    if (ui.scrub) ui.scrub.max = String(Math.max(1, Math.round(timelineMs))); if (ui.ms) ui.ms.max = String(ceiling());
+    layoutScroll(); readTime();
+    if (reduced) { for (const e of entries) e.rest?.(); setPlaying(false); } else reconcile();
+  }
+  // Scroll-linked and pinned effects follow where the artboard is relative to the canvas viewport. Called when the camera moves (once per painted frame) and after a bind.
+  function layoutScroll() {
+    if (!scrolled.length && !stickies.length) return;
+    const top = host.stage.getBoundingClientRect().top, z = host.camera().z || 1, offsetOf = root => { const r = root?.getBoundingClientRect?.(); return r ? (top - r.top) / z : 0; };
+    for (const e of scrolled) e.apply(offsetOf(e.root));
+    for (const s of stickies) { const y = offsetOf(s.root), natural = s.box.y, push = Math.min(Math.max(0, y + s.top - natural), Math.max(0, s.box.rootH - natural - s.box.h)); s.el.style.marginTop = push > 0 ? `${push}px` : ''; }
+  }
+  // An event-driven effect goes toward what its trigger wants now. During an edit it waits (the pose is held); frozen or reduced it shows the end state at once.
+  function settle(e, initial = false) {
+    if (editing && !initial) return;
+    const want = e.want(); if (!initial && e.dir === want) return;
+    if (initial || reduced || frozen) { e.snap(want); return; }
+    e.dir = want; e.animation.playbackRate = want ? 1 : -1; e.animation.play(); held.delete(e);
+  }
+  function setState(id, value) {
+    if (states.get(id) === value) return; states.set(id, value);
+    applyTexts(); for (const e of entries) if (e.type === 'state') settle(e);
+  }
+
+  // ---- The person's controls.
+  function engage({paused = false} = {}) {
+    if (engaged || stopped) return; engaged = true; userPaused = paused; states.clear(); for (const [id, value] of initialStates(host.preview())) states.set(id, value);
+    bind(); paintToggle();
+  }
+  // Back to exactly the artwork: every effect cancelled, texts and pins taken off, local state forgotten.
+  function disengage() {
+    if (!engaged) return; engaged = false; userPaused = false; frozen = false; setPlaying(false);
+    teardown(); restoreText(); states.clear(); trail.length = 0; paintToggle(); readTime(); say('Motion is off. The canvas shows the artwork.');
+  }
+  function pause() { if (!engaged) return; userPaused = true; freeze(); setPlaying(false); }
   function resume() {
-    if (reduced) { say('Motion is reduced. Turn off Reduce motion to play it.'); applyMotionMode(); return; }
+    if (reduced) { say('Motion is reduced. Turn off Reduce motion to play it.'); if (!engaged) engage({paused: true}); return; }
     if (atLimit()) { say(`The time control stops at ${MAX_TIME_MS} ms. Replay starts again.`); return; }
-    userPaused = false;
-    if (timeline.length && ended()) seek(0);
+    if (!engaged) { engage(); return; }
+    userPaused = false; if (timeline.length && ended()) seek(0);
     reconcile();
   }
-  // The exact entry. Only a plain non-negative number up to MAX_TIME_MS is a time; anything else is refused and the field goes back to the time that is shown.
+  const toggle = () => { if (playing) pause(); else resume(); };
+  function replay() { if (!engaged) engage({paused: true}); seek(0); userPaused = false; if (reduced) { say('Motion is reduced. Turn off Reduce motion to play it.'); return; } reconcile(); }
+  // The exact entry. Only a plain non-negative number up to the ceiling is a time; anything else is refused and the field returns to the time that is shown.
   function commitTime() {
-    const raw = String(msInput.value).trim(), n = Number(raw);
-    if (!/^\d+(\.\d+)?$/.test(raw) || !Number.isFinite(n) || n > ceiling()) { say(`Enter a time from 0 to ${ceiling()} ms.`); msInput.value = String(Math.round(time())); return false; }
-    pause(); const t = seek(n); msInput.value = String(t);
+    const raw = String(ui.ms.value).trim(), n = Number(raw), plain = /^\d+(\.\d+)?$/.test(raw) && Number.isFinite(n);
+    if (!plain || n > Math.max(MAX_TIME_MS, engaged ? ceiling() : 0)) { say(`Enter a time from 0 to ${engaged ? ceiling() : MAX_TIME_MS} ms.`); ui.ms.value = String(Math.round(time())); return false; }
+    if (!engaged) { if (!hasMotion()) return false; engage({paused: true}); }
+    if (n > ceiling()) { /* A finite timeline shorter than the number: it is held at its end, said below. */ }
+    pause(); const t = seek(n); ui.ms.value = String(t);
     if (t !== Math.round(n)) say(`The timeline ends at ${t} ms.`);
     return true;
   }
-  // Keys inside Play. The editor's capture-phase guard hands every key to key(), so Play's own handlers still work while no other part of the page sees it.
-  function bindKey(el, handler) { keyed.set(el, handler); on(el, 'keydown', event => { if (!handled.has(event)) { const done = handler(event); if (done) handled.add(event); } }); }
-  // Focus containment. What can take focus inside Play, in reading order: the toolbar's controls (not disabled), the scrolling preview, and every layer that
-  // was made focusable (a click action, or a focus effect). Hidden, disabled and tabindex -1 things are not in the ring.
-  function focusables() {
-    const out = [], walk = node => { for (const child of Array.from(node.children || [])) { if (child.hidden || child.inert) continue; if (child.tabIndex >= 0 && !child.disabled && child.type !== 'hidden') out.push(child); walk(child); } };
-    walk(root); return out;
-  }
-  const inside = el => !!el && (el === root || !!root.contains?.(el));
-  // Tab at the last stop goes to the first, Shift+Tab at the first goes to the last, and focus that is somewhere else (the page body after a click on empty
-  // space, a layer that was just replaced) comes back in. Everything in between is left to the browser, so selects, the number field and the slider keep
-  // their native behaviour.
-  function trapTab(event) {
-    const ring = focusables(), active = inside(event.target) ? event.target : globalThis.document?.activeElement, index = ring.indexOf(active), last = ring.length - 1;
-    const send = to => { event.preventDefault(); event.stopPropagation(); (to || root).focus?.(); return true; };
-    if (!ring.length) return send(null);
-    if (index < 0) return send(event.shiftKey ? ring[last] : ring[0]);
-    if (event.shiftKey && index === 0) return send(ring[last]);
-    if (!event.shiftKey && index === last) return send(ring[0]);
-    return false;
-  }
-  // The editor's capture-phase guard calls this for every key while Play is open, and Play's own root listener calls it for the same key when the guard is absent.
-  // An event is only ever acted on once.
-  function key(event) {
-    if (handled.has(event)) return true;
-    if (event.key === 'Escape') { handled.add(event); event.preventDefault(); event.stopPropagation(); host.onClose(); return true; }
-    if (event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey && trapTab(event)) { handled.add(event); return true; }
-    for (let n = event.target; n && n !== root; n = n.parentNode) { const handler = keyed.get(n); if (handler?.(event)) { handled.add(event); return true; } }
-    event.stopPropagation(); return false;
-  }
-  // A rebuild (another variant, Page or revision) replaces the layers. If focus was on one, it goes to the same layer in the new build, else to the preview
-  // itself; focus that was in the toolbar stays where it is. It never falls to the page behind.
-  function focusMemory() { const active = globalThis.document?.activeElement; return inside(active) ? {layer: active.dataset?.playNode ?? null, was: active} : null; }
-  function refocus(before) {
-    if (!before || stopped) return;
-    if (before.layer === null) { if (!inside(globalThis.document?.activeElement)) scroller.focus?.({preventScroll: true}); return; }
-    const same = nodeMap.get(Number(before.layer));
-    (same && same.tabIndex >= 0 ? same : scroller).focus?.({preventScroll: true});
-  }
-  function applyMotionMode() {
-    motion.setAttribute('aria-pressed', String(reduced)); root.classList.toggle('play-reduced', reduced); root.dataset.playReduced = String(reduced);
-    if (reduced) { setPlaying(false); for (const entry of entries) entry.rest?.(); updateScroll(); readTime(); }
-  }
   function setReduced(value) {
-    reduced = value; applyMotionMode();
-    if (!reduced) { for (const entry of entries) if (entry.record.trigger.type === 'state' || entry.record.trigger.type === 'scroll-in') entry.rest(); seek(0); updateScroll(); resume(); }
+    reduced = value; paintToggle();
+    if (!engaged) return;
+    if (reduced) { for (const e of entries) e.rest?.(); setPlaying(false); layoutScroll(); readTime(); return; }
+    for (const e of entries) if (e.kind === 'event') e.rest?.();
+    seek(0); layoutScroll(); userPaused = false; reconcile();
   }
 
-  // ---- Moving about
-  function go(nextPage, nextRoot, scroll = 0) {
-    if (!scene.pages.some(p => p.id === nextPage)) return;
-    // Going to another Page is a deliberate act: it starts that Page fresh (reconcile() still waits while Play is hidden or offscreen).
-    pageId = nextPage; lockedRoot = nextRoot ?? null; build(); scroller.scrollTop = scroll; updateScroll();
+  // ---- Connection to the editor.
+  // Called whenever the layer elements may have been replaced or the shown Pages changed (a rebuild, an undo, a revision, a new layer, another Page): the effects are
+  // re-attached to the new elements, keeping the clock, the local state and the person's pause. Batched, and a no-op while motion is off or nothing changed.
+  function dirty() {
+    if (stopped) return; paintToggle();
+    if (!engaged || dirtyQueued) return; dirtyQueued = true;
+    queueMicrotask(() => { dirtyQueued = false; if (engaged && !stopped && stale()) bind({keepTime: timeline.length ? time() : null}); });
   }
-  // The Paper changed under Play (a new revision): rebuild from the new data, keeping the Page, scroll place, still-valid states and the time.
-  function update(nextScene, nextPreview, label = 'Updated to the latest version') {
-    if (stopped) return;
-    scene = nextScene; preview = nextPreview || null;
-    for (const [id, value] of [...states]) { const definition = preview?.states?.find(s => s.id === id); if (!definition || !definition.values.includes(value)) states.delete(id); }
-    for (const [id, value] of initialStates(preview)) if (!states.has(id)) states.set(id, value);
-    if (!scene.pages.some(p => p.id === pageId)) pageId = scene.pages[0].id;
-    rebuildInPlace();
-    say(label);
+  function stale() {
+    const want = (host.preview()?.animations || []).filter(r => host.pageShown(r.page) && host.nodeEl(r.page, r.node)), have = entries.map(e => e.record);
+    if (want.length !== have.length || want.some((r, i) => r !== have[i])) return true;
+    return entries.some(e => host.nodeEl(e.record.page, e.record.node) !== e.target || e.target.isConnected === false) || stickies.some(s => s.el.isConnected === false) || [...textTargets.values()].some(t => { const el = host.nodeEl(t.page, t.node); return !el || el.isConnected === false; });
   }
-  // Rebuilds what is shown from the current data and keeps everything the person was in the middle of: the clock (a paused time stays that exact time, playing
-  // stays playing, finished entrances are not replayed), local states, the scroll place (as a share of the page) and focus. Old animations and observers are cancelled.
-  function rebuildInPlace() {
-    const ratio = scroller.scrollTop / Math.max(1, scroller.scrollHeight - scroller.clientHeight), at = timeline.length ? time() : null;
-    build({keepTime: at, fresh: false});
-    scroller.scrollTop = Math.round(ratio * Math.max(0, scroller.scrollHeight - scroller.clientHeight)); updateScroll();
+  function cameraChanged() { if (engaged) layoutScroll(); }
+  function selectionChanged() { if (!engaged) return; for (const e of entries) if (e.type === 'focus') settle(e); }
+  // An edit gesture, a text edit or a property edit is in progress: hold every effect at its current pose (no jump) until it ends. `textKey` is the layer being
+  // typed into: it shows its own text, never a state's.
+  function setEditing(flag, {textKey = null} = {}) {
+    if (editing === flag && suppressed === textKey) return;
+    editing = flag; const was = suppressed; suppressed = flag ? textKey : null;
+    if (engaged) { if (flag && textKey) { const t = textTargets.get(textKey); const el = t && host.nodeEl(t.page, t.node); if (el) el.textContent = host.nodeText(t.page, t.node); transientText.delete(textKey); } reconcile(); if (!flag && was) applyTexts(); }
   }
-  // The window, a panel or the host changed the room Play has. Looked at once per frame, only when the browser says the size changed (no polling), and only
-  // acted on when the DECISION changed: another authored variant, or another fitting scale. A change that decides the same thing only updates the width shown,
-  // so an observer callback caused by our own rebuild finds nothing to do and cannot loop.
-  function relayout() {
-    if (stopped || !shown) return;
-    const d = decide(); if (!d.room || !d.rootNode) return;
-    const scale = layoutScale(d.width, d.room, d.rootNode.rect.w);
-    if (d.rootNode.id !== shown.root || Math.abs(scale - shown.scale) > 0.0005) { rebuildInPlace(); return; }
-    if (Math.round(d.width) !== Math.round(shown.width)) { shown.width = d.width; lastRoom = d.room; root.dataset.playWidth = String(Math.round(d.width)); describe(); }
+  // The deliberate "Try interaction": the click actions authored on one layer, on this same canvas. Navigation uses the editor's own Page and camera actions.
+  const interactionsFor = (pageId, nodeId) => (host.preview()?.interactions || []).filter(i => i.page === pageId && i.node === nodeId);
+  function tryLayer(pageId, nodeId) {
+    const records = interactionsFor(pageId, nodeId); if (!records.length) return 0;
+    if (!engaged) engage({paused: true});
+    for (const record of records) for (const action of record.actions) {
+      if (action.type === 'set-state') setState(action.state, action.value);
+      else if (action.type === 'navigate') { trail.push({pageId: host.currentPage?.() ?? pageId}); host.navigate(action.page, action.root); }
+      else if (action.type === 'back') { const previous = trail.pop(); if (previous) host.navigate(previous.pageId); }
+      else if (action.type === 'scroll-to') host.panTo(pageId, action.node);
+    }
+    return records.length;
   }
-  function onResize() { if (stopped || resizeFrame) return; resizeFrame = frames.requestAnimationFrame(() => { resizeFrame = 0; relayout(); }); }
-  if (typeof ResizeObserver === 'function') { sizeWatch = new ResizeObserver(onResize); sizeWatch.observe(scroller); } else { globalThis.window?.addEventListener?.('resize', onResize); }
   function destroy() {
-    if (stopped) return; stopped = true; clearTimeout(noticeTimer); sizeWatch?.disconnect(); sizeWatch = null; globalThis.window?.removeEventListener?.('resize', onResize); frames.cancelAnimationFrame?.(resizeFrame); resizeFrame = 0; pause(true); teardown();
-    root.replaceChildren(); root.hidden = true; for (const key of Object.keys(root.dataset || {})) if (key.startsWith('play')) delete root.dataset[key];
+    if (stopped) return; stopped = true; clearTimeout(noticeTimer);
+    teardown(); restoreText(); engaged = false; playing = false;
+    for (const undo of ui.cleanups?.splice(0) || []) undo();
   }
-  build();
+
+  // ---- The controls in the page (one toggle in the header; the optional time, replay and reduced-motion area of the Motion inspector). Bound once.
+  function bindControls(controls) {
+    ui = {...controls, cleanups: []}; const bindEvent = (target, type, fn, options) => { target.addEventListener(type, fn, options); ui.cleanups.push(() => target.removeEventListener(type, fn, options)); };
+    if (ui.toggle) {
+      // A pointer press moves focus first, and a focused time field commits (and pauses) on that change BEFORE the click arrives. The click must do what the button said
+      // when it was pressed: the press records that intent in the capture phase, ahead of the blur, and the pointer click uses it once. A keyboard activation has no press
+      // (its click has detail 0), and focus has already settled, so it follows the state as it is. A cancelled press forgets its intent.
+      bindEvent(ui.toggle, 'pointerdown', () => { pressed = playing ? 'pause' : 'play'; }, {capture: true});
+      bindEvent(ui.toggle, 'pointercancel', () => { pressed = null; });
+      bindEvent(ui.toggle, 'click', event => { const intent = event?.detail > 0 ? pressed : null; pressed = null; if (intent ? intent === 'pause' : playing) pause(); else resume(); });
+    }
+    if (ui.replay) bindEvent(ui.replay, 'click', () => replay());
+    if (ui.reset) bindEvent(ui.reset, 'click', () => disengage());
+    if (ui.reduce) bindEvent(ui.reduce, 'click', () => { userChose = true; setReduced(!reduced); });
+    if (ui.scrub) bindEvent(ui.scrub, 'input', () => { const at = Number(ui.scrub.value); if (!engaged) engage({paused: true}); pause(); seek(at); });
+    if (ui.ms) {
+      bindEvent(ui.ms, 'keydown', event => { if (event.key !== 'Enter') return; event.preventDefault(); commitTime(); });
+      bindEvent(ui.ms, 'change', () => commitTime());
+      bindEvent(ui.ms, 'blur', () => { if (engaged && ui.ms.value !== String(Math.round(time()))) commitTime(); });
+    }
+    if (system?.addEventListener) { const change = () => { if (!userChose) setReduced(system.matches); }; system.addEventListener('change', change); ui.cleanups.push(() => system.removeEventListener('change', change)); }
+    const away = () => reconcile(); globalThis.document?.addEventListener?.('visibilitychange', away); ui.cleanups.push(() => globalThis.document?.removeEventListener?.('visibilitychange', away));
+    if (typeof IntersectionObserver === 'function' && host.stage) { const watch = new IntersectionObserver(items => { visible = items.some(item => item.isIntersecting); reconcile(); }); watch.observe(host.stage); ui.cleanups.push(() => watch.disconnect()); }
+    paintToggle(); readTime(); paintStatus();
+  }
   return {
-    update, destroy, go, seek, pause, resume, setState, setReduced, key,
-    setViewport(value) { viewport = value; lockedRoot = null; build(); },
-    relayout,
-    get snapshot() { return {pageId, shown: shown && {...shown}, time: time(), loops: loops.size > 0, playing, reduced, states: Object.fromEntries(states), scrollTop: scroller.scrollTop, timelineMs, animations: entries.length}; },
-    focus() { back.focus?.(); },
+    bindControls, engage, disengage, pause, resume, toggle, replay, seek: at => { if (!engaged) engage({paused: true}); pause(); return seek(at); }, setReduced, setState, tryLayer, interactionsFor, dirty, cameraChanged, selectionChanged, setEditing, textFor, commitTime, destroy,
+    get engaged() { return engaged; }, get editing() { return editing; },
+    posed: key => engaged && entries.some(e => host.keyOf(e.record.page, e.record.node) === key),
+    get snapshot() { return {engaged, playing, userPaused, frozen, reduced, editing, time: time(), loops: loops.size > 0, timelineMs, states: Object.fromEntries(states), animations: entries.length, pinned: stickies.length}; },
   };
 }

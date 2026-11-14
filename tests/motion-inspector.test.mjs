@@ -20,25 +20,26 @@ async function harness(source = addMotion(syntheticLanding()), {canEdit = true, 
   const code = app.slice(app.indexOf('function motionEdit(change) {'), app.indexOf('// Panels: wide surfaces'));
   const messages = [], history = [], nodes = new Map(), entries = new Map(), selection = new Set(), box = new El('section'), body = new El('div');
   for (const page of source.pages) { entries.set(page.id, new Map(page.nodes.map(n => [n.id, n]))); for (const node of page.nodes) nodes.set(`${page.id}:${node.id}`, {page, node}); }
-  const state = {scene: source, canEdit, selected: null};
-  const make = new Function('state', 'document', '$', 'selection', 'nodes', 'entries', 'message', 'pushHistory', 'copy', 'commitFields', 'previewProblem', 'withRecord', 'withoutRecord', 'uniqueId', 'presetRecord', 'PRESETS', 'PROPERTIES', 'EASINGS', 'isArtboard',
+  const state = {scene: source, canEdit, selected: null}, tryButton = new El('button'), dirtied = []; const motion = {interactionsFor: (p, n) => (state.scene.preview?.interactions || []).filter(i => i.page === p && i.node === n), dirty: () => dirtied.push(1)};
+  const make = new Function('state', 'document', '$', 'selection', 'nodes', 'entries', 'message', 'pushHistory', 'copy', 'commitFields', 'motion', 'previewProblem', 'withRecord', 'withoutRecord', 'uniqueId', 'presetRecord', 'PRESETS', 'PROPERTIES', 'EASINGS', 'isArtboard',
     `const scene = new Proxy({}, {get: (_, k) => state.scene[k], set: (_, k, v) => { state.scene[k] = v; return true; }, deleteProperty: (_, k) => delete state.scene[k], has: (_, k) => k in state.scene}); let canEdit = state.canEdit; let selected = null;
      ${code}
      return {renderMotion, motionEdit, select: key => { selected = key; selection.clear(); if (key) selection.add(key); }, setCanEdit: v => { canEdit = v; }};`);
-  const api = make(state, {createElement: tag => new El(tag), createTextNode: text => Object.assign(new El('#text'), {_text: text})}, selector => selector === '#motion-section' ? box : selector === '#motion-body' ? body : null, selection, nodes, entries, text => messages.push(text), action => history.push(action), v => JSON.parse(JSON.stringify(v)), () => {}, previewProblem, withRecord, withoutRecord, uniqueId, presetRecord, PRESETS, PROPERTIES, EASINGS, isArtboard);
+  const api = make(state, {createElement: tag => new El(tag), createTextNode: text => Object.assign(new El('#text'), {_text: text})}, selector => selector === '#motion-section' ? box : selector === '#motion-body' ? body : selector === '#motion-try' ? tryButton : null, selection, nodes, entries, text => messages.push(text), action => history.push(action), v => JSON.parse(JSON.stringify(v)), () => {}, motion, previewProblem, withRecord, withoutRecord, uniqueId, presetRecord, PRESETS, PROPERTIES, EASINGS, isArtboard);
   api.setCanEdit(canEdit);
   const pick = (page, name) => { const node = page.nodes.find(n => n.name === name); api.select(`${page.id}:${node.id}`); api.renderMotion(); return node; };
   const field = label => body.all().find(e => e.attrs['aria-label'] === label || e.attrs['aria-label']?.startsWith(label)), fields = label => body.all().filter(e => e.attrs['aria-label']?.startsWith(label));
-  return {api, state, box, body, messages, history, pick, field, fields, scene: source};
+  return {api, state, box, body, messages, history, pick, field, fields, scene: source, tryButton, dirtied};
 }
 
-test('nothing selected hides the section; a layer shows its motion and the controls that tune it, only to people who can edit', async () => {
-  const h = await harness(); h.api.renderMotion(); assert.equal(h.box.hidden, true);
+test('the section shows when the Paper has motion or a layer is selected; a layer shows its motion and the controls that tune it, only to people who can edit', async () => {
+  const h = await harness(); h.api.renderMotion(); assert.equal(h.box.hidden, false, 'a Paper with motion keeps its time and reset controls reachable'); assert.equal(h.body.children.length, 0, 'but there is nothing to author without a layer'); assert.equal(h.tryButton.disabled, true);
+  const bare = await harness(syntheticLanding()); bare.api.renderMotion(); assert.equal(bare.box.hidden, true, 'a Paper with no motion and no selection shows nothing');
   const headline = h.pick(h.scene.pages[0], 'D hero headline'); assert.equal(h.box.hidden, false);
   assert.ok(h.field('Add motion to this layer'), 'the preset menu'); assert.equal(h.fields('Motion a').length, 1, 'one card for the headline’s one animation'); assert.ok(h.field('When it moves') && h.field('Duration ms') && h.field('Delay ms') && h.field('Easing'));
   assert.equal(h.field('Duration ms').value, '900'); assert.equal(h.field('Delay ms').value, '160'); assert.equal(h.field('Opacity from').value, '0'); assert.equal(h.field('Opacity to').value, '1'); assert.equal(h.field('Move Y from').value, '36');
   const options = h.field('Add motion to this layer').children.map(o => o.textContent); assert.deepEqual(options, ['Add motion…', ...Object.values(PRESETS).map(p => p.label)]);
-  h.pick(h.scene.pages[0], 'D primary CTA'); assert.ok(h.field('Add a click action'), 'click actions for a layer'); assert.ok(h.fields('Click action').length >= 1);
+  h.pick(h.scene.pages[0], 'D primary CTA'); assert.ok(h.field('Add a click action'), 'click actions for a layer'); assert.ok(h.fields('Click action').length >= 1); assert.equal(h.tryButton.disabled, false, 'Try interaction is offered for a layer with a click action'); h.pick(h.scene.pages[0], 'D eyebrow'); assert.equal(h.tryButton.disabled, true, 'and honestly disabled where there is none'); assert.match(h.tryButton.title, /no click action/);
   const view = await harness(addMotion(syntheticLanding()), {canEdit: false}); view.pick(view.scene.pages[0], 'D hero headline'); assert.equal(view.field('Duration ms'), undefined, 'no controls for a view-only person'); assert.match(view.body.textContent, /motion effect.*This Paper is view-only/);
   const empty = await harness(syntheticLanding(), {canEdit: true}); empty.pick(empty.scene.pages[0], 'D eyebrow'); assert.equal(empty.fields('Motion ').length, 0); assert.ok(empty.field('Add motion to this layer'));
   const broken = addMotion(syntheticLanding()); broken.preview.animations[0].css = 'x'; const b = await harness(broken); b.pick(b.scene.pages[0], 'D hero headline'); assert.match(b.body.textContent, /The preview model can’t be used: .*unknown field/); assert.equal(b.field('Add motion to this layer'), undefined, 'authoring is paused, not guessed');

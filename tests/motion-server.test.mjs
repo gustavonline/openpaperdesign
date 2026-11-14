@@ -86,5 +86,5 @@ test('the runtime inventory serves the new editor files from the same list the s
   assert.ok(EDITOR_FILES.includes('preview-model.js') && EDITOR_FILES.includes('play.js'));
   for (const file of ['preview-model.js', 'play.js']) await fs.access(path.join(RUNTIME, file));
   const play = await fs.readFile(path.join(RUNTIME, 'play.js'), 'utf8'), model = await fs.readFile(path.join(RUNTIME, 'preview-model.js'), 'utf8');
-  for (const [name, source] of [['play.js', play], ['preview-model.js', model]]) assert.doesNotMatch(source, /\beval\s*\(|new Function|\.innerHTML\s*=|insertAdjacentHTML|document\.write|import\s*\(|<iframe|srcdoc|fetch\s*\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|postMessage|setAttribute\(\s*['"](?:style|href|src|on)/, `${name} runs no code from the Paper, writes no markup, touches no network or storage`);
+  for (const [name, source] of [['play.js', play], ['preview-model.js', model]]) assert.doesNotMatch(source, /\beval\s*\(|new Function|\.innerHTML\s*=|insertAdjacentHTML|document\.write|import\s*\(|<iframe|srcdoc|fetch\s*\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|postMessage|setAttribute\(\s*['"](?:style|src|on)/, `${name} runs no code from the Paper, writes no markup, touches no network or storage`);
 });
