@@ -55,6 +55,8 @@ export function validatePaper(paper, { read = false } = {}) {
   }
   fail(paper.assets && typeof paper.assets === 'object' && !Array.isArray(paper.assets) && Object.values(paper.assets).every(asset => typeof asset === 'string' && /^assets\/[a-zA-Z0-9_.-]+$/.test(asset)), 'Invalid asset references');
   // Optional: the name each imported image had, by asset key, so Save and Download can offer it. Old Papers have none and fall back to the stored name.
+  // Optional: the name an image layer was imported under, kept on its fill so identical bytes imported under two names keep both. Same rule as assetNames.
+  for (const page of paper.pages) for (const node of page.nodes) for (const fill of node.style?.fills || []) fail(!fill || fill.type !== 'image' || fill.name === undefined || (typeof fill.name === 'string' && fill.name.length > 0 && fill.name.length <= 120 && !/[\u0000-\u001f\u007f\\/]/.test(fill.name)), 'Invalid image names');
   fail(paper.assetNames === undefined || (paper.assetNames && typeof paper.assetNames === 'object' && !Array.isArray(paper.assetNames) && Object.keys(paper.assetNames).length <= 2000 && Object.values(paper.assetNames).every(name => typeof name === 'string' && name.length > 0 && name.length <= 120 && !/[\u0000-\u001f\u007f\\/]/.test(name))), 'Invalid asset names');
   if (paper.symbols !== undefined) {
     fail(Array.isArray(paper.symbols) && paper.symbols.length <= 100, 'Scratchpad holds at most 100 symbols');

@@ -59,3 +59,21 @@ test('the Design tab labels this as observed, keeps it apart from the guide, and
   assert.match(app, /function updateHistory\(\) \{[^}]*renderDesign\(\)/); for (const route of ['designText = null; renderDesign(); paintCamera()', "guide-changed',e=>{if(ours(e)){designText=null;renderDesign();}}"]) assert.ok(app.includes(route), route);
   for (const fn of ['deletePage(', 'showPage(', 'applyHistory(']) { const i = app.indexOf('function ' + fn); assert.ok(app.slice(i, app.indexOf('\n}\n', i)).includes('renderDesign()'), `${fn} recounts`); }
 });
+
+test('a rectangle, frame, ellipse or text box with a border counts that colour in use, once per layer, and the guide comparison sees it', () => {
+  const bordered = (id, type, stroke, extra = {}) => ({id, type, rect: {x: 0, y: 0, w: 10, h: 10}, style: {fills: [{type: 'solid', color: '#FFFFFF'}], stroke, stroke_width: 10}, ...extra});
+  const plain = (id, stroke) => ({id, type: 'rect', rect: {x: 0, y: 0, w: 1, h: 1}, style: {fills: [{type: 'solid', color: '#ffffff'}], stroke}});
+  const scene = {assets: {}, pages: [{id: 'p1', name: 'Home', nodes: [bordered(1, 'rect', '#FF0000'), bordered(2, 'frame', '#ff0000'), bordered(3, 'ellipse', '#00AA00'), bordered(4, 'text', '#0000ff', {font_size: 14}), plain(5, null), plain(6, '')]}, {id: 'p2', name: 'Other', nodes: [bordered(1, 'rect', '#ff0000')]}]};
+  const inv = designInventory(scene, {guide: 'Surface #ffffff; outline #ff0000'}), by = Object.fromEntries(inv.colours.map(c => [c.color, [c.layers, c.pages]]));
+  assert.deepEqual(by['#ff0000'], [3, 2], 'two layers on one Page and one on another, case-insensitive'); assert.deepEqual(by['#00aa00'], [1, 1]); assert.deepEqual(by['#0000ff'], [1, 1], 'a text box’s border too');
+  assert.deepEqual(by['#ffffff'], [7, 2], 'fills are still counted'); assert.ok(!('null' in by) && !('' in by), 'no stroke is no colour');
+  assert.deepEqual(inv.compare.unusedInGuide, [], 'the red the guide lists IS in use'); assert.deepEqual(inv.compare.notInGuide.sort(), ['#0000ff', '#00aa00'], 'and the borders the guide does not list are reported'); assert.equal(inv.coverage[0].colours, 4);
+  // The reported case alone: a white rectangle with a red 10px border against "Surface #ffffff; outline #ff0000".
+  const one = designInventory({assets: {}, pages: [{id: 'p', name: 'P', nodes: [bordered(1, 'rect', '#ff0000')]}]}, {guide: 'Surface #ffffff; outline #ff0000'});
+  assert.deepEqual(one.colours.map(c => c.color).sort(), ['#ff0000', '#ffffff']); assert.deepEqual(one.compare, {supported: true, listed: 2, notInGuide: [], unusedInGuide: []});
+  // Vector strokes are counted as before, once per layer.
+  const vec = designInventory({assets: {}, pages: [{id: 'p', name: 'P', nodes: [{id: 1, type: 'connector', rect: {x: 0, y: 0, w: 1, h: 1}, style: {stroke: '#222222'}}, {id: 2, type: 'stroke', rect: {x: 0, y: 0, w: 1, h: 1}, style: {stroke: '#222222'}}]}]}, {});
+  assert.deepEqual(vec.colours.map(c => [c.color, c.layers]), [['#222222', 2]]);
+  // Damaged (non-string) strokes are ignored, never thrown on.
+  assert.doesNotThrow(() => designInventory({assets: {}, pages: [{id: 'p', name: 'P', nodes: [bordered(1, 'rect', 42), bordered(2, 'rect', {})]}]}, {}));
+});

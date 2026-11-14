@@ -3,11 +3,11 @@ import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLea
 import {setupPresence} from './presence.js?v=ad47b40267f6';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
-import { createPlayer } from './play.js?v=c0ab3e1a4652';
+import { createPlayer } from './play.js?v=a27c747d4030';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
 import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=49ba16a33b90';
 import { setupLibrary } from './diagram-ui.js?v=e5ef696311d7';
-import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=157c1cd40cc3';
+import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,homeRoute,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=1e9319fbe599';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
 const sidebarUI=setupSidebar();
@@ -554,7 +554,7 @@ async function dropImages(e){
         scene.assets[item.asset]=item.path;if(item.saveAs){scene.assetNames??={};scene.assetNames[item.asset]??=item.saveAs;}
         const size=imageSize(item.size,{z:camera.z,w:stage.clientWidth,h:stage.clientHeight}),name=(item.saveAs||'Image').replace(/\.[^.]+$/,'').slice(0,80)||'Image';
         // Centred on the drop point (then stepped for further files), whatever the camera: insertTemplate maps screen to world.
-        insertTemplate({name,root:1,nodes:[{id:1,type:'rect',name,rect:{x:0,y:0,w:size.w,h:size.h},style:{fills:[{type:'image',asset:item.asset,mode:'fit'}],opacity:1},visible:true,locked:false}]},{board,x:e.clientX-size.w*camera.z/2+index*28,y:e.clientY-size.h*camera.z/2+index*28});
+        insertTemplate({name,root:1,nodes:[{id:1,type:'rect',name,rect:{x:0,y:0,w:size.w,h:size.h},style:{fills:[{type:'image',asset:item.asset,mode:'fit',...(item.saveAs?{name:item.saveAs}:{})}],opacity:1},visible:true,locked:false}]},{board,x:e.clientX-size.w*camera.z/2+index*28,y:e.clientY-size.h*camera.z/2+index*28});
       },
     });
     message(importSummary(result));

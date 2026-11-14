@@ -42,5 +42,5 @@ Limits: up to 100 Pages, 50,000 total layers, 20 MB owner artwork saves; guest a
 
 ## Optional top-level fields
 
-- `assetNames`: `{ "<asset key>": "Original name.png" }`. The name an imported image had, so Save image and Download original can offer it. Each value is 1–120 characters with no path separators or control characters. Older Papers have none and fall back to the stored file name.
+- On an image fill, `name`: the original file name that layer was imported under (same rules as below), so identical bytes imported twice keep both names; it is checked on save. `assetNames`: `{ "<asset key>": "Original name.png" }`. The name an imported image had, so Save image and Download original can offer it. Each value is 1–120 characters with no path separators or control characters. Older Papers have none and fall back to the stored file name.
 - `preview`: the preview model, version 1: authored motion, interactions and responsive variants. A newer version still opens but cannot be saved by this version. See [motion.md](motion.md) and [preview-model.schema.json](preview-model.schema.json).

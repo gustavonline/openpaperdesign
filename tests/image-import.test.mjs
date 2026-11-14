@@ -139,7 +139,7 @@ test('the editor refuses to let a dropped file navigate away, imports only for e
   e = event(inArtboard, ['Files'], [file('Hero shot.png', PNG), file('bad.gif', GIF), file('wide.jpg', JPEG)]); drop(e); await settle();
   assert.equal(e.prevented, true); assert.equal(e.stopped, true); assert.deepEqual(state.uploads.map(u => [u.url, u.type, u.bytes.equals(u.type === 'image/png' ? PNG : JPEG)]), [['/api/assets?paper=p1', 'image/png', true], ['/api/assets?paper=p1', 'image/jpeg', true]], 'originals through the managed asset route');
   assert.equal(state.inserted.length, 2); const [first, second] = state.inserted;
-  assert.deepEqual(first.template.nodes[0].style.fills, [{type: 'image', asset: 'asset1', mode: 'fit'}]); assert.equal(first.template.nodes[0].type, 'rect'); assert.equal(first.template.name, 'Hero shot'); assert.deepEqual([first.template.nodes[0].rect.w, first.template.nodes[0].rect.h], [640, 480], '800x600 brought under 60% of a 1200x800 canvas');
+  assert.deepEqual(first.template.nodes[0].style.fills, [{type: 'image', asset: 'asset1', mode: 'fit', name: 'Hero shot.png'}], 'the layer keeps the name it was imported under'); assert.equal(first.template.nodes[0].type, 'rect'); assert.equal(first.template.name, 'Hero shot'); assert.deepEqual([first.template.nodes[0].rect.w, first.template.nodes[0].rect.h], [640, 480], '800x600 brought under 60% of a 1200x800 canvas');
   assert.deepEqual(first.drop, {board: 'pg:1', x: 600 - 320, y: 400 - 240}, 'centred on the pointer, inside the artboard that was dropped on'); assert.equal(second.drop.x, 600 - second.template.nodes[0].rect.w / 2 + 28, 'the next file is stepped'); assert.equal(second.drop.board, 'pg:1');
   assert.deepEqual(api.scene.assets, {asset1: 'assets/asset1.png', asset2: 'assets/asset2.png'}); assert.deepEqual(api.scene.assetNames, {asset1: 'Hero shot.png', asset2: 'wide.jpg'});
   assert.match(state.messages.at(-1), /Added 2 images\. Not added: bad\.gif is not a PNG, JPEG or WebP image\./);
@@ -162,4 +162,52 @@ test('the menu carries Copy image and Save image… for images only, wired to fr
   assert.match(app, /copyOk:copyImageSupport\(\{ClipboardItem:window\.ClipboardItem,clipboard:navigator\.clipboard\}\),saveOk:savePickerSupport\(window\)/, 'offered only where the browser can do it');
   assert.doesNotMatch(app.slice(app.indexOf('async function saveImage()'), app.indexOf('const hasFiles')), /download\(/, 'no download fallback when the chooser is cancelled or refused');
   assert.doesNotMatch(app, /showDirectoryPicker|FileSystemHandle|text\/uri-list.*clipboard|navigator\.clipboard\.write\(\[new ClipboardItem\(\{'text\/uri-list'/, 'no file clipboard is claimed');
+});
+
+// ---- Review finding 3: the same bytes imported under two names are one stored file but two layers, each keeping its own name.
+test('identical bytes imported as First.png and Second.png are one stored file and two layers that each keep their own original name, through save, reopen, undo/redo and .paper.zip', async t => {
+  const os = await import('node:os'), path = await import('node:path'), {PaperLibrary, PaperError} = await import('../server/library.mjs'), {exportBundle, importBundle, readBundle} = await import('../server/bundle.mjs');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'paper-twin-')); t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  const lib = await PaperLibrary.open(dir), made = await lib.create({name: 'Twins'}), first = await lib.read(made.id), paper = first.paper, page = paper.pages[0], artboard = page.nodes[0];
+  // The two imports go through the real importer and the real managed-asset route, exactly as a drop does, and place layers the way the editor does.
+  const placed = [], result = await importImageFiles([file('First.png', PNG), file('Second.png', PNG)], {read: f => f.arrayBuffer(), measure: async () => ({w: 20, h: 12}), upload: (bytes, mime) => lib.addAsset(made.id, Buffer.from(bytes)), alive: () => true, place: item => placed.push(item)});
+  assert.deepEqual(result.added, ['First.png', 'Second.png']); assert.equal(placed[0].asset, placed[1].asset, 'one stored file'); assert.equal(placed[0].path, placed[1].path); assert.deepEqual([placed[0].saveAs, placed[1].saveAs], ['First.png', 'Second.png']);
+  const files = (await fs.readdir(path.join(await lib.folder(made.id), 'assets'))).filter(n => !n.startsWith('.')); assert.equal(files.length, 1, 'bytes are stored once');
+  let id = page.next_id || 2;
+  for (const item of placed) {
+    paper.assets[item.asset] = item.path; paper.assetNames ??= {}; paper.assetNames[item.asset] ??= item.saveAs;   // as the editor does: the first import names the asset
+    const node = {id, parent: artboard.id, type: 'rect', name: item.saveAs.replace(/\.[^.]+$/, ''), rect: {x: id * 30, y: 10, w: 20, h: 12}, style: {fills: [{type: 'image', asset: item.asset, mode: 'fit', name: item.saveAs}], opacity: 1}, visible: true, locked: false};
+    page.nodes.push(node); artboard.children.push(id); page.next_id = ++id;
+  }
+  const saved = await lib.save(made.id, Buffer.from(JSON.stringify(paper)), first.revision); assert.ok(saved.saved);
+  const offered = (scene, layerName) => { const node = scene.pages[0].nodes.find(n => n.name === layerName); return saveNameFor(scene, node, placed[0].path.slice(7), 'image/png'); };
+  const bytesOf = async () => PNG;
+  const check = async (scene, where) => {
+    assert.deepEqual(['First', 'Second'].map(n => offered(scene, n)), ['First.png', 'Second.png'], where);
+    for (const layerName of ['First', 'Second']) { const node = scene.pages[0].nodes.find(n => n.name === layerName), got = await fetchOriginal({paperId: made.id, scene, node, fetchImpl: async () => new Response(await bytesOf(), {headers: {'content-type': 'image/png'}})}); assert.equal(got.saveAs, layerName + '.png', `${where}: ${layerName} downloads under its own name`); assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()), PNG, 'the exact original bytes'); assert.equal(got.mime, 'image/png'); assert.equal(got.name, placed[0].path.slice(7)); }
+  };
+  await check((await lib.read(made.id)).paper, 'after save and reopen');
+  // Undo and redo restore layer snapshots (deep copies): the name travels with the fill.
+  const reopened = (await lib.read(made.id)).paper, snapshot = JSON.parse(JSON.stringify(reopened.pages[0].nodes.find(n => n.name === 'Second'))); reopened.pages[0].nodes = reopened.pages[0].nodes.filter(n => n.name !== 'Second'); reopened.pages[0].nodes[0].children = reopened.pages[0].nodes[0].children.filter(c => c !== snapshot.id);
+  reopened.pages[0].nodes.push(JSON.parse(JSON.stringify(snapshot))); reopened.pages[0].nodes[0].children.push(snapshot.id); await check(reopened, 'after delete then undo');
+  // .paper.zip: one asset entry, both names, same ids, exact bytes.
+  const bundle = await exportBundle(lib, made.id), {entries} = await readBundle(bundle), assetEntries = [...entries.keys()].filter(n => n.startsWith('assets/')); assert.deepEqual(assetEntries, [placed[0].path], 'one asset entry, no duplicate'); assert.deepEqual(Buffer.from(entries.get(placed[0].path)), PNG);
+  const target = await PaperLibrary.open(await fs.mkdtemp(path.join(dir, 'target-'))), imported = await importBundle(target, bundle), back = (await target.read(imported.id)).paper; assert.deepEqual(back.pages[0].nodes.map(n => n.style?.fills?.[0]?.name).filter(Boolean), ['First.png', 'Second.png']); assert.deepEqual(back.assetNames, paper.assetNames); assert.deepEqual(back.assets, paper.assets);
+  await check({...back}, 'after .paper.zip export and import'); assert.deepEqual(Buffer.from(await fs.readFile(path.join(await target.folder(imported.id), placed[0].path))), PNG);
+  // The roundtrip of a second bundle adds nothing.
+  const again = await readBundle(await exportBundle(target, imported.id)); assert.deepEqual([...again.entries.keys()].filter(n => n.startsWith('assets/')), [placed[0].path]);
+});
+
+test('older Papers still work: no layer name falls back to the remembered asset name, then to the stored name; invalid names are ignored by the editor and refused by the server', async t => {
+  const os = await import('node:os'), path = await import('node:path'), {PaperLibrary} = await import('../server/library.mjs');
+  const node = (name, extra = {}) => ({style: {fills: [{type: 'image', asset: 'k', mode: 'fit', ...(name === undefined ? {} : {name}), ...extra}]}});
+  const scene = {assets: {k: `assets/${SHA}.png`}, assetNames: {k: 'Remembered.png'}}, stored = `${SHA}.png`;
+  assert.equal(saveNameFor(scene, node('Layer.png'), stored, 'image/png'), 'Layer.png', 'the layer’s own name wins'); assert.equal(saveNameFor(scene, node(undefined), stored, 'image/png'), 'Remembered.png', 'an older layer uses the asset’s remembered name'); assert.equal(saveNameFor({assets: scene.assets}, node(undefined), stored, 'image/png'), stored, 'an older Paper with no names offers the stored name');
+  for (const bad of ['', 'a/b.png', 'a\\b.png', 'x'.repeat(121) + '.png', 'bad\u0000.png', 'photo.gif', 42, null, {}, '..']) assert.equal(saveNameFor(scene, node(bad), stored, 'image/png'), 'Remembered.png', `${JSON.stringify(bad)} is not a usable layer name`);
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'paper-twin2-')); t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  const lib = await PaperLibrary.open(dir), made = await lib.create({name: 'Names'}), cur = await lib.read(made.id), base = cur.paper;
+  base.assets.k = `assets/${SHA}.png`; const add = fill => { const copy = JSON.parse(JSON.stringify(base)); copy.pages[0].nodes.push({id: 2, parent: 1, type: 'rect', name: 'Img', rect: {x: 0, y: 0, w: 5, h: 5}, style: {fills: [{type: 'image', asset: 'k', mode: 'fit', ...fill}]}, visible: true, locked: false}); copy.pages[0].nodes[0].children.push(2); copy.pages[0].next_id = 3; return Buffer.from(JSON.stringify(copy)); };
+  for (const bad of ['', 'a/b.png', 'a\\b.png', 'x'.repeat(121), 'bad\u0000.png', 42, null, {}, []]) await assert.rejects(lib.save(made.id, add({name: bad}), cur.revision), e => e.status === 400 && /image names/i.test(e.message), JSON.stringify(bad));
+  assert.ok((await lib.save(made.id, add({name: 'Fine name.png'}), cur.revision)).saved, 'a valid name saves'); assert.equal((await lib.read(made.id)).paper.pages[0].nodes.at(-1).style.fills[0].name, 'Fine name.png');
+  const plain = (await lib.read(made.id)).paper; delete plain.pages[0].nodes.at(-1).style.fills[0].name; assert.ok((await lib.save(made.id, Buffer.from(JSON.stringify(plain)), (await lib.read(made.id)).revision)).saved, 'a layer with no name (an older Paper) saves');
 });

@@ -458,3 +458,99 @@ test('without ResizeObserver the window’s own resize event is used, once, and 
   const m = mount(t, {width: 1440, noResizeObserver: true}), {env} = m; assert.equal(env.resizers.length, 0); assert.equal(env.windowListeners.get('resize')?.length, 1);
   env.width = 390; for (const fn of env.windowListeners.get('resize')) fn(); for (let i = 0; i < 6 && env.runFrame(); i++); assert.equal(m.container.dataset.playVariant, 'landing-mobile'); m.player.destroy(); assert.equal(env.windowListeners.get('resize')?.length ?? 0, 0);
 });
+
+// ---- Review findings 1, 2 and the lead's clock-cap finding: behavioural tests on the real player with the fake DOM and fake WAAPI. They prove Play's own lifecycle
+// ---- decisions (what is paused, what is queued, what is accepted); real browsers' timing is the lead's.
+const revealOf = m => m.animationsFor(m.named('D section reveal title')).find(a => a.frames[0].translate === '0px 28px');
+const hoverOf = m => m.animationsFor(m.named('D primary CTA')).find(a => a.frames[1].scale === '1.04');
+const focusOf = m => m.animationsFor(m.named('D Solo toggle')).find(a => a.frames[1].scale === '1.05');
+const stateOf = m => m.animationsFor(m.named('D Together toggle')).find(a => a.frames[0].backgroundColor === '#ecede3');
+const seenBy = (m, id) => m.env.observers.find(o => o.targets.has(m.byNode(id)));
+const startAll = m => { m.env.intersect(seenBy(m, m.named('D section reveal title')), true); m.byNode(m.named('D primary CTA')).fire('pointerenter'); m.byNode(m.named('D Solo toggle')).fire('focusin'); m.byNode(m.named('D Together toggle')).fire('click'); };
+const eventAnimations = m => [revealOf(m), hoverOf(m), focusOf(m), stateOf(m)];
+
+test('pausing freezes every event-driven effect where it is, not just the load timeline, and resuming continues them from there', t => {
+  const m = mount(t), {env} = m; startAll(m); env.advance(100);
+  const effects = eventAnimations(m); assert.ok(effects.every(a => a.running && a.currentTime === 100), 'all four are moving');
+  m.button('Pause').fire('click'); assert.equal(m.player.snapshot.playing, false);
+  assert.ok(effects.every(a => !a.running && a.currentTime === 100), 'paused: held at 100, not running'); env.advance(100); assert.ok(effects.every(a => a.currentTime === 100), 'and they do not drift while paused');
+  const loops = loopsOf(m).map(a => a.currentTime); env.advance(100); assert.deepEqual(loopsOf(m).map(a => a.currentTime), loops, 'the timeline is held too');
+  m.button('Play').fire('click'); assert.ok(effects.every(a => a.running && a.currentTime === 100), 'resumed from where they stopped, not restarted'); env.advance(50); assert.ok(effects.every(a => a.currentTime === 150));
+  // Replaying the timeline is a separate act and does not restart the local effects.
+  const replay = env.elements.find(e => e.attrs['aria-label'] === 'Replay from the start'); const before = effects.map(a => a.plays); replay.fire('click'); assert.ok(effects.every(a => a.currentTime === 150), 'Replay restarts the timed timeline; local effects keep their own progress');
+});
+
+test('hidden and offscreen suspend every owned animation too, and only what was moving continues when shown again; a pause the person chose is not undone', t => {
+  const m = mount(t), {env} = m; startAll(m); env.advance(100); const effects = eventAnimations(m);
+  env.hide(true); assert.ok(effects.every(a => !a.running && a.currentTime === 100), 'hidden: held'); env.advance(100); assert.ok(effects.every(a => a.currentTime === 100), 'no drift while hidden'); assert.equal(env.frames.size, 0);
+  env.hide(false); assert.ok(effects.every(a => a.running && a.currentTime === 100), 'shown again: continues from the held position'); env.advance(40); assert.ok(effects.every(a => a.currentTime === 140));
+  const watcher = env.observers.find(o => o.targets.has(m.find('play-viewport'))); env.intersect(watcher, false); assert.ok(effects.every(a => !a.running && a.currentTime === 140), 'offscreen: held'); env.advance(200); assert.ok(effects.every(a => a.currentTime === 140)); env.intersect(watcher, true); assert.ok(effects.every(a => a.running));
+  // A person's pause, then hidden and shown: it stays paused, nothing starts.
+  m.button('Pause').fire('click'); env.hide(true); env.hide(false); assert.ok(effects.every(a => !a.running), 'a deliberate pause survives hiding and showing'); assert.equal(m.player.snapshot.playing, false);
+  // An effect that had already finished is not replayed by resuming.
+  const finished = mount(t), fe = finished.env; finished.byNode(finished.named('D primary CTA')).fire('pointerenter'); fe.advance(500); const h = hoverOf(finished); assert.equal(h.currentTime, h.end); const plays = h.plays; fe.hide(true); fe.hide(false); assert.equal(h.plays, plays, 'a finished effect is not restarted'); assert.equal(h.currentTime, h.end);
+});
+
+test('while frozen nothing starts moving: a hover, focus, reveal or state change shows its end state at once and cannot drift; it is not resumed later', t => {
+  const m = mount(t), {env} = m; m.player.pause();
+  const cta = m.byNode(m.named('D primary CTA')), hover = hoverOf(m); cta.fire('pointerenter'); assert.deepEqual([hover.running, hover.currentTime], [false, hover.end], 'paused hover shows the hovered state instantly'); env.advance(500); assert.equal(hover.currentTime, hover.end); cta.fire('pointerleave'); assert.deepEqual([hover.running, hover.currentTime], [false, 0]);
+  m.byNode(m.named('D Solo toggle')).fire('focusin'); assert.deepEqual([focusOf(m).running, focusOf(m).currentTime], [false, focusOf(m).end]);
+  m.byNode(m.named('D Together toggle')).fire('click'); assert.deepEqual([stateOf(m).running, stateOf(m).currentTime], [false, stateOf(m).end]); assert.equal(m.byNode(m.named('D state title')).textContent, 'Better, together.', 'the text state is applied');
+  env.intersect(seenBy(m, m.named('D section reveal title')), true); const reveal = revealOf(m); assert.deepEqual([reveal.running, reveal.currentTime], [false, reveal.end]);
+  env.advance(1000); assert.ok(eventAnimations(m).every(a => !a.running)); m.button('Play').fire('click'); assert.ok(eventAnimations(m).every(a => !a.running), 'what was shown instantly while paused is not started again');
+  // The same while hidden: an observer or a click arriving then must not animate.
+  const h = mount(t); h.env.hide(true); h.env.intersect(seenBy(h, h.named('D section reveal title')), true); const r = revealOf(h); assert.deepEqual([r.running, r.currentTime], [false, r.end]); h.byNode(h.named('D Together toggle')).fire('click'); assert.equal(stateOf(h).running, false); h.env.advance(300); assert.equal(stateOf(h).currentTime, stateOf(h).end);
+});
+
+test('a rebuild while hidden or paused (new revision, resize, viewport) starts nothing, and shown again plays the timeline from the held clock', t => {
+  const m = mount(t), {env} = m; env.advance(2000); env.hide(true); const next = addMotion(syntheticLanding()); m.player.update(next, next.preview);
+  assert.ok(m.live().every(a => !a.running), 'nothing runs after a rebuild while hidden'); assert.equal(env.frames.size, 0); resizeTo(m, 390); assert.ok(m.live().every(a => !a.running), 'nor after a resize'); assert.equal(env.frames.size, 0);
+  m.player.setViewport('1440'); assert.ok(m.live().every(a => !a.running)); assert.equal(m.player.snapshot.playing, false);
+  env.hide(false); assert.equal(m.player.snapshot.playing, true, 'shown again: the timeline continues'); assert.ok(loopsOf(m).every(a => a.running)); assert.equal(env.frames.size, 1); assert.ok(loopsOf(m).every(a => a.currentTime === 0), 'choosing a viewport restarts the timeline, as before');
+  // Going to another Page while hidden waits for the Page to be shown.
+  const g = mount(t); g.env.hide(true); g.player.go(g.scene.pages[1].id); assert.ok(g.live().every(a => !a.running)); assert.equal(g.env.frames.size, 0); g.env.hide(false); assert.equal(g.player.snapshot.playing, true);
+});
+
+test('reduced motion stays instant: no event effect ever runs, paused or not', t => {
+  const m = mount(t, {reduced: true}), {env} = m; m.byNode(m.named('D primary CTA')).fire('pointerenter'); assert.ok(!hoverOf(m).running && hoverOf(m).currentTime === hoverOf(m).end); m.byNode(m.named('D Together toggle')).fire('click'); assert.ok(!stateOf(m).running); env.intersect(seenBy(m, m.named('D section reveal title')), true); assert.ok(!revealOf(m).running);
+  assert.equal(env.animations.filter(a => a.running).length, 0); assert.equal(env.frames.size, 0);
+});
+
+// ---- Finding 2: no timeline, no clock loop.
+const quietScene = () => { const s = addMotion(syntheticLanding()); s.preview.animations = s.preview.animations.filter(a => a.trigger.type !== 'load'); return s; };
+const idle = (m, n = 100) => { let fired = 0; for (let i = 0; i < n && m.env.runFrame(); i++) fired++; return {fired, queued: m.env.frames.size}; };
+
+test('a Paper with no load motion schedules no frame at all, however long it is open, and its controls say so', t => {
+  const plain = syntheticLanding(), m = mount(t, {scene: plain}), {env} = m;
+  assert.equal(m.live().length, 0); assert.equal(m.player.snapshot.playing, false); assert.equal(env.frames.size, 0, 'no frame queued on opening'); assert.deepEqual(idle(m), {fired: 0, queued: 0});
+  for (const label of ['Replay from the start', 'Time in milliseconds', 'Set time in milliseconds (exact)']) assert.equal(m.env.elements.find(e => e.attrs['aria-label'] === label && e.parentNode).disabled, true, label); assert.equal(m.button('Play').disabled, true);
+  assert.ok(!ringOf(m).some(el => el.disabled), 'disabled controls leave the tab ring');
+  m.button('Play').fire('click'); env.hide(true); env.hide(false); resizeTo(m, 390); resizeTo(m, 1440); m.player.resume(); m.player.setViewport('390'); m.player.setViewport('auto'); assert.deepEqual(idle(m), {fired: 0, queued: 0}, 'hide, show, resize, resume, viewport: still nothing');
+  const next = syntheticLanding(); m.player.update(next, undefined); assert.equal(env.frames.size, 0); m.player.go(m.scene.pages[1].id); assert.equal(env.frames.size, 0);
+});
+
+test('a click-only Page, and navigating or updating to one, leaves no recurring frame, while clicks, scroll and state still work', t => {
+  const scene = quietScene(), m = mount(t, {scene}), {env} = m, title = m.byNode(m.named('D state title')); assert.equal(env.frames.size, 0); assert.equal(m.player.snapshot.playing, false);
+  m.byNode(m.named('D Together toggle')).fire('click'); assert.equal(title.textContent, 'Better, together.'); assert.equal(stateOf(m).running, true, 'the state effect still plays'); assert.equal(env.frames.size, 0, 'and a state effect needs no clock loop'); const scroller = m.find('play-viewport'), glass = m.animationsFor(m.named('D sticky glass navigation')).find(a => a.frames[0].backdropFilter); scroller.scrollTop = 40; scroller.fire('scroll'); assert.equal(glass.currentTime, 500, 'scroll-linked still follows the scroll');
+  m.byNode(m.named('D primary CTA')).fire('click'); assert.equal(m.container.dataset.playPage, scene.pages[1].id, 'navigation still works'); assert.deepEqual(idle(m), {fired: 0, queued: 0});
+  // From a Page with a timeline (the full example) to one without, and back.
+  const full = mount(t), fe = full.env; assert.equal(fe.frames.size, 1); const next = quietScene(); full.player.update(next, next.preview); assert.equal(full.player.snapshot.playing, false); assert.deepEqual(idle(full), {fired: 0, queued: 0}, 'updating to a Page with no timeline stops the clock');
+  const back = addMotion(syntheticLanding()); full.player.update(back, back.preview); assert.equal(full.player.snapshot.playing, false, 'the clock is not restarted by an update that was not playing'); full.button('Play').fire('click'); assert.equal(full.player.snapshot.playing, true); assert.equal(fe.frames.size, 1);
+  // Navigating from a timeline Page to a Page without one: the clock stops.
+  const two = addMotion(syntheticLanding()); two.preview.animations = two.preview.animations.filter(a => !(a.page === two.pages[1].id && a.trigger.type === 'load')); const n = mount(t, {scene: two}); assert.equal(n.env.frames.size, 1); n.player.go(two.pages[1].id); assert.equal(n.player.snapshot.timelineMs, 0); assert.deepEqual(idle(n), {fired: 0, queued: 0}, 'navigation to a Page with no timeline'); n.player.go(two.pages[0].id); assert.equal(n.env.frames.size, 1, 'and back to one with');
+});
+
+// ---- The lead's fifth finding: the time control's limit.
+test('at the time control’s limit Play pauses exactly there and says so: the displayed held time is always accepted and reproduces the frame', t => {
+  const m = mount(t), {env} = m, orb = loopsOf(m)[0], field = msField(m); m.player.pause(); m.player.seek(3599950); m.button('Play').fire('click'); assert.equal(m.player.snapshot.playing, true);
+  env.advance(350); assert.ok(env.runFrame()); assert.equal(m.player.snapshot.playing, false, 'Play stopped at the limit'); assert.ok(loopsOf(m).every(a => a.currentTime === 3600000 && !a.running), 'every loop is held exactly at the limit, none past it'); assert.equal(m.player.snapshot.time, 3600000);
+  assert.equal(field.value, '3600000'); assert.match(m.find('play-status').textContent, /Paused at the 3600000 ms limit of the time control\. Replay starts again\./); assert.equal(env.frames.size, 0, 'and no frame loop remains');
+  const frame = m.live().map(frameOf); m.player.seek(0); assert.equal(orb.currentTime, 0); field.value = '3600000'; field.fire('change'); assert.equal(orb.currentTime, 3600000, 'the displayed time is accepted'); assert.deepEqual(m.live().map(frameOf), frame, 'and gives the same frame'); assert.equal(m.find('play-status').textContent.includes('Enter a time'), false);
+  // Play at the limit does not start something that stops at once, and says what to do; Replay starts over from zero.
+  m.button('Play').fire('click'); assert.equal(m.player.snapshot.playing, false); assert.match(m.find('play-status').textContent, /stops at 3600000 ms\. Replay starts again\./); assert.equal(loopsOf(m)[0].running, false);
+  env.elements.find(e => e.attrs['aria-label'] === 'Replay from the start').fire('click'); assert.equal(orb.currentTime, 0); assert.equal(orb.running, true); assert.equal(m.player.snapshot.playing, true);
+  // A pause just past the limit (hidden between frames) is held at the limit, never above it.
+  const h = mount(t); h.player.pause(); h.player.seek(3599999); h.button('Play').fire('click'); h.env.advance(40); h.env.hide(true); assert.equal(loopsOf(h)[0].currentTime, 3600000, 'held at the limit'); assert.equal(h.player.snapshot.time, 3600000);
+  // Below the limit nothing changes: a long run still reports its real time.
+  const long = mount(t); long.env.advance(650217); long.player.pause(); assert.equal(long.player.snapshot.time, 650217); const lf = long.live().map(frameOf); long.player.seek(650217); assert.deepEqual(long.live().map(frameOf), lf);
+});

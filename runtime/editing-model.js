@@ -242,10 +242,14 @@ export function safeAssetName(name, mime) {
   if (!base || !/[^\s.]/.test(base)) return '';
   return `${base}.${EXTENSIONS[mime].includes(ext) ? ext : EXTENSIONS[mime][0]}`;
 }
-// The name offered when saving: the validated name the Paper remembers for this asset, else the stored file's own name (older Papers).
+// The name offered when saving, from most to least specific: the name this image LAYER was imported under (`fill.name`: identical bytes imported twice are one
+// stored file but two layers, each keeping its own file name), else the name the Paper remembers for the stored asset (`assetNames`, the first import; older
+// Papers), else the stored file's own name. Each is used only if it is a valid name for this image type.
 export function saveNameFor(scene, node, stored, mime) {
-  const fill = imageFillOf(node), remembered = fill && Object.hasOwn(scene?.assetNames || {}, fill.asset) ? scene.assetNames[fill.asset] : null;
-  return typeof remembered === 'string' && remembered && safeAssetName(remembered, mime) === remembered ? remembered : stored;
+  const fill = imageFillOf(node), usable = name => typeof name === 'string' && name && safeAssetName(name, mime) === name;
+  if (usable(fill?.name)) return fill.name;
+  const remembered = fill && Object.hasOwn(scene?.assetNames || {}, fill.asset) ? scene.assetNames[fill.asset] : null;
+  return usable(remembered) ? remembered : stored;
 }
 // The size of a dropped image in world units: its own size, brought down so that on screen it never fills more than ~60% of the canvas,
 // whatever the camera zoom. The same image therefore lands at a sensible size when zoomed far in or out.
@@ -460,7 +464,6 @@ export function applyPageAction(scene, action, reverse) {
 // tokens, or calls a model. It counts what is on the Pages (every Page, so a pattern or a divergence is visible), says how many Pages each style is on, how
 // each Page covers them, and, only where the guide states explicit values that can be compared exactly, which colours in use the guide does not list and
 // which listed colours no layer uses. It is recomputed from the Paper whenever the Paper or its Pages change, so it never holds a stale copy.
-const isVectorNode = node => node.type === 'stroke' || node.type === 'connector';
 export const normaliseHex = hex => { const lower = String(hex).toLowerCase(); return lower.length === 4 ? '#' + [...lower.slice(1)].map(c => c + c).join('') : lower; };
 // The explicit hex colours a guide states (#rgb or #rrggbb). Names, rgb()/hsl() and typography are not compared: only values that can be matched exactly.
 export function guideColours(text) {
@@ -479,7 +482,9 @@ export function designInventory(scene, {guide = null, currentPageId = null} = {}
       const fills = node.style?.fills || [], covered = fills.some(f => f.type === 'image' && f.mode !== 'fit' && scene.assets?.[f.asset]);
       if (fills.some(f => f.type === 'image')) { images++; pageImages++; }
       if (!covered) for (const f of fills) if (f.type === 'solid' && f.color) { const c = f.color.toLowerCase(); use(colours, c, page.id); pageColours.add(c); }
-      if (isVectorNode(node) && node.style?.stroke) { const c = node.style.stroke.toLowerCase(); use(colours, c, page.id); pageColours.add(c); }
+      // One rule for every kind of layer: a layer with a stroke colour draws it, as the line of a stroke or connector or as the border of a rectangle, ellipse,
+      // frame or text box (the same condition the canvas uses to paint it), so it is a colour in use and counts once per layer.
+      const line = node.style?.stroke; if (typeof line === 'string' && line) { const c = line.toLowerCase(); use(colours, c, page.id); pageColours.add(c); }
     }
     coverage.push({id: page.id, name: page.name, layers: page.nodes.length, textStyles: pageStyles.size, colours: pageColours.size, images: pageImages, current: page.id === currentPageId});
   }

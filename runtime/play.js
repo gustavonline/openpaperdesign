@@ -27,6 +27,10 @@ export function createPlayer(host) {
   // One shared clock drives every timeline animation. A loop never ends, so the clock is allowed to run past the first cycle; `ends` is when each finite
   // animation is over and `loops` are the ones that repeat forever.
   const ends = new Map(), loops = new Set(), keyed = new Map(), handled = new WeakSet();
+  // `frozen`: Play is paused (by the person) or suspended (hidden or offscreen). While frozen, the load timeline is held on its clock AND every event-driven
+  // effect that was moving (a reveal, hover, focus or state transition) is held where it was; none starts, and a change made meanwhile shows its end state at once.
+  // `held` are the event effects that were running when it froze: only those continue on resume, from where they stopped.
+  let frozen = false; const held = new Set();
 
   // ---- The toolbar and the one scroll container. Everything here is created by Play and removed by Play.
   const root = host.container; root.replaceChildren(); root.hidden = false; root.tabIndex = -1;
@@ -54,7 +58,7 @@ export function createPlayer(host) {
 
   // ---- Building one variant
   function teardown() {
-    for (const entry of entries) entry.cancel(); entries.length = 0; timeline = []; scrolled = []; ends.clear(); loops.clear(); keyed.clear();
+    for (const entry of entries) entry.cancel(); entries.length = 0; timeline = []; scrolled = []; ends.clear(); loops.clear(); keyed.clear(); held.clear();
     for (const undo of cleanups.splice(0)) undo();
     frames.cancelAnimationFrame?.(frame); frame = 0;
     for (const img of scaler.querySelectorAll?.('img') || []) img.removeAttribute('src');
@@ -126,7 +130,9 @@ export function createPlayer(host) {
     describe(); scroller.scrollTop = 0; updateScroll();
     if (keepTime !== null) seek(keepTime);
     applyMotionMode();
-    if (!reduced && autoplay) { playTimeline(); setPlaying(true); } else { setPlaying(false); readTime(); }
+    // Timed controls exist only where there is a timeline: with none (an older Paper, a click-only Page) there is no clock to run, so no frame loop is ever started.
+    for (const control of [toggle, replay, scrub, msInput]) { control.disabled = !timeline.length; if (!timeline.length) control.title = 'This Page has no timed motion'; }
+    if (!reduced && autoplay && timeline.length && !frozen) { playTimeline(); setPlaying(true); } else { setPlaying(false); readTime(); }
     refocus(before);
   }
 
@@ -145,12 +151,13 @@ export function createPlayer(host) {
       animation.pause(); animation.currentTime = 0;
       const entry = {record, animation, cancel() { try { animation.cancel(); } catch { /* Already gone. */ } }}; entries.push(entry);
       const type = record.trigger.type, end = (record.delayMs || 0) + record.durationMs * (record.iterations === 'infinite' ? 1 : (record.iterations || 1));
-      const snap = atEnd => { animation.pause(); animation.currentTime = atEnd ? end : 0; };
+      entry.end = end; const snap = atEnd => { held.delete(entry); animation.pause(); animation.currentTime = atEnd ? end : 0; };
+      const still = () => reduced || frozen; // instant instead of moving
       const source = () => nodeMap.get(record.trigger.source ?? record.node) || target;
       if (type === 'load') { timeline.push(animation); ends.set(animation, end); if (record.iterations === 'infinite') loops.add(animation); entry.rest = () => snap(record.iterations !== 'infinite'); }
       else if (type === 'scroll-in') {
         entry.revealed = false; entry.rest = () => snap(entry.revealed);
-        const reveal = () => { if (entry.revealed) return; entry.revealed = true; if (reduced) snap(true); else { animation.playbackRate = 1; animation.play(); } };
+        const reveal = () => { if (entry.revealed) return; entry.revealed = true; if (still()) snap(true); else { animation.playbackRate = 1; animation.play(); } };
         if (typeof IntersectionObserver === 'function') {
           const seen = new IntersectionObserver(items => { if (items.some(item => item.isIntersecting)) { reveal(); seen.disconnect(); } }, {root: scroller, threshold: record.trigger.threshold ?? .25});
           seen.observe(target); const stop = entry.cancel; entry.cancel = () => { seen.disconnect(); stop(); };
@@ -162,10 +169,10 @@ export function createPlayer(host) {
         const around = source(), enter = type === 'hover' ? 'pointerenter' : 'focusin', leave = type === 'hover' ? 'pointerleave' : 'focusout';
         if (type === 'focus' && around.tabIndex < 0) around.tabIndex = 0;
         entry.rest = () => snap(false);
-        const toward = forward => { if (reduced) snap(forward); else { animation.playbackRate = forward ? 1 : -1; animation.play(); } };
+        const toward = forward => { if (still()) snap(forward); else { animation.playbackRate = forward ? 1 : -1; animation.play(); } };
         on(around, enter, () => toward(true)); on(around, leave, () => toward(false));
       } else if (type === 'state') {
-        entry.sync = animate => { const active = states.get(record.trigger.state) === record.trigger.is; if (reduced || !animate) snap(active); else { animation.playbackRate = active ? 1 : -1; animation.play(); } };
+        entry.sync = animate => { const active = states.get(record.trigger.state) === record.trigger.is; if (still() || !animate) snap(active); else { animation.playbackRate = active ? 1 : -1; animation.play(); } };
         entry.rest = () => entry.sync(false); entry.sync(false);
       }
     }
@@ -215,6 +222,10 @@ export function createPlayer(host) {
   function tick() {
     frame = 0;
     if (stopped || !playing || document.hidden || !visible) return;
+    if (!timeline.length) { setPlaying(false); return; }
+    // The time control is bounded (MAX_TIME_MS). Where loops would run past it, Play stops exactly at the limit and says so: the time shown is then the time held,
+    // so typing it again reproduces the frame. It never clamps the display while animations go on, and it never resets a loop.
+    if (loops.size && time() >= MAX_TIME_MS) { hold(MAX_TIME_MS); freeze(); setPlaying(false); say(`Paused at the ${MAX_TIME_MS} ms limit of the time control. Replay starts again.`); return; }
     readTime(); if (ended()) { setPlaying(false); return; }
     frame = frames.requestAnimationFrame(tick);
   }
@@ -223,11 +234,24 @@ export function createPlayer(host) {
     const cap = loops.size ? MAX_TIME_MS : timelineMs, t = Math.round(Math.max(0, Math.min(cap, Number.isFinite(at) ? at : 0)));
     hold(t); readTime(); return t;
   }
-  function pause(quiet = false) { if (timeline.length) hold(Math.round(time())); if (playing || !quiet) setPlaying(false); else readTime(); }
+  function freeze() {
+    frozen = true;
+    for (const entry of entries) { const type = entry.record.trigger.type; if (type === 'load' || type === 'scroll') continue; if (entry.animation.playState === 'running') { held.add(entry); entry.animation.pause(); } }
+  }
+  function thaw() {
+    frozen = false;
+    for (const entry of held) { const a = entry.animation; if (entries.includes(entry) && !(a.playbackRate > 0 && Number(a.currentTime) >= entry.end)) a.play(); }
+    held.clear();
+  }
+  // Pausing (the button, the slider, the field) and being hidden or offscreen both freeze everything Play owns, exactly where it is.
+  function pause(quiet = false) { if (timeline.length) hold(Math.min(MAX_TIME_MS, Math.round(time()))); freeze(); if (playing || !quiet) setPlaying(false); else readTime(); }
   // Plays what still has something to play. A finite animation that is already over stays where it is: the browser would rewind it to its start, which would replay its entrance.
   function playTimeline() { for (const a of timeline) if (loops.has(a) || (Number(a.currentTime) || 0) < ends.get(a)) a.play(); }
   function resume() {
     if (reduced) { say('Motion is reduced. Turn off Reduce motion to play it.'); applyMotionMode(); return; }
+    if (loops.size && time() >= MAX_TIME_MS) { say(`The time control stops at ${MAX_TIME_MS} ms. Replay starts again.`); return; }
+    thaw();
+    if (!timeline.length) return;
     if (ended()) seek(0);
     playTimeline(); setPlaying(true);
   }
@@ -290,6 +314,8 @@ export function createPlayer(host) {
   // ---- Moving about
   function go(nextPage, nextRoot, scroll = 0) {
     if (!scene.pages.some(p => p.id === nextPage)) return;
+    // Going to another Page is a deliberate act: it starts that Page fresh unless Play is hidden or offscreen (then it waits and starts when shown again).
+    frozen = !!globalThis.document?.hidden || !visible; if (frozen) resumeAfter = true; held.clear();
     pageId = nextPage; lockedRoot = nextRoot ?? null; build(); scroller.scrollTop = scroll; updateScroll();
   }
   // The Paper changed under Play (a new revision): rebuild from the new data, keeping the Page, scroll place, still-valid states and the time.
