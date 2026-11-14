@@ -3,7 +3,7 @@ import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLea
 import {setupPresence} from './presence.js?v=2a7d7c240b0d';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
-import { createMotion } from './play.js?v=13a5e064a498';
+import { createMotion } from './play.js?v=6170a9f023fd';
 import { IDENTITY, apply, parsePose, chainBasis, poseBasis } from './geometry.js?v=18dc3d2b4478';
 import { handoffProblem, directionProblem, withResource, withoutResource, withFields, HANDOFF_LIMITS } from './handoff-model.js?v=65d2e50b9d5f';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';

@@ -393,3 +393,44 @@ test('ordinary Play at the end of a finite timeline keeps the finished frame and
   const reduced = mount(t, {reduced: true, shown: 'details0000000001'}); press(reduced.controls.toggle); assert.match(reduced.controls.status.textContent, /Motion is reduced/); assert.equal(reduced.running().length, 0);
   void heading;
 });
+
+// ---- 12. Live revisions of pins, text rules and states reach the canvas, and what a revision removes is taken off.
+const revise = (w, change) => { const next = JSON.parse(JSON.stringify(w.scene.preview)); change(next); w.scene.preview = next; assert.equal(previewProblem(next, w.scene), null, 'the revision is a valid model'); w.motion.dirty(); w.env.flush(); return next; };
+const stickyOnly = () => { const s = addMotion(syntheticLanding()); s.preview.animations = []; s.preview.texts = []; s.preview.sticky = s.preview.sticky.slice(0, 1); s.preview.interactions = s.preview.interactions.filter(i => !i.actions.some(a => a.type === 'set-state')); s.preview.states = []; return s; };
+test('adding and removing the last pin while motion is on is followed by the canvas: new pins bind, a removed pin’s offset is taken off, Reset stays usable, and Undo and a new revision do the same', t => {
+  const s = stickyOnly(), w = mount(t, {scene: s}), nav = () => w.el('D sticky glass navigation'); press(w.controls.toggle); w.el('Landing · desktop').rectTop = -400; w.motion.cameraChanged();
+  assert.equal(w.snap().pinned, 1); assert.equal(nav().style.marginTop, '500px', 'the pin holds the layer at the top of the viewport'); const original = w.scene.preview;
+  revise(w, p => p.sticky.push({id: 'extra', page: s.pages[0].id, node: w.named('D hero accent orb')})); assert.equal(w.snap().pinned, 2, 'a pin added to a Paper with nothing else to rebind is bound');
+  revise(w, p => { p.sticky = []; }); assert.equal(w.snap().pinned, 0); assert.equal(nav().style.marginTop, '', 'the removed pin’s offset is taken off the layer'); assert.equal(w.snap().engaged, true);
+  assert.equal(w.controls.reset.disabled, false, 'Reset stays usable: motion is still on'); assert.equal(w.controls.reset.hidden, false); assert.equal(w.controls.toggle.disabled, true, 'there is no motion to play now');
+  w.scene.preview = original; w.motion.dirty(); w.env.flush(); assert.equal(w.snap().pinned, 1, 'Undo (the earlier model comes back) pins it again'); assert.equal(nav().style.marginTop, '500px'); assert.equal(w.controls.toggle.disabled, false);
+  w.controls.reset.fire('click'); assert.equal(w.snap().engaged, false); assert.equal(nav().style.marginTop, '', 'Reset takes everything off');
+  // A different Page shown: the pins of Pages that are no longer shown are not applied, and come back with their Page.
+  const p = mount(t, {scene: stickyOnly()}); press(p.controls.toggle); p.el('Landing · desktop').rectTop = -400; p.motion.cameraChanged(); assert.equal(p.snap().pinned, 1); p.state.shown = p.page(1).id; p.motion.dirty(); p.env.flush(); assert.equal(p.snap().pinned, 0, 'the Landing Page is not shown'); assert.equal(p.el('D sticky glass navigation').style.marginTop, ''); p.state.shown = p.page(0).id; p.motion.dirty(); p.env.flush(); assert.equal(p.snap().pinned, 1);
+  // An unchanged model rebinds nothing (batched, cached identity).
+  const same = mount(t, {scene: stickyOnly()}); press(same.controls.toggle); const effects = same.live(); same.motion.dirty(); same.motion.dirty(); same.env.flush(); assert.equal(same.env.microtasks.length, 0); assert.deepEqual(same.live(), effects, 'nothing changed: nothing rebound');
+});
+test('adding and removing the last text rule while motion is on changes the shown text and nothing else; the authored text is exact again and the transient text is forgotten', t => {
+  const s = addMotion(syntheticLanding()); s.preview.animations = []; s.preview.sticky = []; const only = s.preview.texts.find(r => r.node === s.pages[0].nodes.find(n => n.name === 'D state title').id); s.preview.texts = [];
+  const w = mount(t, {scene: s}), title = () => w.el('D state title'), key = w.key('D state title'); press(w.controls.toggle); w.motion.setState('mode', 'together'); assert.equal(title().textContent, 'A clear starting point.', 'no rule yet');
+  revise(w, p => { p.texts.push(only); }); assert.equal(title().textContent, 'Better, together.', 'a rule added to a model with no animations is applied'); assert.equal(w.motion.textFor(key), 'Better, together.'); assert.equal(w.snap().states.mode, 'together', 'the local state was kept');
+  revise(w, p => { p.texts = []; }); assert.equal(title().textContent, 'A clear starting point.', 'the removed rule’s text is taken off'); assert.equal(w.motion.textFor(key), null, 'and forgotten'); assert.equal(w.controls.reset.disabled, false);
+  revise(w, p => { p.texts.push(only); }); assert.equal(title().textContent, 'Better, together.', 'Undo of the removal'); w.controls.reset.fire('click'); assert.equal(title().textContent, 'A clear starting point.');
+});
+const regrouped = p => { p.states = [{id: 'mode', values: ['solo', 'group'], initial: 'group'}]; for (const t of p.texts) if (t.is === 'together') t.is = 'group'; for (const a of p.animations) if (a.trigger.type === 'state' && a.trigger.is === 'together') a.trigger.is = 'group'; for (const i of p.interactions) for (const a of i.actions) if (a.type === 'set-state' && a.value === 'together') a.value = 'group'; };
+test('a revision keeps a local state only while its definition and value still exist; a removed value, a new definition and a deleted one start from the new model before any text or effect is evaluated, and the clock and pause are kept', t => {
+  const w = mount(t), title = () => w.el('D state title'); press(w.controls.toggle); w.motion.setState('mode', 'together'); assert.equal(title().textContent, 'Better, together.'); w.motion.seek(700); const time = w.snap().time, paused = w.snap().userPaused;
+  assert.equal(paused, true);
+  // The value the person had chosen is gone and the initial value changed: the new initial applies, so the authored group text and its effects are shown, not the plain text.
+  revise(w, regrouped); assert.deepEqual(w.snap().states, {mode: 'group'}); assert.equal(title().textContent, 'Better, together.', 'the new initial state’s text'); const group = w.anims('D Together toggle').find(a => a.frames[0].backgroundColor === '#ecede3'); assert.ok(group, 'the state-driven effect exists for the new value'); assert.equal(group.currentTime, group.end, 'and is at the end state of the group');
+  assert.equal(w.snap().time, time, 'the clock is kept'); assert.equal(w.snap().userPaused, true, 'and so is the pause');
+  // A still-valid local choice survives an unrelated revision.
+  w.motion.setState('mode', 'solo'); assert.equal(title().textContent, 'A clear starting point.'); revise(w, p => { p.sticky = p.sticky.slice(0, 1); }); assert.deepEqual(w.snap().states, {mode: 'solo'}, 'a valid local value is kept'); assert.equal(title().textContent, 'A clear starting point.');
+  // A full DOM rebuild with the same model changes nothing either.
+  w.motion.setState('mode', 'group'); w.rebuild(); assert.deepEqual(w.snap().states, {mode: 'group'}); assert.equal(title().textContent, 'Better, together.');
+  // A new definition takes its initial value; a deleted definition is forgotten; an unrelated one is untouched.
+  revise(w, p => { p.states.push({id: 'theme', values: ['light', 'dark'], initial: 'dark'}); }); assert.deepEqual(w.snap().states, {mode: 'group', theme: 'dark'});
+  revise(w, p => { p.states = p.states.filter(s => s.id === 'theme'); p.texts = []; p.animations = p.animations.filter(a => a.trigger.type !== 'state'); p.interactions = p.interactions.filter(i => !i.actions.some(a => a.type === 'set-state')); }); assert.deepEqual(w.snap().states, {theme: 'dark'}, 'the deleted definition is gone'); assert.equal(title().textContent, 'A clear starting point.', 'its text is taken off');
+  // Undo: the earlier model comes back and its initial value applies to the definition that came back.
+  const before = JSON.parse(JSON.stringify(w.scene.preview)); w.scene.preview = (() => { const p = addMotion(syntheticLanding()).preview; return p; })(); w.motion.dirty(); w.env.flush(); assert.equal(previewProblem(w.scene.preview, w.scene), null); assert.deepEqual(w.snap().states, {mode: 'solo'}, 'a definition that returns starts from its initial value; theme is gone'); assert.equal(title().textContent, 'A clear starting point.'); void before;
+});

@@ -33,6 +33,10 @@ export function createMotion(host) {
   // The facts that decide what may move (see reconcile()). `engaged` is "motion is on": the layers carry their effects; off, they are exactly the artwork.
   let engaged = false, userPaused = false, editing = false, suppressed = null, visible = true, reduced = !!system?.matches, userChose = false, frozen = false, playing = false, pressed = null;
   let ui = {}, dirtyQueued = false, pumping = 0;
+  // What the bound effects were built from: the validated model object (every edit, undo, redo and revision makes a new one, so a change to pins, text rules or states
+  // is seen as well as one to animations) and which Pages' records were shown.
+  let built = {preview: null, shown: ''};
+  const shownKey = preview => [...new Set([...(preview?.animations || []), ...(preview?.texts || []), ...(preview?.sticky || [])].map(r => r.page))].sort().map(page => `${page}:${host.pageShown(page) ? 1 : 0}`).join('|');
   const titles = new Map();
   let quiet = false;
   const refresh = () => { if (!quiet) host.frame?.(); };
@@ -111,7 +115,7 @@ export function createMotion(host) {
     const label = playing ? 'Pause motion' : 'Play motion', motionOn = hasMotion(), clockOn = motionOn && hasClock();
     t.setAttribute('aria-pressed', String(playing)); t.setAttribute('aria-label', label); t.setAttribute('title', motionOn ? label : 'This Paper has no motion yet. Add some from a layer’s Motion section.'); t.disabled = !motionOn;
     t.querySelector?.('use')?.setAttribute('href', playing ? '#i-pause' : '#i-play');
-    if (ui.reset) ui.reset.disabled = !motionOn;
+    if (ui.reset) ui.reset.disabled = !motionOn && !engaged;
     // Replay, the scrubber and the time field act on the load clock only: with no load animation on the shown Pages there is nothing for them to do.
     for (const control of [ui.replay, ui.scrub, ui.ms]) if (control) { if (!titles.has(control)) titles.set(control, control.title || ''); control.disabled = !clockOn; control.title = clockOn ? titles.get(control) : 'These Pages have no load animation, so there is no clock to set. Hover, focus, reveal and state effects have none.'; }
     if (ui.reduce) ui.reduce.setAttribute('aria-pressed', String(reduced));
@@ -137,14 +141,22 @@ export function createMotion(host) {
       if (rule) transientText.set(key, rule.text); else transientText.delete(key);
       if (el.textContent !== text) el.textContent = text;
     }
+    const ruled = new Set(rules.map(rule => host.keyOf(rule.page, rule.node))); for (const key of [...textTargets.keys()]) if (!ruled.has(key)) { textTargets.delete(key); transientText.delete(key); }
   }
   const textFor = key => (engaged && key !== suppressed && transientText.has(key)) ? transientText.get(key) : null;
 
+  // A revision may add, remove or reshape states. A local value stays only while its definition and that value still exist; a new or no-longer-valid one takes the
+  // definition's initial value, and a deleted definition is forgotten, all before any text or effect is evaluated.
+  function reconcileStates(preview) {
+    const defined = new Map((preview?.states || []).map(state => [state.id, state]));
+    for (const [id, value] of [...states]) { const state = defined.get(id); if (!state || !state.values.includes(value)) states.delete(id); }
+    for (const [id, state] of defined) if (!states.has(id)) states.set(id, state.initial);
+  }
   // One rebind is one pose notification, however many effects it sets.
   function bind(options) { quiet = true; try { bindEffects(options); } finally { quiet = false; refresh(); } }
   function bindEffects({keepTime = null} = {}) {
     teardown(); frozen = blocked() || userPaused;
-    const preview = host.preview();
+    const preview = host.preview(); built = {preview, shown: shownKey(preview)}; reconcileStates(preview);
     for (const record of preview?.animations || []) {
       if (!host.pageShown(record.page)) continue;
       const target = host.nodeEl(record.page, record.node); if (!target || typeof target.animate !== 'function') continue;
@@ -257,6 +269,8 @@ export function createMotion(host) {
     queueMicrotask(() => { dirtyQueued = false; if (stopped) return; paintToggle(); if (engaged && stale()) bind({keepTime: timeline.length ? time() : null}); });
   }
   function stale() {
+    const current = host.preview();
+    if (current !== built.preview || shownKey(current) !== built.shown) return true;
     const want = (host.preview()?.animations || []).filter(r => host.pageShown(r.page) && host.nodeEl(r.page, r.node)), have = entries.map(e => e.record);
     if (want.length !== have.length || want.some((r, i) => r !== have[i])) return true;
     return entries.some(e => host.nodeEl(e.record.page, e.record.node) !== e.target || e.target.isConnected === false) || stickies.some(s => s.el.isConnected === false) || [...textTargets.values()].some(t => { const el = host.nodeEl(t.page, t.node); return !el || el.isConnected === false; });
