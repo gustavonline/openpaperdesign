@@ -1,8 +1,14 @@
 # Source handoff: what the Paper cannot carry, handed over on purpose
 
-A Paper carries the editable design (layers, ids, assets, layout, desktop and mobile artboards), the curated `DESIGN.md` and a **bounded declarative preview model** (`motion.md`): timed, hover, focus, scroll-driven and state animation, click actions, a pinned layer. That covers most landing pages. It does **not** carry arbitrary code. A canvas-driven background written in JavaScript, scroll choreography that reads the page's real scroll position, fonts and their licences are outside it, and this version will not fake them with keyframes or a link to a site that omits the files.
+A Paper carries the editable design (layers, ids, assets, layout, desktop and mobile artboards), the curated `DESIGN.md` and a **bounded declarative preview model** (`motion.md`): timed, hover, focus, scroll-driven and state animation, click actions, a pinned layer. It does **not** carry arbitrary code. A canvas-driven background written in JavaScript, scroll choreography that reads the page's real scroll position, fonts and their licences are outside it, and this version will not fake them with keyframes or a link to a site that omits the files.
 
 When the design depends on such a reference, the author attaches **one or a few source archives (ZIP)** to the Paper on purpose and records, in plain data, which direction was chosen and how to use the archive. A recipient (a person or an agent) retrieves exactly those bytes through the same invitation, then rebuilds and runs the design **in their own implementation project**. Nothing is attached automatically, nothing is extracted or run by OpenPaperDesign, and a Paper without a handoff is exactly as before.
+
+## Canvas, website preview and what travels
+
+Behaviour that the canvas cannot honestly show (real document scrolling, sticky or fixed composition, scroll choreography, responsive reflow, Canvas/WebGL/JavaScript, forms and data) is verified in the project's actual browser or localhost preview, not on the canvas; panning the canvas only simulates scrolling. A localhost address is local to its owner: the invitation does not forward it and Quick Tunnel does not expose a separate site. So the handoff must carry what a recipient needs to run it themselves: the source archive, the entry point and a plain sentence on how to run it (`entrypoint.run`), and the licences; or the owner shares a preview on purpose and says where.
+
+Where applicable, say in `support.covered`, `support.gaps` and the direction notes, for each behaviour that lives in the website: its trigger, target layer, timing and easing (or scroll range), breakpoint, reduced-motion behaviour, status (on the canvas, or website only) and the Page, artboard and source revision it belongs to. Do not invent facts the design does not have, and do not describe canvas panning as real scrolling.
 
 ## For the author
 

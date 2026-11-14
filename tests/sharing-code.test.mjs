@@ -242,7 +242,7 @@ test('owner secrets: status and overview never carry the code or key; only the r
   const reuse=await r.sharing.create(r.made.id,'edit',false,false,{protect:true,expiry:'never'});assert.equal(reuse.createdId,g.id);
   const changed=await r.sharing.create(r.made.id,'edit',false,false,{protect:false,expiry:'never'});assert.notEqual(changed.createdId,g.id);
   assert.equal((await r.sharing.status(r.made.id)).invitations.some(i=>i.id===g.id),false,'the replaced invitation ended');
-  assert.equal(VERSION.includes('preview.28'),true);
+  assert.equal(VERSION.includes('preview.30'),true);
 });
 
 test('Home Shared lists protected and Never invitations without secrets, and the owner API validates the new options',async t=>{

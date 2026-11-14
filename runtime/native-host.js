@@ -1,10 +1,11 @@
 import {compatibleWorkspace,WORKSPACE_API,PAPER_DOCUMENT_VERSION} from './workspace-protocol.js';
 import {createScope} from './native-scope.js';
+import {downloadContents,base64} from './native-download.js';
 import {findInvitationLink} from './access-code.js';
-const VERSION='0.7.0-preview.28',pending=new Map();let sequence=0,scope,current,activeTransport,booted=false,input,output,invoked,handled=false,navigating=false,queued,downloadMode;
+const VERSION='0.7.0-preview.30',pending=new Map();let sequence=0,scope,current,activeTransport,booted=false,input,output,invoked,handled=false,navigating=false,queued,downloadMode;
 const invocation=new Promise(resolve=>invoked=resolve),nativeFetch=globalThis.fetch.bind(globalThis),nativeAdd=globalThis.addEventListener.bind(globalThis);
 const sharedViews=new Map();
-function rpc(method,params={}){return new Promise((resolve,reject)=>{const id=`paper-native-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(new Error('Paper did not respond. Try again.'));},method==='tools/call'?90000:15000);pending.set(id,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id,method,params},'*');});}
+function rpc(method,params={}){return new Promise((resolve,reject)=>{const id=`paper-native-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(Object.assign(new Error('Paper did not respond. Try again.'),{timedOut:true}));},method==='tools/call'?90000:method==='ui/download-file'?300000:15000);pending.set(id,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id,method,params},'*');});}
 async function tool(name,args){const result=await rpc('tools/call',{name,arguments:args});if(result.isError)throw new Error(result.content?.find(c=>c.type==='text')?.text||'Paper could not complete the request.');return result.structuredContent||JSON.parse(result.content.find(c=>c.type==='text').text);}
 async function home(args={}){const answer=await tool('paper_ui',{key:__paperUIKey,workspaceId:'personal',origin:'http://127.0.0.1:0',instance:'',path:'/api/home',method:Object.keys(args).length?'POST':'GET',...(Object.keys(args).length?{headers:{'content-type':'application/json'},body:base64(new TextEncoder().encode(JSON.stringify(args)))}:{})});return JSON.parse(new TextDecoder().decode(bytes(answer.body)));}
 function status(text,action=()=>openHome(),label='Open Home'){
@@ -14,17 +15,32 @@ function status(text,action=()=>openHome(),label='Open Home'){
   if(action)node.querySelector('button').focus();
 }
 const bytes=value=>Uint8Array.from(atob(value||''),c=>c.charCodeAt(0));
-function base64(value){let text='';for(let i=0;i<value.length;i+=32768)text+=String.fromCharCode(...value.subarray(i,i+32768));return btoa(text);}
 async function external(value,login=false){const url=new URL(value),allowed=login?url.origin==='https://mcp.notion.com'&&url.pathname==='/authorize':url.protocol==='https:'&&/(^|\.)notion\.(so|site)$/.test(url.hostname);if(!allowed||url.username||url.password)throw new Error('Unexpected Notion address.');const result=await rpc('ui/open-link',{url:url.href});if(result?.isError)throw new Error('Notion could not be opened.');}
 async function openAgent(value){const url=new URL(value),codex=url.protocol==='codex:'&&url.hostname==='threads'&&url.pathname==='/new'&&[...url.searchParams.keys()].every(k=>k==='prompt'),claude=url.protocol==='claude:'&&url.hostname==='code'&&url.pathname==='/new'&&[...url.searchParams.keys()].every(k=>k==='q');if(!(codex||claude)||url.username||url.password||url.hash||url.href.length>16000)throw new Error('Unexpected agent link.');const result=await rpc('ui/open-link',{url:url.href});if(result?.isError)throw new Error('Open the invitation in a browser to choose an app.');}
 async function openGuest(guest){const origin=new URL(guest.origin);if(!/^[a-f0-9]{24}$/.test(guest.id)||!/^[a-zA-Z0-9_-]{1,80}$/.test(guest.paperId)||!['http:','https:'].includes(origin.protocol)||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash)throw new Error('Invalid shared Paper.');sharedViews.set(guest.id,guest);await navigate(`${origin.origin}/?paper=${encodeURIComponent(guest.paperId)}#shared=${guest.id}`);}
 async function joinGuest(url,{signal,code}={}){if(signal?.aborted)throw signal.reason;const result=await tool('paper_join',{url,...(code?{code}:{})});if(signal?.aborted)throw signal.reason;if(!result.guest)throw new Error('The invitation could not be opened.');await openGuest(result.guest);void rpc('ui/update-model-context',{content:[{type:'text',text:`The user opened this shared Paper in OpenPaperDesign: ${new URL(findInvitationLink(url)||url).href}. Call paper_join with that invitation before using the artwork tools${code?'; it needs the access code the user already entered, so ask them for it rather than guessing':''}. Owner files and accounts are unavailable through the invitation.`}]}).catch(()=>{});}
+// A non-blocking, bounded notice: it never covers or replaces the Paper, takes no focus and goes away by itself.
+function notice(text){
+  let node=document.getElementById('paper-native-notice');
+  if(!node){node=document.createElement('div');node.id='paper-native-notice';node.setAttribute('role','status');node.setAttribute('aria-live','polite');Object.assign(node.style,{position:'fixed',left:'50%',bottom:'20px',transform:'translateX(-50%)',maxWidth:'min(520px,90vw)',padding:'8px 12px',borderRadius:'8px',background:'#1f2937',color:'#fff',font:'13px/1.4 system-ui,sans-serif',zIndex:'2147483000',pointerEvents:'none'});document.body.append(node);}
+  node.textContent=String(text).slice(0,300);clearTimeout(node._timer);node._timer=setTimeout(()=>node.remove(),9000);
+}
+// One request, one file, never repeated. The host answers that it took the request, not where or whether the file ended up: success here means only "accepted".
+// What is said about a failure is only what is known. A reply that refuses establishes a refusal ("Nothing was saved"). A request that was never sent establishes that
+// too. But a reply that does not arrive (the timer here cannot cancel what the host is doing) establishes NOTHING: the host may have saved the file, or be waiting for the
+// person's answer, so that is reported as unconfirmed (`unconfirmed: true`), with no claim either way and never retried or replaced by another route here.
+// A native view whose host offers no download route does not fall back to a direct link: in a sandboxed app that is blocked or unobservable, so it says plainly that it is unsupported.
 async function download(blob,name){
-  try{
-    if(downloadMode){const params=downloadMode==='blob'?{blob,name}:{contents:[{uri:`file:///${encodeURIComponent(name)}`,mimeType:blob.type||'application/octet-stream',blob:base64(new Uint8Array(await blob.arrayBuffer()))}]};const result=await rpc('ui/download-file',params);if(result?.isError)throw new Error('The host app did not accept the download.');return true;}
-    const object=URL.createObjectURL(blob),link=document.createElement('a');link.href=object;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(object),30000);
+  if(!downloadMode){const error=new Error('This host app does not offer file downloads to Paper, so nothing was saved. Open Paper in a browser to export.');error.unsupported=true;throw error;}
+  let result;
+  try{result=await rpc('ui/download-file',downloadMode==='blob'?{blob,name}:downloadContents(name,blob.type,new Uint8Array(await blob.arrayBuffer())));}
+  catch(error){
+    if(error?.timedOut){const unconfirmed=new Error('The host app has not confirmed this file. It may still be saved or be waiting for your answer: check the destination before trying again.');unconfirmed.unconfirmed=true;throw unconfirmed;}
+    if(error?.fromHost)throw new Error('The host app declined this file. Nothing was saved.');
+    throw new Error('This file could not be sent to the host app. Nothing was saved.');
+  }
+  if(result?.isError)throw new Error('The host app declined this file. Nothing was saved.');
   return true;
-  }catch(error){status(error.message,()=>document.getElementById('paper-native-status')?.remove(),'Back to Paper');return false;}
 }
 async function navigate(value){
   if(navigating){queued=value;return;}navigating=true;let leaveFailed=false;
@@ -77,7 +93,7 @@ async function openHome(){
 async function applyInvocation(){if(handled||!output)return false;handled=true;if(output.isError){status(output.content?.find(c=>c.type==='text')?.text||'Paper could not complete this action.');return true;}if(output.structuredContent?.guest){await openGuest(output.structuredContent.guest);return true;}if(input?.action==='stop'||output.structuredContent?.stopped){status('Server stopped. Your Papers are saved.');return true;}if(output.structuredContent?.url){await navigate(output.structuredContent.url);return true;}return false;}
 nativeAdd('message',event=>{
   const data=event.data;if(event.source!==parent||data?.jsonrpc!=='2.0')return;
-  if(pending.has(data.id)){const call=pending.get(data.id);clearTimeout(call.timer);pending.delete(data.id);data.error?call.reject(new Error(data.error.message)):call.resolve(data.result);}
+  if(pending.has(data.id)){const call=pending.get(data.id);clearTimeout(call.timer);pending.delete(data.id);data.error?call.reject(Object.assign(new Error(data.error.message),{fromHost:true})):call.resolve(data.result);}
   else if(data.method==='ui/notifications/host-context-changed'){if(['dark','light'].includes(data.params?.theme))document.documentElement.dataset.theme=data.params.theme;}
   else if(!handled&&data.method==='ui/notifications/tool-input')input=data.params?.arguments;
   else if(!handled&&data.method==='ui/notifications/tool-result'){output=data.params;invoked();if(booted)void applyInvocation();}
@@ -88,11 +104,13 @@ nativeAdd('click',event=>{
   const a=event.target.closest?.('a[href]');if(!a||event.defaultPrevented)return;
   if(a.getAttribute('href')?.startsWith('#'))return;
   const target=new URL(a.getAttribute('href'),current?.url||'http://127.0.0.1');if(target.protocol==='http:'&&target.hostname==='127.0.0.1'&&['/','/home.html'].includes(target.pathname)){event.preventDefault();void navigate(target.href);}
-  else if(a.hasAttribute('download')&&target.origin===current?.url.origin){event.preventDefault();void(async()=>{try{const response=await activeTransport(target);if(!response.ok)throw new Error('This file could not be downloaded.');await download(await response.blob(),a.download||target.pathname.split('/').pop());}catch(error){status(error.message,()=>document.getElementById('paper-native-status')?.remove(),'Back to Paper')}})();}
+  else if(a.hasAttribute('download')&&target.origin===current?.url.origin){event.preventDefault();void(async()=>{try{const response=await activeTransport(target);if(!response.ok)throw new Error('This file could not be downloaded.');await download(await response.blob(),a.download||target.pathname.split('/').pop());}catch(error){notice(error.message)}})();}
 });
 void(async()=>{try{
   const result=await rpc('ui/initialize',{appInfo:{name:'OpenPaperDesign',version:VERSION},appCapabilities:{availableDisplayModes:['fullscreen']},protocolVersion:'2026-01-26'});if(!result.hostCapabilities?.serverTools)throw new Error('This host cannot open Paper.');
-  downloadMode=result.hostInfo?.client_type==='codex_desktop'?'blob':result.hostCapabilities?.downloadFile?'contents':null;
+  // The negotiated capability decides, not the host's name: a host that advertises downloadFile gets the standard typed request. The earlier flat {blob,name} request is
+  // kept only for the one host that was already known to take it and advertises no capability.
+  downloadMode=result.hostCapabilities?.downloadFile?'contents':result.hostInfo?.client_type==='codex_desktop'?'blob':null;
   if(['dark','light'].includes(result.hostContext?.theme))document.documentElement.dataset.theme=result.hostContext.theme;
   parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');
   await Promise.race([invocation,new Promise(resolve=>setTimeout(resolve,500))]);if(input&&!output)await Promise.race([invocation,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Paper is still completing this action.')),60000))]);booted=true;if(!await applyInvocation())await openHome();

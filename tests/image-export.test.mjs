@@ -87,7 +87,7 @@ test('the Share menu offers PNG and JPEG with a scale, never says Exported befor
   assert.match(command, /canChoose: !inPaperSurface && savePickerSupport\(window\)/, 'the host app uses its own download, not a browser chooser it cannot show');
   const requested = [...command.matchAll(/`(Sent \$\{result\.name\}[^`]*|Download of \$\{result\.name\}[^`]*)`/g)].map(m => m[1]); assert.equal(requested.length, 2); assert.ok(requested.every(text => !/Saved|Exported/.test(text)), 'the download path says only that a download was requested');
   assert.match(app, /async function download\(blob, name\) \{ if\(inPaperSurface\)\{if\(await surfaceDownload\(blob,name\)===false\)throw/, 'a host refusal is seen');
-  assert.match(host, /rpc\('ui\/download-file',params\);if\(result\?\.isError\)throw[^]*return true;[^]*return false;/, 'the host download reports whether the request was accepted'); assert.match(surface, /surfaceDownload=\(blob,name\)=>window\.__paperNative\.download\(blob,name\)/);
+  assert.match(host, /rpc\('ui\/download-file',[^]*if\(result\?\.isError\)throw[^]*return true;/, 'the host download reports whether the request was accepted, and a refusal is thrown to the caller'); assert.match(surface, /surfaceDownload=\(blob,name\)=>window\.__paperNative\.download\(blob,name\)/);
   assert.match(app, /snapdom\(crop,\{width: ?px\.width|snapdom\(crop, \{width: px\.width/, 'the capture is the cropped box at the chosen scale'); assert.match(app, /backgroundColor: jpeg \? '#ffffff' : null/, 'PNG is transparent, JPEG sits on white');
   assert.match(app, /size\.width !== px\.width \|\| size\.height !== px\.height/, 'the written file is checked against the promised size');
   assert.equal(savePickerSupport({showSaveFilePicker() {}}), true);

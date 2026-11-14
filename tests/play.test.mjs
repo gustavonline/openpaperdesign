@@ -434,3 +434,15 @@ test('a revision keeps a local state only while its definition and value still e
   // Undo: the earlier model comes back and its initial value applies to the definition that came back.
   const before = JSON.parse(JSON.stringify(w.scene.preview)); w.scene.preview = (() => { const p = addMotion(syntheticLanding()).preview; return p; })(); w.motion.dirty(); w.env.flush(); assert.equal(previewProblem(w.scene.preview, w.scene), null); assert.deepEqual(w.snap().states, {mode: 'solo'}, 'a definition that returns starts from its initial value; theme is gone'); assert.equal(title().textContent, 'A clear starting point.'); void before;
 });
+
+// ---- 13. Play says what is true for the Page that is shown (motion may live on another Page, or nowhere).
+test('on a static Page of a Paper whose motion is on another Page the toggle stays usable but says nothing here will move, in its description and its status; the Page with motion describes the action instead; nothing is animated to look busy', t => {
+  const scene = addMotion(syntheticLanding()), landing = scene.pages[0].id, details = scene.pages[1].id; scene.preview.animations = scene.preview.animations.filter(a => a.page === details); scene.preview.texts = []; scene.preview.sticky = []; scene.preview.interactions = scene.preview.interactions.filter(i => i.page === details);
+  const w = mount(t, {scene, shown: landing}), {env, controls} = w, title = () => controls.toggle.attrs.title;
+  assert.equal(controls.toggle.disabled, false, 'the Paper has motion, so Play is not disabled'); assert.match(title(), /Nothing on the Page shown has authored motion, so nothing here will move\. The Paper has motion on another Page\./); assert.equal(controls.toggle.attrs['aria-label'], 'Play motion', 'the accessible name stays short and stable');
+  press(controls.toggle); assert.match(controls.status.textContent, /Nothing on the Page shown has authored motion/, 'the live status region says it where the person is looking'); assert.equal(w.live().length, 0, 'no effect is attached to a static Page'); assert.equal(env.frames.size, 0, 'and no clock runs for it');
+  w.state.shown = details; w.motion.dirty(); env.flush(); assert.doesNotMatch(title(), /nothing here will move/i); assert.match(title(), /^(Play|Pause) motion/); assert.ok(w.live().length > 0, 'the Page that has motion animates');
+  press(controls.toggle); assert.match(title(), /^Play motion: show this Page’s authored effects on the canvas\. Nothing is saved\.$/, 'paused: it says what Play will do'); press(controls.toggle); assert.equal(title(), 'Pause motion', 'playing: just the action');
+  w.state.shown = 'all'; w.motion.dirty(); env.flush(); assert.doesNotMatch(title(), /nothing here will move/i, 'all Pages shown includes the one with motion');
+  const none = mount(t, {scene: syntheticLanding()}); assert.match(none.controls.toggle.attrs.title, /no motion yet\. Select a layer and add some in its Motion section\./); assert.equal(none.controls.toggle.disabled, true);
+});

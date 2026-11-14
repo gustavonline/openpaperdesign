@@ -2,7 +2,7 @@
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {memoryFile} from './http.mjs';
-export const VERSION='0.7.0-preview.28';
+export const VERSION='0.7.0-preview.30';
 export const EDITOR_FILES = [
   'app.js','home.js','join.js','invitation.js','access-code.js','agent.json','agent.md','native.js','surface.js','sharing.js','diagram-model.js','diagram-library.js','diagram-ui.js','sidebar.js','sidebar-layout.js','workspace-protocol.js','presence.js','agent-motion.js','editing-model.js','preview-model.js','play.js','geometry.js','handoff-model.js','collaboration.md','motion.md','handoff.md','preview-model.schema.json','notion-ui.js','notion.css',
   'inspection.js','canvas.css','chrome.css','assets/Inter-Regular.ttf','assets/Inter-Bold.ttf',
