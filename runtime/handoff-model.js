@@ -110,12 +110,21 @@ export function handoffSummary(handoff) {
   return {
     version: handoff.version, selected, alternatives, ...(reference ? {reference} : {}), ...(entrypoint ? {entrypoint} : {}), ...(provenance ? {provenance} : {}), ...(support ? {support} : {}),
     resources: resources.map(({id, name, description, bytes, sha256, entries}) => ({id, name, ...(description ? {description} : {}), bytes, sha256, files: entries.length, roles: Object.fromEntries(ENTRY_ROLES.map(role => [role, entries.filter(entry => entry.role === role).length]).filter(([, n]) => n))})),
-    retrieve: resources.length ? 'Download a source archive with paper_handoff (action download, a resource id and a destination folder). It is saved as an archive and never extracted or run; unpack it in your own project with your host’s normal approval.' : 'No source archive is attached; the Paper and its preview model are the whole handoff.',
+    retrieve: resources.length ? 'Download a source archive with the installed plugin’s paper_handoff (action download, a resource id and a destination folder), or, with a manual client that has no plugin, GET /api/handoff?paper=<paperId>&resource=<id> with your invitation key (remote MCP does not carry the bytes). It is an archive and is never extracted or run; unpack it in your own project with your host’s normal approval.' : 'No source archive is attached; the Paper and its preview model are the whole handoff.',
   };
 }
+// A direction has a human LABEL (any plain text up to 80 characters, for example “Blåtryk 03”) and a stable ASCII ID that other parts of the manifest and a recipient
+// can rely on. The id is made once, from the label the first time (diacritics folded, letters and numbers joined by dashes), and is never rewritten when the label is
+// edited later: renaming a direction does not change what it is.
+const FOLD = {ø: 'o', æ: 'ae', œ: 'oe', ß: 'ss', đ: 'd', ð: 'd', ł: 'l', þ: 'th'};
+export function directionId(label) {
+  const folded = String(label || '').toLowerCase().replace(/[øæœßđðłþ]/g, c => FOLD[c]).normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  return folded.replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 40).replace(/-+$/, '') || 'direction';
+}
+export const directionProblem = label => plain(String(label ?? '').trim(), 80) ? null : 'A direction name is 1–80 characters of plain text on one line.';
 // The handoff after one source archive is added by the editor (an archive with the same id is replaced): a minimal valid manifest when there was none.
 export function withResource(handoff, resource, {direction = 'Selected'} = {}) {
-  const base = handoff && handoff.version === HANDOFF_VERSION ? JSON.parse(JSON.stringify(handoff)) : {version: HANDOFF_VERSION, selected: {id: direction.slice(0, 40), label: direction.slice(0, 80)}, resources: []};
+  const base = handoff && handoff.version === HANDOFF_VERSION ? JSON.parse(JSON.stringify(handoff)) : {version: HANDOFF_VERSION, selected: {id: directionId(direction), label: String(direction).trim().slice(0, 80)}, resources: []};
   const resources = base.resources || [], same = resources.findIndex(r => r.id === resource.id);
   if (same >= 0) resources[same] = resource; else resources.push(resource);
   base.resources = resources;
@@ -126,7 +135,7 @@ export function withResource(handoff, resource, {direction = 'Selected'} = {}) {
 export function withFields(handoff, {direction, entry, source, gaps}) {
   if (!handoff || handoff.version !== HANDOFF_VERSION) return handoff;
   const next = JSON.parse(JSON.stringify(handoff));
-  if (direction !== undefined) { const text = String(direction).trim(); next.selected = {...next.selected, id: text.slice(0, 40), label: text.slice(0, 80)}; }
+  if (direction !== undefined) { const text = String(direction).trim(); next.selected = {...next.selected, id: next.selected?.id || directionId(text), label: text}; }
   if (entry !== undefined) { if (entry === null) delete next.entrypoint; else next.entrypoint = {...next.entrypoint, resource: entry.resource, path: entry.path}; }
   if (source !== undefined) { const text = String(source).trim(), provenance = {...next.provenance}; if (text) provenance.source = text; else delete provenance.source; if (Object.keys(provenance).length) next.provenance = provenance; else delete next.provenance; }
   if (gaps !== undefined) { const list = String(gaps).split('\n').map(line => line.trim()).filter(Boolean), support = {...next.support}; if (list.length) support.gaps = list; else delete support.gaps; if (Object.keys(support).length) next.support = support; else delete next.support; }

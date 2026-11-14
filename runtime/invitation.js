@@ -41,7 +41,8 @@ export function invitationMessage({role, url, code, expiresAt, timeZone}){
   const shown=code?readCode(code):'';
   const open=`Open the link in your browser${shown?' and enter the code':''}. ${role==='edit'?'You can edit the Paper.':'You can view the Paper but not edit it.'} You do not need a plugin.`;
   const ends=expiresAt===null?'This link has no end time, but it only works while my computer is on, online and running Paper. It is not permanent.':Number.isFinite(expiresAt)?`This link expires ${exactExpiry(expiresAt,timeZone)}.`:'';
-  return ['See my Paper:','',url,'',...(shown?['Access code:',shown,'']:[]),open,...(ends?[ends]:[])].join('\n');
+  const about='This is an OpenPaperDesign Paper. To share it with an AI agent, give the agent this whole message. If the agent cannot open the link itself, it can read the public guide at https://github.com/gustavonline/openpaperdesign.';
+  return ['See my Paper:','',url,'',...(shown?['Access code:',shown,'']:[]),open,about,...(ends?[ends]:[])].join('\n');
 }
 // Why an invitation ended, in plain words. Only a reason the server gave is named; anything else stays neutral
 // (an older server, a dropped stream) rather than blaming the owner.

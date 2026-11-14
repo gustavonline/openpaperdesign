@@ -33,6 +33,7 @@ export function createMotion(host) {
   // The facts that decide what may move (see reconcile()). `engaged` is "motion is on": the layers carry their effects; off, they are exactly the artwork.
   let engaged = false, userPaused = false, editing = false, suppressed = null, visible = true, reduced = !!system?.matches, userChose = false, frozen = false, playing = false, pressed = null;
   let ui = {}, dirtyQueued = false, pumping = 0;
+  const titles = new Map();
   let quiet = false;
   const refresh = () => { if (!quiet) host.frame?.(); };
   const blocked = () => !!globalThis.document?.hidden || !visible || editing;
@@ -72,6 +73,9 @@ export function createMotion(host) {
   }
   // Plays what still has something to play. A finite animation that is already over stays where it is: the browser would rewind it to its start, replaying its entrance.
   const playTimeline = () => { for (const a of timeline) if (loops.has(a) || (Number(a.currentTime) || 0) < ends.get(a)) a.play(); };
+  // The load clock exists only where a load animation targets a layer on a shown Page. It is read from the validated model, not from the bound timeline, so the timed
+  // controls are right BEFORE motion is on (typing a time then starts a paused timed frame) and follow Page and revision changes (dirty() repaints them).
+  const hasClock = () => (host.preview()?.animations || []).some(a => a.trigger.type === 'load' && host.pageShown(a.page) && !!host.nodeEl(a.page, a.node));
   const hasMotion = () => { const p = host.preview(); return !!(p && ((p.animations?.length || 0) + (p.texts?.length || 0) + (p.sticky?.length || 0) > 0)); };
 
   // ---- What may move is decided here, from facts. `userPaused`: the person paused (or the time control's limit was reached). `blocked()`: the document is hidden,
@@ -104,10 +108,12 @@ export function createMotion(host) {
   }
   function paintToggle() {
     const t = ui.toggle; if (!t) return;
-    const label = playing ? 'Pause motion' : 'Play motion';
-    t.setAttribute('aria-pressed', String(playing)); t.setAttribute('aria-label', label); t.setAttribute('title', hasMotion() ? label : 'This Paper has no motion yet. Add some from a layer’s Motion section.'); t.disabled = !hasMotion();
+    const label = playing ? 'Pause motion' : 'Play motion', motionOn = hasMotion(), clockOn = motionOn && hasClock();
+    t.setAttribute('aria-pressed', String(playing)); t.setAttribute('aria-label', label); t.setAttribute('title', motionOn ? label : 'This Paper has no motion yet. Add some from a layer’s Motion section.'); t.disabled = !motionOn;
     t.querySelector?.('use')?.setAttribute('href', playing ? '#i-pause' : '#i-play');
-    for (const control of [ui.replay, ui.reset, ui.scrub, ui.ms]) if (control) control.disabled = !hasMotion();
+    if (ui.reset) ui.reset.disabled = !motionOn;
+    // Replay, the scrubber and the time field act on the load clock only: with no load animation on the shown Pages there is nothing for them to do.
+    for (const control of [ui.replay, ui.scrub, ui.ms]) if (control) { if (!titles.has(control)) titles.set(control, control.title || ''); control.disabled = !clockOn; control.title = clockOn ? titles.get(control) : 'These Pages have no load animation, so there is no clock to set. Hover, focus, reveal and state effects have none.'; }
     if (ui.reduce) ui.reduce.setAttribute('aria-pressed', String(reduced));
     if (ui.reset) ui.reset.hidden = !engaged;
   }
@@ -217,16 +223,18 @@ export function createMotion(host) {
     if (reduced) { say('Motion is reduced. Turn off Reduce motion to play it.'); if (!engaged) engage({paused: true}); return; }
     if (atLimit()) { say(`The time control stops at ${MAX_TIME_MS} ms. Replay starts again.`); return; }
     if (!engaged) { engage(); return; }
-    userPaused = false; if (timeline.length && ended()) seek(0);
-    reconcile();
+    // Play never restarts a timeline that has finished: that is Replay. Everything else it held (events, an unfinished timeline) continues.
+    userPaused = false; reconcile();
+    if (timeline.length && ended()) say('The timeline has finished. Replay starts it again.');
   }
   const toggle = () => { if (playing) pause(); else resume(); };
-  function replay() { if (!engaged) engage({paused: true}); seek(0); userPaused = false; if (reduced) { say('Motion is reduced. Turn off Reduce motion to play it.'); return; } reconcile(); }
+  function replay() { if (!hasClock()) return; if (!engaged) engage({paused: true}); seek(0); userPaused = false; if (reduced) { say('Motion is reduced. Turn off Reduce motion to play it.'); return; } reconcile(); }
   // The exact entry. Only a plain non-negative number up to the ceiling is a time; anything else is refused and the field returns to the time that is shown.
   function commitTime() {
     const raw = String(ui.ms.value).trim(), n = Number(raw), plain = /^\d+(\.\d+)?$/.test(raw) && Number.isFinite(n);
     if (!plain || n > Math.max(MAX_TIME_MS, engaged ? ceiling() : 0)) { say(`Enter a time from 0 to ${engaged ? ceiling() : MAX_TIME_MS} ms.`); ui.ms.value = String(Math.round(time())); return false; }
-    if (!engaged) { if (!hasMotion()) return false; engage({paused: true}); }
+    if (!hasClock()) { say('These Pages have no load animation, so there is no clock to set.'); ui.ms.value = String(Math.round(time())); return false; }
+    if (!engaged) engage({paused: true});
     if (n > ceiling()) { /* A finite timeline shorter than the number: it is held at its end, said below. */ }
     pause(); const t = seek(n); ui.ms.value = String(t);
     if (t !== Math.round(n)) say(`The timeline ends at ${t} ms.`);
@@ -243,10 +251,10 @@ export function createMotion(host) {
   // ---- Connection to the editor.
   // Called whenever the layer elements may have been replaced or the shown Pages changed (a rebuild, an undo, a revision, a new layer, another Page): the effects are
   // re-attached to the new elements, keeping the clock, the local state and the person's pause. Batched, and a no-op while motion is off or nothing changed.
+  // Every layer built asks for this, so it only records the fact: one microtask repaints the toggle and, when something really changed, rebinds.
   function dirty() {
-    if (stopped) return; paintToggle();
-    if (!engaged || dirtyQueued) return; dirtyQueued = true;
-    queueMicrotask(() => { dirtyQueued = false; if (engaged && !stopped && stale()) bind({keepTime: timeline.length ? time() : null}); });
+    if (stopped || dirtyQueued) return; dirtyQueued = true;
+    queueMicrotask(() => { dirtyQueued = false; if (stopped) return; paintToggle(); if (engaged && stale()) bind({keepTime: timeline.length ? time() : null}); });
   }
   function stale() {
     const want = (host.preview()?.animations || []).filter(r => host.pageShown(r.page) && host.nodeEl(r.page, r.node)), have = entries.map(e => e.record);
@@ -295,7 +303,7 @@ export function createMotion(host) {
     if (ui.replay) bindEvent(ui.replay, 'click', () => replay());
     if (ui.reset) bindEvent(ui.reset, 'click', () => disengage());
     if (ui.reduce) bindEvent(ui.reduce, 'click', () => { userChose = true; setReduced(!reduced); });
-    if (ui.scrub) bindEvent(ui.scrub, 'input', () => { const at = Number(ui.scrub.value); if (!engaged) engage({paused: true}); pause(); seek(at); });
+    if (ui.scrub) bindEvent(ui.scrub, 'input', () => { if (!hasClock()) return; const at = Number(ui.scrub.value); if (!engaged) engage({paused: true}); pause(); seek(at); });
     if (ui.ms) {
       bindEvent(ui.ms, 'keydown', event => { if (event.key !== 'Enter') return; event.preventDefault(); commitTime(); });
       bindEvent(ui.ms, 'change', () => commitTime());

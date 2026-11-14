@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=91184955ed68"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=271dd71bf261"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -92,7 +92,7 @@
           <p class="note" id="handoff-note">Source archives the author attached on purpose for whoever builds this design: a ZIP that is only stored and downloaded, never opened or run here.</p>
           <div id="handoff-summary" class="handoff-summary"></div><div id="handoff-files" class="list"></div>
           <div id="handoff-edit" class="handoff-edit" hidden>
-            <label for="handoff-direction">Selected direction</label><input id="handoff-direction" class="field" maxlength="40" placeholder="For example 03" autocomplete="off">
+            <label for="handoff-direction">Selected direction</label><input id="handoff-direction" class="field" maxlength="80" placeholder="For example Blåtryk 03" autocomplete="off">
             <label for="handoff-entry">Entry point</label><select id="handoff-entry" class="field"></select>
             <label for="handoff-source">Source and licence</label><input id="handoff-source" class="field" maxlength="300" placeholder="Where it comes from and under what licence" autocomplete="off">
             <label for="handoff-gaps">What the Paper does not carry (one per line)</label><textarea id="handoff-gaps" class="field" rows="3" placeholder="For example: the canvas background exists only as source"></textarea>
@@ -268,5 +268,5 @@
 <div id="toast" data-canvas-chrome role="status" hidden></div>
 <dialog id="image-url-dialog" data-canvas-chrome aria-labelledby="image-url-title"><form method="dialog"><h2 id="image-url-title">Add image from URL</h2><label>Image URL<input class="field" type="url" name="url" required placeholder="https://…"></label><p class="note">The image is saved with this Paper.</p><div class="row"><button class="btn" type="button" id="cancel-image-url">Cancel</button><button class="btn" type="submit">Add image</button></div><p id="image-url-error" class="note" role="status"></p></form></dialog>
 <div id="paper-inspection-root"></div>
-<script type="module" src="app.js?v=7a02d0a7a326"></script>
+<script type="module" src="app.js?v=30bdac1d45c2"></script>
 </body></html>

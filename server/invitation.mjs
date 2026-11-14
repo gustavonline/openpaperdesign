@@ -3,6 +3,7 @@ import {randomBytes} from 'node:crypto';
 import {isIP} from 'node:net';
 import {PaperError,ID,validatePaper} from './library.mjs';
 import {verifyResource} from './handoff.mjs';
+import {fetchBytes} from './transfer.mjs';
 import {HANDOFF_LIMITS,HANDOFF_VERSION} from '../runtime/handoff-model.js';
 import {VERSION} from './runtime.mjs';
 import {extractInvitation,findInvitationLink,normalizeCode,validCode} from '../runtime/access-code.js';
@@ -14,10 +15,6 @@ export function invitationURL(value){
   const host=url.hostname.replace(/^\[|\]$/g,''),privateIP=isIP(host)&&(host==='::1'||/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|f[cd][a-f0-9]*:)/i.test(host));
   if(url.protocol!=='https:'&&!(url.protocol==='http:'&&privateIP)||url.username||url.password||url.pathname!=='/join'||url.search||!/^#[A-Za-z0-9_-]{43}$/.test(url.hash)||url.href.length>4096)throw new PaperError(400,'Choose an HTTPS Paper invitation, or a link on a private local network.');
   return url;
-}
-async function responseBytes(response){
-  if(Number(response.headers.get('content-length'))>MAX)throw new PaperError(413,'The shared response is too large.');
-  const chunks=[];let size=0;for await(const bytes of response.body){size+=bytes.length;if(size>MAX)throw new PaperError(413,'The shared response is too large.');chunks.push(bytes);}return Buffer.concat(chunks);
 }
 // An explicit code wins over one written in the pasted message. Spacing, case, full-width forms and the dash are ignored.
 export function invitationCode(value,code){
@@ -36,9 +33,10 @@ function refusal(status,body){
 }
 export async function joinInvitation(value,suppliedCode){
   const url=invitationURL(value),token=url.hash.slice(1),code=invitationCode(value,suppliedCode),origin=url.origin,id=randomBytes(12).toString('hex'),client='agent-'+randomBytes(12).toString('hex');let sequence=0,paperId,role;
-  async function send(path,{method='GET',headers={},body}={}){
-    const response=await fetch(new URL(path,origin),{method,headers:{...headers,Origin:origin,Authorization:'Bearer '+token,...(code?{'X-Paper-Code':code}:{})},...(body!==undefined?{body}:{}),redirect:'error',signal:AbortSignal.timeout(30000)});
-    const bytes=await responseBytes(response);return {response,bytes};
+  // `transfer` is the number of bytes about to move (a handoff archive, either way): that one request is bounded by size and progress instead of 30 seconds (transfer.mjs).
+  async function send(path,{method='GET',headers={},body,transfer}={}){
+    const init={method,headers:{...headers,Origin:origin,Authorization:'Bearer '+token,...(code?{'X-Paper-Code':code}:{})},...(body!==undefined?{body}:{}),redirect:'error'};
+    return fetchBytes(new URL(path,origin),init,{max:MAX,...(transfer!==undefined?{expected:transfer}:{})});
   }
   async function rpc(method,params={}){
     const requestId=++sequence,{response,bytes}=await send('/mcp',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25','X-Paper-Client':client},body:JSON.stringify({jsonrpc:'2.0',id:requestId,method,params})});
@@ -75,7 +73,7 @@ export async function joinInvitation(value,suppliedCode){
       if(typeof resourceId!=='string'||!/^[a-z0-9][a-z0-9-]{0,39}$/.test(resourceId))throw new PaperError(400,'Choose a source archive id from the Paper handoff');
       const full=await call('paper_read',{includePaper:true}),resource=full.paper?.handoff?.version===HANDOFF_VERSION?(full.paper.handoff.resources||[]).find(r=>r.id===resourceId):null;
       if(!resource)throw new PaperError(404,'This Paper has no source archive with that id');
-      const {response,bytes}=await send(`/api/handoff?paper=${paperId}&resource=${encodeURIComponent(resourceId)}`);
+      const {response,bytes}=await send(`/api/handoff?paper=${paperId}&resource=${encodeURIComponent(resourceId)}`,{transfer:resource.bytes});
       if(!response.ok){let message='The source archive could not be downloaded.';try{message=JSON.parse(bytes).error||message}catch{}throw new PaperError(response.status===401?401:response.status,message);}
       verifyResource(bytes,resource,message=>{throw new PaperError(502,`The downloaded source archive was refused: ${message}`)});
       return {resource,bytes};
@@ -83,7 +81,7 @@ export async function joinInvitation(value,suppliedCode){
     async handoffAttach(bytes,name){
       if(role!=='edit')throw new PaperError(403,'This invitation is view-only');
       if(!Buffer.isBuffer(bytes)||bytes.length>HANDOFF_LIMITS.resourceBytes)throw new PaperError(413,`A source archive must fit within ${HANDOFF_LIMITS.resourceBytes/1048576} MB`);
-      const {response,bytes:body}=await send(`/api/handoff?paper=${paperId}&name=${encodeURIComponent(name)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:bytes});
+      const {response,bytes:body}=await send(`/api/handoff?paper=${paperId}&name=${encodeURIComponent(name)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:bytes,transfer:bytes.length});
       let data;try{data=JSON.parse(body)}catch{throw new PaperError(502,'The invited Paper returned an unreadable response.')}
       if(!response.ok)throw new PaperError(response.status,data.error||'The source archive was refused.');return data;
     },
@@ -93,7 +91,7 @@ export async function joinInvitation(value,suppliedCode){
       if(target.pathname.startsWith('/api/'))allowed=api[resource]?.includes(method)&&target.searchParams.getAll('paper').length===1&&target.searchParams.get('paper')===paperId&&[...target.searchParams.keys()].every(k=>k==='paper'||extra.includes(k))&&extra.every(k=>target.searchParams.getAll(k).length<=1);
       else if(method==='GET'&&target.pathname.startsWith('/Paper/'+paperId+'/')){const relative=decodeURIComponent(target.pathname.slice(('/Paper/'+paperId+'/').length));allowed=['paper.json','DESIGN.md','feedback.json'].includes(relative)||relative.startsWith('assets/');}
       if(target.origin!==origin||!allowed||/[\\#]/.test(path)||/(?:^|\/)(?:\.\.|%2e)/i.test(path))throw new PaperError(403,'Only this invited Paper is available.');
-      const {response,bytes}=await send(path,options);if(response.ok&&method==='GET'&&['/api/paper','/Paper/'+paperId+'/paper.json'].includes(target.pathname)){const data=JSON.parse(bytes);validatePaper(data.paper||data,{read:true});}return {status:response.status,headers:Object.fromEntries(['content-type','content-disposition','etag'].flatMap(key=>response.headers.has(key)?[[key,response.headers.get(key)]]:[])),body:bytes.toString('base64')};
+      const size=target.pathname==='/api/handoff'?(method==='POST'?(options.body?.length??HANDOFF_LIMITS.resourceBytes):HANDOFF_LIMITS.resourceBytes):undefined,{response,bytes}=await send(path,{...options,...(size!==undefined?{transfer:size}:{})});if(response.ok&&method==='GET'&&['/api/paper','/Paper/'+paperId+'/paper.json'].includes(target.pathname)){const data=JSON.parse(bytes);validatePaper(data.paper||data,{read:true});}return {status:response.status,headers:Object.fromEntries(['content-type','content-disposition','etag'].flatMap(key=>response.headers.has(key)?[[key,response.headers.get(key)]]:[])),body:bytes.toString('base64')};
     }
   };
 }

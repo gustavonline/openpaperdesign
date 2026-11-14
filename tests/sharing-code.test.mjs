@@ -286,20 +286,21 @@ const KEY='A'.repeat(43),URL_='https://example.trycloudflare.com/join#'+KEY,ENDS
 const lines=(...parts)=>parts.join('\n');
 test('Copy invitation is a plain English text with the link and the code each alone on a line, for every kind of invitation',()=>{
   const ask=options=>invitationMessage({url:URL_,timeZone:'Europe/Copenhagen',...options});
+  const about='This is an OpenPaperDesign Paper. To share it with an AI agent, give the agent this whole message. If the agent cannot open the link itself, it can read the public guide at https://github.com/gustavonline/openpaperdesign.';
   const end='This link expires Saturday, 14 November 2026 at 14:30 CET.',never='This link has no end time, but it only works while my computer is on, online and running Paper. It is not permanent.';
-  assert.equal(ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS}),lines('See my Paper:','',URL_,'','Access code:','K7QM-4P2X','','Open the link in your browser and enter the code. You can edit the Paper. You do not need a plugin.',end));
-  assert.equal(ask({role:'view',code:'k7qm-4p2x',expiresAt:ENDS}),lines('See my Paper:','',URL_,'','Access code:','K7QM-4P2X','','Open the link in your browser and enter the code. You can view the Paper but not edit it. You do not need a plugin.',end));
-  assert.equal(ask({role:'edit',code:'K7QM4P2X',expiresAt:null}),lines('See my Paper:','',URL_,'','Access code:','K7QM-4P2X','','Open the link in your browser and enter the code. You can edit the Paper. You do not need a plugin.',never));
+  assert.equal(ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS}),lines('See my Paper:','',URL_,'','Access code:','K7QM-4P2X','','Open the link in your browser and enter the code. You can edit the Paper. You do not need a plugin.',about,end));
+  assert.equal(ask({role:'view',code:'k7qm-4p2x',expiresAt:ENDS}),lines('See my Paper:','',URL_,'','Access code:','K7QM-4P2X','','Open the link in your browser and enter the code. You can view the Paper but not edit it. You do not need a plugin.',about,end));
+  assert.equal(ask({role:'edit',code:'K7QM4P2X',expiresAt:null}),lines('See my Paper:','',URL_,'','Access code:','K7QM-4P2X','','Open the link in your browser and enter the code. You can edit the Paper. You do not need a plugin.',about,never));
   // Without a code the whole code block is gone: no label, no empty line pair.
   const open=ask({role:'view',code:'',expiresAt:ENDS});
-  assert.equal(open,lines('See my Paper:','',URL_,'','Open the link in your browser. You can view the Paper but not edit it. You do not need a plugin.',end));
+  assert.equal(open,lines('See my Paper:','',URL_,'','Open the link in your browser. You can view the Paper but not edit it. You do not need a plugin.',about,end));
   assert.doesNotMatch(open,/Access code|enter the code/);assert.equal(ask({role:'edit',expiresAt:null}).includes('Access code'),false);
   // Finite ends name date, time and zone in the invitation, whatever zone the owner or recipient is in.
   assert.match(ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS,timeZone:'UTC'}),/expires Saturday, 14 November 2026 at 13:30 UTC\.$/);
   assert.match(ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS,timeZone:'America/New_York'}),/expires Saturday, 14 November 2026 at 08:30 GMT-5\.$/);
   // No quotes, Markdown or punctuation hugs the link or the code, and Never promises no hosting.
   for(const message of [ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS}),ask({role:'view',code:'K7QM4P2X',expiresAt:null})]){
-    const own=message.split('\n');assert.ok(own.includes(URL_));assert.ok(own.includes('K7QM-4P2X'));assert.doesNotMatch(message,/[*_`<>“”"]|\]\(/);assert.doesNotMatch(message,/permanent hosting|forever|always|Danish|Se mit|Adgangskode/i);assert.doesNotMatch(message,/must install|install the/i);
+    const own=message.split('\n');assert.ok(own.includes(URL_));assert.ok(own.includes('K7QM-4P2X'));assert.doesNotMatch(message,/[*_`<>“”"]|\]\(/);assert.doesNotMatch(message,/permanent hosting|forever|always|Danish|Se mit|Adgangskode/i);assert.match(message,/OpenPaperDesign/);assert.match(message,/share it with an AI agent/);assert.ok(message.includes('https://github.com/gustavonline/openpaperdesign'));assert.doesNotMatch(message,/must install|install the/i);
   }
   assert.ok(ask({role:'edit',code:'K7QM4P2X',expiresAt:null}).includes('only works while my computer is on, online and running Paper'));
 });

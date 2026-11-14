@@ -5,7 +5,7 @@ import os from 'node:os';
 import { connectionErrors, resolveConnections, isArtboard, PAPER_FORMAT, isPaperFormat } from '../runtime/diagram-model.js';
 import { previewProblem } from '../runtime/preview-model.js';
 import { handoffProblem } from '../runtime/handoff-model.js';
-import { verifyStored } from './handoff.mjs';
+import { verifyStored, markUnreferenced } from './handoff.mjs';
 
 export const MAX_PAPER_BYTES = 20 * 1024 * 1024;
 export const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -191,6 +191,7 @@ export class PaperLibrary {
       const file = path.join(folder,`${kind}.json`); let previous;
       try { previous = await fs.readFile(file); } catch(error) { if(error.code!=='ENOENT')throw error; }
       await this.atomic(folder,`${kind}.json`,bytes,previous,authorize);
+      if (kind === 'paper') await markUnreferenced(folder, current.paper.handoff, document.handoff);
       const saved={revision:revision(bytes),saved:true};
       // Publish the durable commit before releasing the writer lock, so file
       // observers cannot announce the same bytes first as an unknown edit.

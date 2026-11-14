@@ -18,12 +18,15 @@ const toDegrees = (value, unit = 'deg') => value * ({deg: 1, rad: 180 / Math.PI,
 const numbers = text => (String(text).match(new RegExp(NUMBER, 'gi')) || []).map(Number);
 // The computed values of the individual transform properties the motion runtime sets on an element ('none' when it sets none): the translation (design px),
 // and the linear part R(rotate) * S(scale), in the order the browser applies them (translate, rotate, scale about the element's origin, then its own transform).
-export function parsePose({translate = 'none', rotate = 'none', scale = 'none'} = {}) {
+// `transformOrigin` is the computed origin in px relative to the element's own box ('0px 0px' for a layer, the centre for a top-level artboard): a point's drawn
+// position is translate + origin + linear * (point - origin), so a point (not a displacement) needs it.
+export function parsePose({translate = 'none', rotate = 'none', scale = 'none', transformOrigin = '0px 0px'} = {}) {
   let angle = 0;
   if (rotate && rotate !== 'none') { const match = ANGLE.exec(String(rotate).trim()); if (match) angle = toDegrees(Number(match[1]), match[2]); }
   const factors = scale && scale !== 'none' ? numbers(scale) : [], sx = factors.length ? factors[0] : 1, sy = factors.length > 1 ? factors[1] : sx;
   const t = translate && translate !== 'none' ? numbers(translate) : [], radians = angle * Math.PI / 180, cos = Math.cos(radians), sin = Math.sin(radians);
-  return {tx: t[0] || 0, ty: t[1] || 0, linear: [cos * sx, sin * sx, -sin * sy, cos * sy]};
+  const origin = numbers(transformOrigin || '');
+  return {tx: t[0] || 0, ty: t[1] || 0, ox: origin[0] || 0, oy: origin[1] || 0, linear: [cos * sx, sin * sx, -sin * sy, cos * sy]};
 }
 // The linear map from an element's CHILDREN's local coordinates (design units) up to the coordinates of the chain's top, for ancestors listed nearest first.
 // Each ancestor contributes its canonical diagram scale (the symbol content is scaled to its box) and then its own animated pose.
@@ -32,5 +35,6 @@ export function chainBasis(ancestors) {
   for (const {pose = IDENTITY, sx = 1, sy = 1} of ancestors) { if (!isIdentity(pose)) posed = true; basis = mul(mul(pose, [sx, 0, 0, sy]), basis); }
   return {linear: basis, inverse: posed ? invert(basis) : null, posed};
 }
-// Resize of the animated element itself: the origin of its own box is its top-left, so only its linear part matters for a size change.
-export const poseBasis = pose => ({linear: pose, inverse: isIdentity(pose) ? null : invert(pose), posed: !isIdentity(pose)});
+// Resize of the animated element itself. `fx`, `fy` say where its origin sits as a fraction of its box (0 for the top-left, 0.5 for the centre), because the
+// origin moves when the box is resized.
+export const poseBasis = (pose, fx = 0, fy = 0) => ({linear: pose, inverse: isIdentity(pose) ? null : invert(pose), posed: !isIdentity(pose), fx, fy});

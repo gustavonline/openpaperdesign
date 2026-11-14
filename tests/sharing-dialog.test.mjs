@@ -62,7 +62,7 @@ function rig(initial={}){
   const find=(match,n=0)=>buttons(n).find(b=>typeof match==='string'?label(b)===match||b.textContent.trim()===match:match.test(label(b)));
   const press=(match,n=0)=>find(match,n).fire('click');
   const open=async()=>{opener.fire('click');await settle();};
-  return {calls,script,clip,server,ui,row,text,buttons,find,press,open,rejectClipboard(){clipboard='reject';},hold(){let release;hold={promise:new Promise(r=>{release=r;})};return ()=>{release();hold=null;};},messageFor:{protectedEditNever:['See my Paper:','',secret.url,'','Access code:','K7QM-4P2X','','Open the link in your browser and enter the code. You can edit the Paper. You do not need a plugin.',NEVER].join('\n')}};
+  return {calls,script,clip,server,ui,row,text,buttons,find,press,open,rejectClipboard(){clipboard='reject';},hold(){let release;hold={promise:new Promise(r=>{release=r;})};return ()=>{release();hold=null;};},messageFor:{protectedEditNever:['See my Paper:','',secret.url,'','Access code:','K7QM-4P2X','','Open the link in your browser and enter the code. You can edit the Paper. You do not need a plugin.','This is an OpenPaperDesign Paper. To share it with an AI agent, give the agent this whole message. If the agent cannot open the link itself, it can read the public guide at https://github.com/gustavonline/openpaperdesign.',NEVER].join('\n')}};
 }
 const copyLink=/^Copy link/,copyCode=/^Copy code/;
 
@@ -123,11 +123,12 @@ test('a rejected clipboard keeps the selected read-only manual-copy text and doe
 
 test('the invitation clipboard text follows the real invitation, while the Copy icons stay exactly the link and the code',async()=>{
   const ends=Date.parse('2026-11-14T13:30:00Z');
+  const ABOUT='This is an OpenPaperDesign Paper. To share it with an AI agent, give the agent this whole message. If the agent cannot open the link itself, it can read the public guide at https://github.com/gustavonline/openpaperdesign.';
   const open='Open the link in your browser',endsLine='This link expires Saturday, 14 November 2026 at 14:30 CET.';
   for(const [change,expected] of [
-    [{role:'view',protected:true,expiresAt:ends},['See my Paper:','',secret.url,'','Access code:','K7QM-4P2X','',`${open} and enter the code. You can view the Paper but not edit it. You do not need a plugin.`,endsLine]],
-    [{role:'edit',protected:false,expiresAt:ends},['See my Paper:','',secret.url,'',`${open}. You can edit the Paper. You do not need a plugin.`,endsLine]],
-    [{role:'view',protected:false,expiresAt:null},['See my Paper:','',secret.url,'',`${open}. You can view the Paper but not edit it. You do not need a plugin.`,NEVER]],
+    [{role:'view',protected:true,expiresAt:ends},['See my Paper:','',secret.url,'','Access code:','K7QM-4P2X','',`${open} and enter the code. You can view the Paper but not edit it. You do not need a plugin.`,ABOUT,endsLine]],
+    [{role:'edit',protected:false,expiresAt:ends},['See my Paper:','',secret.url,'',`${open}. You can edit the Paper. You do not need a plugin.`,ABOUT,endsLine]],
+    [{role:'view',protected:false,expiresAt:null},['See my Paper:','',secret.url,'',`${open}. You can view the Paper but not edit it. You do not need a plugin.`,ABOUT,NEVER]],
   ]){
     const r=rig({invitations:[{...invitation,...change}]});r.script.push('ok','ok','ok','ok');await r.open();
     r.press('Copy invitation');await settle();

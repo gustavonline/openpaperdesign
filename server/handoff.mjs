@@ -19,6 +19,7 @@ const file = sha => `handoff/${sha}.zip`;
 
 // Proves an archive is well formed and lists what is in it. Reads in memory only; the bytes are never written anywhere by this.
 export function inspectArchive(bytes) {
+  inspectStats.runs++;
   check(Buffer.isBuffer(bytes) || bytes instanceof Uint8Array, 'supply ZIP bytes'); bytes = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
   const safe = name => {
     const bare = name.endsWith('/') ? name.slice(0, -1) : name;
@@ -33,10 +34,25 @@ export function inspectArchive(bytes) {
 }
 const listing = entries => JSON.stringify([...entries].map(({path: p, bytes, role}) => [p, bytes, role]).sort((a, b) => a[0] < b[0] ? -1 : 1));
 // Bytes must be exactly what the manifest records: size, digest and the file list.
+// The file list of bytes with a given digest never changes, so proving a well-formed archive is done once per digest and remembered (a handful of recent ones). The digest of
+// the bytes in hand is ALWAYS computed here; a cached list is only ever used for bytes that hash to the same value, so a changed byte is still refused.
+export const inspectStats = {runs: 0};
+const inspected = new Map();
+function entriesFor(bytes, digest) {
+  if (inspected.has(digest)) { const kept = inspected.get(digest); inspected.delete(digest); inspected.set(digest, kept); return kept; }
+  const {entries} = inspectArchive(bytes); inspected.set(digest, entries); if (inspected.size > 16) inspected.delete(inspected.keys().next().value); return entries;
+}
 export function verifyResource(bytes, resource, say = reject) {
   if (bytes.length !== resource.bytes) say(`the archive ${resource.id} is ${bytes.length} bytes but its manifest says ${resource.bytes}`);
-  if (sha256(bytes) !== resource.sha256) say(`the archive ${resource.id} does not match its recorded sha256`);
-  if (listing(inspectArchive(bytes).entries) !== listing(resource.entries)) say(`the file list of ${resource.id} does not match its manifest`);
+  const digest = sha256(bytes);
+  if (digest !== resource.sha256) say(`the archive ${resource.id} does not match its recorded sha256`);
+  if (listing(entriesFor(bytes, digest)) !== listing(resource.entries)) say(`the file list of ${resource.id} does not match its manifest`);
+}
+// A save that stops naming an archive starts its grace period NOW: its bytes are kept (an immediate Undo needs them) and collected later by an attach once they have been
+// unreferenced for the grace period, whatever the age of the file itself.
+export async function markUnreferenced(folder, before, after) {
+  const keep = new Set(currentResources(after).map(r => r.sha256)), now = new Date();
+  for (const resource of currentResources(before)) if (!keep.has(resource.sha256)) await fs.utimes(path.join(folder, 'handoff', `${resource.sha256}.zip`), now, now).catch(() => {});
 }
 const currentResources = handoff => handoff && handoff.version === HANDOFF_VERSION && Array.isArray(handoff.resources) ? handoff.resources : [];
 async function openStored(folder, sha) {
@@ -60,12 +76,14 @@ export async function attachResource(library, id, bytes, {name} = {}, authorize 
   fail(Buffer.isBuffer(bytes) && bytes.length >= 22, 'Supply a ZIP file');
   fail(bytes.length <= HANDOFF_LIMITS.resourceBytes, `A source archive must fit within ${HANDOFF_LIMITS.resourceBytes / 1048576} MB`, 413);
   const {entries} = inspectArchive(bytes), digest = sha256(bytes), folder = await library.folder(id), directory = path.join(folder, 'handoff');
+  inspected.set(digest, entries); if (inspected.size > 16) inspected.delete(inspected.keys().next().value);
   const fileName = safeArchiveName(name), slug = (fileName.replace(/\.zip$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)) || 'source';
   await library.locked(folder, async () => {
     authorize(); await noLink(directory, true); await fs.mkdir(directory, {recursive: true, mode: 0o700});
     const target = path.join(directory, `${digest}.zip`);
     if (await noLink(target, true)) return;
-    // Bytes not named by the current manifest and older than an hour are leftovers of replaced or removed archives; they are never exported or served.
+    // Bytes not named by the current manifest for an hour are leftovers of replaced or removed archives; they are never exported or served. (A save that stops naming an
+    // archive touches it, so the hour counts from then, not from when the file was first written.)
     const manifest = currentResources((await library.read(id)).paper.handoff).map(r => r.sha256), now = Date.now(); let kept = 0;
     for (const item of await fs.readdir(directory, {withFileTypes: true})) {
       const full = path.join(directory, item.name), st = await fs.lstat(full);

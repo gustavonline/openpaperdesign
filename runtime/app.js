@@ -3,12 +3,12 @@ import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLea
 import {setupPresence} from './presence.js?v=2a7d7c240b0d';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=a989571611a9';
-import { createMotion } from './play.js?v=b3c6ce324a79';
-import { IDENTITY, apply, parsePose, chainBasis, poseBasis } from './geometry.js?v=d8d6bdecb42d';
-import { handoffProblem, withResource, withoutResource, withFields, HANDOFF_LIMITS } from './handoff-model.js?v=dff204719b9f';
+import { createMotion } from './play.js?v=13a5e064a498';
+import { IDENTITY, apply, parsePose, chainBasis, poseBasis } from './geometry.js?v=18dc3d2b4478';
+import { handoffProblem, directionProblem, withResource, withoutResource, withFields, HANDOFF_LIMITS } from './handoff-model.js?v=65d2e50b9d5f';
 import { previewProblem, prunePreview, pruneForPage as pruneMotionForPage, presetRecord, PRESETS, PROPERTIES, withRecord, withoutRecord, uniqueId, EASINGS } from './preview-model.js?v=78e8556c4950';
-import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=3b37f5a632f7';
-import { setupLibrary } from './diagram-ui.js?v=488ecd6beaa3';
+import { childTransform, nodeBounds, symbolAncestor, instantiate, resolveConnections, isArtboard, moveLayer, resizeArtboard, isPaperFormat } from './diagram-model.js?v=05fd3de55700';
+import { setupLibrary } from './diagram-ui.js?v=f50730c8cd9b';
 import {selectionRoots,captureLayers,pasteLayers,groupLayers,ungroupLayers,arrangeLayers,textTarget,editableText,statusSpot,statusFrame,fetchCapturedOriginal,captureOriginal,layerUnderPointer,editMenuState,imageFillOf,fitCamera,emptyCamera,importImageFiles,importSummary,imageSize,copyOriginalImage,designInventory,cleanPageName,nextPageName,blankPage,pageProblem,pageLayerCount,neighbourAfterDelete,addPageTo,renamePageIn,deletePageFrom,applyPageAction,unionBox,exportPixels,exportFileName,prepareSelectionClone,jpegWithNotice,exportImage,EXPORT_SCALES,saveWithChooser,plannedOriginal,OriginalError,copyImageSupport,savePickerSupport} from './editing-model.js?v=5dd9feb00f24';
 import {setupNotion,notionIcon} from './notion-ui.js?v=99d6e92293a7';
 const $ = selector => document.querySelector(selector);
@@ -210,7 +210,7 @@ function paint(key) {
   const b = boards.get(key), node = b.node, o = b.offset;
   b.viewRect = { ...node.rect, x: node.rect.x + o.x, y: node.rect.y + o.y };
   Object.assign(b.wrapper.style, { width: `${node.rect.w}px`, height: `${node.rect.h}px`, transform: `translate(${b.viewRect.x}px,${b.viewRect.y}px)` });
-  b.wrapper.classList.toggle('board-selected',selection.has(key)&&!node.locked&&selection.size===1);syncBoardPose(b);
+  b.wrapper.classList.toggle('board-selected',selection.has(key)&&!node.locked&&selection.size===1);syncBoardPose(b,key);
   b.name.textContent = node.name; b.name.title = node.name; b.name.setAttribute('aria-label', `Select board ${node.name}`);
   if (b.artboard) {styleNode({...node,rect:{...node.rect,x:0,y:0},rotation:0},b.content);Object.assign(b.content.style,{overflow:node.clip?'hidden':'visible',visibility:node.visible===false?'hidden':''});}
   else {const shown={...node,rect:{...node.rect,x:0,y:0}};if(node.type==='stroke')shown.points=node.points.map(p=>({...p,x:p.x-node.rect.x,y:p.y-node.rect.y}));styleNode(shown,dom.get(key));}
@@ -230,6 +230,7 @@ function layoutBoards() {
   motion?.dirty();
 }
 function buildScene() {
+  previewEdits++;
   presenceUI?.clearEffects();
   world.replaceChildren(); dom.clear(); nodes.clear(); boards.clear(); entries.clear();
   for (const page of scene.pages) entries.set(page.id, new Map(page.nodes.map(n => [n.id, n])));
@@ -246,10 +247,10 @@ function mountRoot(page,node){
   wrapper.className=`artboard${artboard?'':' free-root'}`;wrapper.dataset.board=key;wrapper.setAttribute('aria-label',node.name);
   label.className='board-label';label.innerHTML='<button type="button" class="ibtn board-move" title="Move artboard"><svg class="icon"><use href="#i-grip"/></svg></button><button type="button" class="board-name" aria-pressed="false"></button>';
   const [move,name]=label.querySelectorAll('button');move.dataset.boardMove=key;move.setAttribute('aria-label',`Move ${node.name}`);name.dataset.boardSelect=key;content.className='board-content';
-  const b={wrapper,content,page,node,name,artboard,offset:offsetForPage(scene.pages.indexOf(page)),viewRect:node.rect};boards.set(key,b);
+  const b={wrapper,content,frame:null,page,node,name,artboard,offset:offsetForPage(scene.pages.indexOf(page)),viewRect:node.rect};boards.set(key,b);
   if(artboard){nodes.set(key,{page,node,boardKey:key,root:true,topLevel:true});dom.set(key,content);for(const id of node.children||[])makeNode(page,entries.get(page.id).get(id),content,key);}
   else {makeNode(page,{...node,rect:{...node.rect,x:0,y:0}},content,null);nodes.set(key,{page,node,boardKey:null,root:false,topLevel:true});}
-  wrapper.append(label,content);
+  const frame=document.createElement('div');frame.className='board-frame';frame.append(label);wrapper.append(frame,content);b.frame=frame;
   if(artboard&&canEdit){const handles=document.createElement('div');handles.className='board-resizers';for(const edge of ['n','s','w','e','nw','ne','sw','se']){const h=document.createElement('button');h.type='button';h.dataset.resize=edge;h.dataset.resizeBoard=key;h.tabIndex=-1;h.title=`Resize artboard (${edge})`;h.setAttribute('aria-label',h.title);handles.append(h);}wrapper.append(handles);b.resizers=handles;}
   wrapper.hidden=pageId!=='all'&&page.id!==pageId;const nextId=page.root[page.root.indexOf(node.id)+1],next=boards.get(keyOf(page,nextId))?.wrapper;if(next)next.before(wrapper);else world.append(wrapper);paint(key);return b;
 }
@@ -366,7 +367,10 @@ function populateInspector() {
 
 // History. Structural records keep exact page.nodes indices and the sibling position for undo.
 function updateHistory() { $('#undo').disabled = !history.length; $('#redo').disabled = !future.length; if (leftTab === 'design') renderDesign(); }
-function pushHistory(action) { Object.defineProperty(action,'_bytes',{value:JSON.stringify(action).length,writable:true,configurable:true});history.push(action);let bytes=history.reduce((sum,item)=>sum+(item._bytes||0),0);while(history.length>1&&(history.length>200||bytes>32*1024*1024))bytes-=history.shift()._bytes||0;future.length = 0; updateHistory(); queueSave(); }
+// Counts every change to the Paper's layers, Pages or motion (each edit, undo and redo, rebuild): the preview model is checked against the whole Paper, and that check
+// is kept only until this moves (see validPreview).
+let previewEdits = 0;
+function pushHistory(action) { previewEdits++; Object.defineProperty(action,'_bytes',{value:JSON.stringify(action).length,writable:true,configurable:true});history.push(action);let bytes=history.reduce((sum,item)=>sum+(item._bytes||0),0);while(history.length>1&&(history.length>200||bytes>32*1024*1024))bytes-=history.shift()._bytes||0;future.length = 0; updateHistory(); queueSave(); }
 function record(key, before, after) { if (JSON.stringify(before) !== JSON.stringify(after)) pushHistory({ key, before, after }); }
 function subtree(map, id) { const n = map.get(id); return n ? [id, ...(n.children || []).flatMap(c => subtree(map, c))] : []; }
 function detach(key) {
@@ -400,6 +404,7 @@ function applyNode(key, snapshot) {
   Object.keys(entry.node).forEach(k => delete entry.node[k]); Object.assign(entry.node, copy(snapshot)); paint(key);
 }
 function applyHistory(action, reverse) {
+  previewEdits++;
   if(action.kind==='page-edit'){
     const page=scene.pages.find(p=>p.id===action.pageId),map=new Map(page.nodes.map(n=>[n.id,n]));
     for(const change of action.changes){const node=reverse?change.before:change.after;if(node)map.set(change.id,copy(node));else map.delete(change.id);}
@@ -962,24 +967,33 @@ function liveBasis(page, node) {
   for (let parent = map.get(node.parent); parent; parent = map.get(parent.parent)) chain.push({ pose: livePose(dom.get(keyOf(page, parent.id))).linear, sx: parent.diagram ? parent.rect.w / parent.diagram.width : 1, sy: parent.diagram ? parent.rect.h / parent.diagram.height : 1 });
   const basis = chainBasis(chain); return basis.posed && basis.inverse ? basis : null;
 }
-// An artboard's own pose, for resizing it; and a canvas point as a coordinate inside a drawing context, through the board's pose (origin: its top-left).
-function boardPose(b) { if (!motion?.engaged || !b?.artboard) return null; const basis = poseBasis(livePose(b.content).linear); return basis.posed && basis.inverse ? basis : null; }
+// An artboard's own pose, for resizing it; and a canvas point as a coordinate inside a drawing context, through the board's pose about its ACTUAL computed origin
+// (a top-level artboard's default is the centre of its box, a layer's is its top-left; nothing here assumes either).
+function boardPose(b) {
+  if (!motion?.engaged || !b?.artboard) return null;
+  const pose = livePose(b.content), w = b.node.rect.w, h = b.node.rect.h, basis = poseBasis(pose.linear, w ? pose.ox / w : 0, h ? pose.oy / h : 0);
+  return basis.posed && basis.inverse ? basis : null;
+}
 function contextPoint(b, wx, wy) {
   const origin = contextOrigin(b), x = wx - origin.x, y = wy - origin.y;
   if (!b.node || !b.artboard || !motion?.engaged) return { x, y, pose: null };
-  // A translation moves where the board is drawn even when it does not rotate or scale it, so a point always goes through the pose.
-  const pose = livePose(b.content), basis = poseBasis(pose.linear), usable = basis.posed && basis.inverse, local = apply(usable ? basis.inverse : IDENTITY, x - pose.tx, y - pose.ty);
-  return { x: local.x, y: local.y, pose: usable ? basis : null };
+  // A translation moves where the board is drawn even when it does not rotate or scale it, so a point always goes through the pose: drawn = translate + origin + linear * (point - origin).
+  const pose = livePose(b.content), basis = poseBasis(pose.linear), usable = basis.posed && basis.inverse, local = apply(usable ? basis.inverse : IDENTITY, x - pose.tx - pose.ox, y - pose.ty - pose.oy);
+  return { x: local.x + pose.ox, y: local.y + pose.oy, pose: usable ? boardPose(b) : null };
 }
-// An artboard's selection frame and resize handles are UI beside its content, so while motion poses the content they take the same pose (the same computed
-// translate, rotate and scale about the same top-left origin): outline, handles and their hit area then sit on the displayed artboard. Only a selected board has them.
-function syncBoardPose(b) {
-  const handles = b?.resizers; if (!handles) return;
-  const style = motion?.engaged && !b.wrapper.hidden && b.wrapper.classList.contains('board-selected') ? getComputedStyle(b.content) : null, next = style ? [style.translate, style.rotate, style.scale] : ['none', 'none', 'none'], key = next.join('|');
-  if (b.poseKey === key) return; b.poseKey = key;
-  for (const [name, value] of [['translate', next[0]], ['rotate', next[1]], ['scale', next[2]]]) handles.style[name] = value === 'none' ? '' : value;
+// An artboard's name and move grip, its selection frame and its resize handles are UI beside its content, so while motion poses the content they take the same pose
+// (the same computed translate, rotate and scale, about the same origin since they share its box): grip, outline, handles and their hit areas then sit on the displayed
+// artboard. Only an artboard that motion actually animates is touched, the frame only while it is selected, and only when the pose changed.
+function setPose(b, target, slot, values) {
+  if (!target) return; const key = values.join('|'); if (b[slot] === key) return; b[slot] = key;
+  ['translate', 'rotate', 'scale'].forEach((name, i) => { target.style[name] = values[i] === 'none' ? '' : values[i]; });
 }
-const syncBoardPoses = () => { for (const b of boards.values()) syncBoardPose(b); };
+function syncBoardPose(b, key) {
+  if (!b?.artboard) return;
+  const plain = ['none', 'none', 'none'], animated = !!(motion?.engaged && !b.wrapper.hidden && key && motion.posed?.(key)), style = animated ? getComputedStyle(b.content) : null, pose = style ? [style.translate, style.rotate, style.scale] : plain;
+  setPose(b, b.frame, 'frameKey', pose); setPose(b, b.resizers, 'poseKey', b.wrapper.classList.contains('board-selected') ? pose : plain);
+}
+const syncBoardPoses = () => { for (const [key, b] of boards) syncBoardPose(b, key); };
 function snapDelta(g,event,dx,dy){
   clearGuides();let x=dx/camera.z,y=dy/camera.z;
   if(event.shiftKey){if(Math.abs(x)>Math.abs(y))y=0;else x=0;}
@@ -1011,7 +1025,8 @@ stage.addEventListener('pointerdown', e => {
     if(e.shiftKey){selectNode(key,{add:true});stage.focus({preventScroll:true});e.preventDefault();return;}
     const collapse=selection.size>1&&selection.has(key);if(selection.has(key))selectMany([...selection],{primary:key});else selectNode(key);
     if (canEdit && !node.locked && !node.bindings){const changes=moveChanges(),excluded=new Set(changes.flatMap(item=>subtree(entries.get(nodes.get(item.key).page.id),nodes.get(item.key).node.id))),page=nodes.get(key).page;
-      gesture={kind:'node',key,before:copy(node),changes,start:p,collapse,duplicatePending:e.altKey,snapRects:page.nodes.filter(n=>!excluded.has(n.id)&&n.visible!==false&&(n.parent??null)===(node.parent??null)).slice(0,2000).map(n=>nodeBounds(n,entries.get(page.id)))};
+      const snapNodes=page.nodes.filter(n=>!excluded.has(n.id)&&n.visible!==false&&(n.parent??null)===(node.parent??null)).slice(0,2000);
+      gesture={kind:'node',key,before:copy(node),changes,start:p,collapse,duplicatePending:e.altKey,snapRects:snapNodes.map(n=>nodeBounds(n,entries.get(page.id))),snapKeys:snapNodes.map(n=>keyOf(page,n.id))};
     }
   } else if(e.shiftKey){const marquee=document.createElement('div');marquee.className='selection-marquee';stage.append(marquee);gesture={kind:'marquee',start:p,marquee,page:drawingContext(e.target).page,previous:e.metaKey?[...selection]:[]};}
   else { selectNode(null); gesture = { kind: 'pan', start: p, camera: { ...camera } }; }
@@ -1046,12 +1061,28 @@ stage.addEventListener('pointermove', e => {
 });
 // One step of a layer drag. The pointer's displacement, in visible design units, becomes each layer's change in ITS parent's coordinates: the canonical diagram scale
 // as always, or the inverse of the animated ancestors' map while motion poses them (so the layer follows the pointer on screen, with no jump at either end).
-// Snapping and guides compare model edges, which a posed ancestor no longer shows where they are: while a layer's parents are posed the drag follows the pointer exactly.
+// Snapping and guides keep working while parents are posed, in screen space: they compare what is drawn (the layers' visible bounds, held at the pose the drag started
+// from) and the guides are drawn where those edges are on screen; the snapped pointer displacement then goes through the same conversion.
+const stageBox = element => { const r = element.getBoundingClientRect(), s = stage.getBoundingClientRect(); return { x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height }; };
+function snapVisible(g, event, dx, dy) {
+  clearGuides(); let delta = { x: dx, y: dy };
+  if (event.shiftKey) { if (Math.abs(delta.x) > Math.abs(delta.y)) delta.y = 0; else delta.x = 0; }
+  if (event.altKey || !g.changes?.length) return { x: delta.x / camera.z, y: delta.y / camera.z };
+  g.visual ??= { anchor: stageBox(dom.get(g.changes[0].key)), others: (g.snapKeys || []).map(key => dom.get(key)).filter(Boolean).map(stageBox).filter(r => r.w + r.h > 0) };
+  const r = g.visual.anchor, offset = offsetForPage(scene.pages.indexOf(nodes.get(g.changes[0].key).page)), threshold = 5;
+  for (const axis of ['x', 'y']) {
+    if (event.shiftKey && delta[axis] === 0) continue;
+    const size = axis === 'x' ? 'w' : 'h', edges = [r[axis] + delta[axis], r[axis] + delta[axis] + r[size] / 2, r[axis] + delta[axis] + r[size]]; let nearest = threshold, adjust = null, target;
+    if (canvasView.objects) for (const other of g.visual.others) for (const value of [other[axis], other[axis] + other[size] / 2, other[axis] + other[size]]) for (const edge of edges) if (Math.abs(value - edge) < nearest) { nearest = Math.abs(value - edge); adjust = value - edge; target = value; }
+    if (adjust !== null) { delta[axis] += adjust; const guide = document.createElement('div'); guide.className = `snap-guide ${axis}`; guide.style[axis === 'x' ? 'left' : 'top'] = `${target}px`; stage.append(guide); guides.push(guide); }
+    else if (canvasView.snap) { const world = (r[axis] + delta[axis] - camera[axis]) / camera.z - offset[axis]; delta[axis] = (Math.round(world / 8) * 8 + offset[axis]) * camera.z + camera[axis] - r[axis]; }
+  }
+  return { x: delta.x / camera.z, y: delta.y / camera.z };
+}
 function moveNodes(g, e, dx, dy) {
   if (g.duplicatePending) { g.duplicatePending = false; if (duplicateSelection(0)) { g.duplicateAction = history.pop(); updateHistory(); g.key = selected; g.changes = moveChanges(); } }
   if (g.changes.some(item => item.pose)) {
-    clearGuides(); const visible = { x: dx / camera.z, y: dy / camera.z };
-    if (e.shiftKey) { if (Math.abs(visible.x) > Math.abs(visible.y)) visible.y = 0; else visible.x = 0; }
+    const visible = snapVisible(g, e, dx, dy);
     for (const item of g.changes) {
       const local = item.pose ? apply(item.pose.inverse, visible.x, visible.y) : { x: visible.x / (item.scale.sx || 1), y: visible.y / (item.scale.sy || 1) };
       const node = nodes.get(item.key).node, x = bound(item.before.rect.x + local.x), y = bound(item.before.rect.y + local.y); moveLayer(node, x - node.rect.x, y - node.rect.y); paint(item.key);
@@ -1320,9 +1351,19 @@ $('#page-menu').addEventListener('click', e => {
 // with the same camera, Page, selection, panels and tools. Nothing is copied, covered, locked or made modal, nothing is saved, and the editor keeps every gesture
 // (see the contract at the top of play.js). Motion below is the inspector's section for what the selected layer does, with the optional time, replay, reduced-motion
 // and reset-to-artwork controls and the deliberate "Try interaction" for authored click actions.
+// The preview model is validated against the whole Paper (every Page, layer, root and state it names must exist), which is linear in the layers, and the motion runtime
+// asks for the model many times while a scene is built. The answer is therefore kept for the actual scene object, the actual preview object and the layer count, and
+// dropped by every edit, undo, redo and rebuild (previewEdits): a large Paper is validated once per change, never once per layer.
+let previewValidity = null;
+function validPreview() {
+  if (!scene) return null;
+  const total = scene.pages.reduce((sum, page) => sum + page.nodes.length, 0), kept = previewValidity;
+  if (kept && kept.scene === scene && kept.preview === scene.preview && kept.edits === previewEdits && kept.total === total) return kept.value;
+  const value = previewProblem(scene.preview, scene) ? null : scene.preview || null; previewValidity = { scene, preview: scene.preview, edits: previewEdits, total, value }; return value;
+}
 const motionHost = {
   scene: () => scene,
-  preview: () => { if (!scene || previewProblem(scene.preview, scene)) return null; return scene.preview || null; },
+  preview: validPreview,
   pageShown: id => pageId === 'all' || pageId === id,
   nodeEl: (p, n) => dom.get(p + ':' + n) || null,
   keyOf: (p, n) => p + ':' + n,
@@ -1393,10 +1434,10 @@ async function attachHandoff(file) {
   const status = $('#handoff-status');
   try {
     if (!canEdit) throw new Error('This Paper is view-only.'); if (!/\.zip$/i.test(file.name)) throw new Error('Choose a .zip file.'); if (file.size > HANDOFF_LIMITS.resourceBytes) throw new Error(`A source archive must fit within ${HANDOFF_LIMITS.resourceBytes / 1048576} MB.`);
+    const direction = $('#handoff-direction').value.trim() || 'Selected', named = directionProblem(direction); if (named) throw new Error(named);
     status.textContent = `Checking ${file.name}…`;
     const response = await fetch(`/api/handoff${paperQuery}&name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { ...clientHeaders, 'Content-Type': 'application/octet-stream' }, body: file }), data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `The archive was refused (${response.status}).`);
-    const direction = $('#handoff-direction').value.trim() || 'Selected';
     if (handoffEdit(handoff => withResource(handoff, data.resource, { direction }))) status.textContent = `${data.resource.name} is attached: ${data.resource.entries.length} files. It is stored and downloadable by anyone with this Paper; it is never opened or run here.`;
   } catch (error) { status.textContent = error.message; }
 }

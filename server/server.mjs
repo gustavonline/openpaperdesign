@@ -13,7 +13,7 @@ import { createInterface } from 'node:readline';
 import { PaperLibrary, PaperError, ID, MAX_PAPER_BYTES, imageBytes,validatePaper } from './library.mjs';
 import {exportBundle,importBundle,MAX_BUNDLE_BYTES} from './bundle.mjs';
 import {createNotion} from './notion.mjs';
-import { json, readBody, staticFile } from './http.mjs';
+import { json, readBody, bodyDeadline, staticFile } from './http.mjs';
 import { createSharing } from './sharing.mjs';
 import { complete, protocolError } from './mcp.mjs';
 import {createHome, homeResource, isHomeResource, HOME_URI, HOME_MIME, personalWorkspace, rememberWorkspace,dataHome} from './home.mjs';
@@ -147,7 +147,7 @@ export async function startServer(workspace,{port=0,runtime=RUNTIME,shareUrl,sha
       if(pathname==='/api/handoff'){
         const id=paperId(url,['resource','name']);
         if(req.method==='GET'){const {resource,bytes}=await readResource(library,id,url.searchParams.get('resource'));res.writeHead(200,downloadHeaders(resource,bytes));res.end(bytes);return;}
-        if(req.method==='POST')return json(res,201,await attachResource(library,id,await readBody(req,HANDOFF_LIMITS.resourceBytes),{name:url.searchParams.get('name')||''}));
+        if(req.method==='POST')return json(res,201,await attachResource(library,id,await readBody(req,HANDOFF_LIMITS.resourceBytes,{deadlineMs:bodyDeadline(HANDOFF_LIMITS.resourceBytes)}),{name:url.searchParams.get('name')||''}));
       }
       if(pathname==='/api/papers'){
         if(req.method==='GET')return json(res,200,{papers:await library.list()});

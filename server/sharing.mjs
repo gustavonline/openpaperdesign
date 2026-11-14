@@ -6,8 +6,9 @@ import os from 'node:os';
 import {randomBytes, createHash, timingSafeEqual} from 'node:crypto';
 import {PaperError, ID, MAX_PAPER_BYTES, imageBytes} from './library.mjs';
 import {attachResource, readResource, downloadHeaders} from './handoff.mjs';
+import {TIMING} from './transfer.mjs';
 import {HANDOFF_LIMITS, handoffSummary} from '../runtime/handoff-model.js';
-import {json, readBody, staticFile} from './http.mjs';
+import {json, readBody, bodyDeadline, staticFile} from './http.mjs';
 import {complete, protocolError} from './mcp.mjs';
 import {hasCloudflared,quickTunnel} from './tunnel.mjs';
 import {CODE_ALPHABET,CODE_LENGTH,normalizeCode,validCode,formatCode} from '../runtime/access-code.js';
@@ -42,7 +43,9 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
   const valid=grant=>grant&&grants.get(grant.id)===grant&&live(grant);
   const forPaper=id=>[...grants.values()].filter(g=>g.paperId===id&&valid(g));
   const END={expired:'This invitation expired. Ask the owner for a new link.',revoked:'The owner stopped this invitation. Ask for a new link.'};
-  const gone=()=>new PaperError(401,'This invitation has expired or was stopped. Ask the owner for a new link.');
+  const gone=()=>new PaperError(401,'This invitation is not available: it may have expired or been stopped, or the key may be incomplete or wrong. Ask the owner for a new link, and check you have the whole link.');
+  // A request that presented no key at all says nothing about the invitation: it is not expired or stopped, it simply was not given its key.
+  const noKey=()=>new PaperError(401,'No invitation key was sent with this request, so no invitation was checked. The key is the part of the invitation link after #, and a code may also be needed. How to connect (browser, plugin, or a manual client): /agent.md.',{reason:'no-key'});
   // A wrong code is counted per invitation, across every guest. While the budget is spent every
   // attempt is refused, so a right guess is not an oracle. Checking and counting never await.
   function checkCode(grant,supplied){
@@ -79,6 +82,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
         if(reason)throw new PaperError(401,END[reason],{reason});
       }
     }
+    if(!auth&&(bearerOnly||cookieJar(req,listener).size===0))throw noKey();
     throw gone();
   }
   // The reason survives into the lock rechecks: a grant that expired while its save waited says expired, not stopped.
@@ -195,7 +199,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
       if(pathname==='/api/handoff'){
         scoped(grant,url,['resource','name']);
         if(req.method==='GET'){const {resource,bytes}=await readResource(library,grant.paperId,url.searchParams.get('resource'));if(!valid(grant))throw gone();res.writeHead(200,downloadHeaders(resource,bytes));res.end(bytes);return;}
-        if(req.method==='POST'){if(req.headers.origin!==requestOrigin)throw new PaperError(403,'Use the Paper editor or the plugin to attach a source archive');budget(grant);return json(res,201,await attachResource(library,grant.paperId,await readBody(req,HANDOFF_LIMITS.resourceBytes),{name:url.searchParams.get('name')||''},()=>writable(grant)));}
+        if(req.method==='POST'){if(req.headers.origin!==requestOrigin)throw new PaperError(403,'Use the Paper editor or the plugin to attach a source archive');budget(grant);return json(res,201,await attachResource(library,grant.paperId,await readBody(req,HANDOFF_LIMITS.resourceBytes,{deadlineMs:bodyDeadline(HANDOFF_LIMITS.resourceBytes)}),{name:url.searchParams.get('name')||''},()=>writable(grant)));}
       }
       if(!['GET','HEAD'].includes(req.method))throw new PaperError(403,'Owner controls are unavailable through an invitation');
       if(pathname.startsWith('/Paper/')){
@@ -220,7 +224,7 @@ export function createSharing({library,editor,presence,publicUrl,port=0,now=Date
   async function start(network,internet){await ensureStart(network,internet).task;}
   async function startListener(network,internet,address,signal){
     const mode=modeOf({network,internet});
-    const listener={network,mode,health:randomBytes(12).toString('hex'),ready:!internet,probed:false,online:!!publicUrl||internet,probeAbort:new AbortController()},pending=http.createServer((req,res)=>handle(req,res,listener));pending.headersTimeout=15000;pending.requestTimeout=30000;pending.keepAliveTimeout=5000;
+    const listener={network,mode,health:randomBytes(12).toString('hex'),ready:!internet,probed:false,online:!!publicUrl||internet,probeAbort:new AbortController()},pending=http.createServer((req,res)=>handle(req,res,listener));pending.headersTimeout=15000;pending.requestTimeout=TIMING.ceiling;pending.keepAliveTimeout=5000;
     await new Promise((resolve,reject)=>{pending.once('error',reject);pending.listen(network||internet?0:port,network?'0.0.0.0':'127.0.0.1',resolve);});
     listener.server=pending;listener.localOrigin=`http://127.0.0.1:${pending.address().port}`;listener.origin=network?`http://${address}:${pending.address().port}`:publicUrl||listener.localOrigin;
     try{

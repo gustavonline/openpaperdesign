@@ -350,3 +350,46 @@ test('every record is its own effect, created in declared order with fill both a
   // A rebind keeps the order.
   w.rebuild(); const again = env.animations.filter(a => !a.cancelled); assert.deepEqual(again.map(a => a.options.duration), declared.map(r => r.durationMs), 'declared order after a rebind');
 });
+
+// ---- 11. The clock-only controls exist only where there is a load clock; Play never restarts a finished timeline.
+const clockControls = w => [w.controls.replay, w.controls.scrub, w.controls.ms];
+const withoutLoadOn = (scene, pageId) => { scene.preview.animations = scene.preview.animations.filter(a => !(a.page === pageId && a.trigger.type === 'load')); return scene; };
+test('a Paper whose shown Pages have only hover, focus, reveal and state effects keeps Play/Pause, Reduce and Reset but its clock controls are disabled, before and after Play, and they never act', t => {
+  const scene = addMotion(syntheticLanding()); for (const page of scene.pages) withoutLoadOn(scene, page.id);
+  const w = mount(t, {scene}), {env, controls} = w;
+  assert.equal(controls.toggle.disabled, false, 'there is motion to play'); assert.ok(clockControls(w).every(c => c.disabled), 'before Play: no clock, so no time, scrubber or Replay'); assert.match(controls.ms.title, /no load animation/);
+  controls.ms.value = '500'; controls.ms.fire('change'); assert.equal(w.snap().engaged, false, 'a typed time does not start anything'); assert.match(controls.status.textContent, /no clock to set/); assert.equal(controls.ms.value, '0');
+  controls.scrub.value = '300'; controls.scrub.fire('input'); assert.equal(w.snap().engaged, false); controls.replay.fire('click'); assert.equal(w.snap().engaged, false, 'Replay with nothing to replay does nothing');
+  press(controls.toggle); assert.equal(w.snap().engaged, true); assert.ok(clockControls(w).every(c => c.disabled), 'after Play: still none'); assert.equal(controls.reset.disabled, false); assert.equal(controls.reset.hidden, false); assert.equal(controls.toggle.disabled, false); assert.equal(env.frames.size, 0, 'no idle frame loop');
+  const hover = w.anims('D primary CTA').find(a => a.frames[1].scale === '1.04'); w.el('D primary CTA').fire('pointerenter'); assert.equal(hover.running, true, 'event effects still play'); press(controls.toggle); assert.equal(hover.running, false, 'and Pause still freezes them');
+  controls.reduce.fire('click'); assert.equal(controls.reduce.attrs['aria-pressed'], 'true', 'Reduce still works'); controls.reset.fire('click'); assert.equal(w.snap().engaged, false); assert.ok(clockControls(w).every(c => c.disabled), 'after Reset: still none');
+  assert.equal(controls.ms.title, 'These Pages have no load animation, so there is no clock to set. Hover, focus, reveal and state effects have none.');
+});
+test('a timed Paper’s clock controls work BEFORE Play (typing a time starts a paused timed frame) and follow the shown Page and a new revision', t => {
+  const scene = withoutLoadOn(addMotion(syntheticLanding()), 'landing0000000001'), w = mount(t, {scene, shown: 'landing0000000001'}), {env, controls} = w;
+  assert.equal(controls.toggle.disabled, false); assert.ok(clockControls(w).every(c => c.disabled), 'the shown Page (Landing) has no load animation');
+  w.state.shown = 'details0000000001'; w.motion.dirty(); env.flush(); assert.ok(clockControls(w).every(c => !c.disabled), 'another Page with a load animation brings the clock back, with motion still off'); assert.equal(w.snap().engaged, false); assert.doesNotMatch(controls.ms.title, /no load animation/, 'the explanation is gone with the reason');
+  controls.ms.value = '400'; controls.ms.fire('change'); assert.equal(w.snap().engaged, true, 'a typed time starts a paused timed frame'); assert.equal(w.snap().playing, false); assert.equal(w.snap().time, 400);
+  w.state.shown = 'landing0000000001'; w.motion.dirty(); env.flush(); assert.ok(clockControls(w).every(c => c.disabled), 'back on the Page with no clock: disabled again, while engaged'); assert.equal(controls.toggle.disabled, false); assert.equal(controls.reset.hidden, false);
+  w.state.shown = 'details0000000001'; w.motion.dirty(); env.flush(); assert.ok(clockControls(w).every(c => !c.disabled)); assert.equal(w.snap().userPaused, true, 'the person’s pause was kept across Pages');
+  // A new revision that removes, then restores, the load animations.
+  const before = w.scene.preview; w.scene.preview = {...before, animations: before.animations.filter(a => a.trigger.type !== 'load')}; w.motion.dirty(); env.flush(); assert.ok(clockControls(w).every(c => c.disabled), 'a revision with no load animation'); w.scene.preview = before; w.motion.dirty(); env.flush(); assert.ok(clockControls(w).every(c => !c.disabled), 'and with them again');
+  // The fully timed landing Paper: always enabled.
+  const timed = mount(t); assert.ok(clockControls(timed).every(c => !c.disabled));
+});
+test('ordinary Play at the end of a finite timeline keeps the finished frame and says Replay restarts it; explicit Replay and a time seek still work, an unfinished pause resumes, and reduced and loop caps are unchanged', t => {
+  const w = mount(t, {shown: 'details0000000001'}), {env, controls} = w; press(controls.toggle); const heading = w.anims('Details heading', w.page(1))[0] || w.live()[0];
+  assert.equal(w.snap().timelineMs, 1020, 'the finite timeline ends at 1020 ms'); controls.ms.value = '10000'; controls.ms.fire('change'); assert.equal(w.snap().time, 1020, 'clamped to its own end'); assert.match(controls.status.textContent, /ends at 1020 ms/);
+  const frame = w.live().map(frameOf), plays = w.live().map(a => a.plays); press(controls.toggle);
+  assert.equal(w.snap().time, 1020, 'Play did not restart it'); assert.equal(w.snap().playing, false); assert.equal(w.running().length, 0); assert.deepEqual(w.live().map(frameOf), frame, 'the finished frame is exactly kept'); assert.deepEqual(w.live().map(a => a.plays), plays, 'no animation was played again'); assert.match(controls.status.textContent, /finished\. Replay starts it again/); assert.equal(controls.toggle.attrs['aria-label'], 'Play motion'); assert.equal(env.frames.size, 0);
+  env.advance(180); assert.equal(w.snap().time, 1020, 'and nothing moves afterwards');
+  controls.replay.fire('click'); assert.equal(w.snap().time, 0); assert.equal(w.snap().playing, true, 'explicit Replay restarts it'); env.advance(180); assert.equal(Math.round(w.live()[0].currentTime), 180);
+  press(controls.toggle); const paused = w.snap().time; assert.equal(paused, 180); press(controls.toggle); assert.equal(w.snap().playing, true, 'an unfinished timeline resumes from where it paused'); env.advance(100); assert.equal(Math.round(w.live()[0].currentTime), 280);
+  w.motion.seek(1020); press(controls.toggle); assert.equal(w.snap().time, 1020); w.motion.seek(200); press(controls.toggle); assert.equal(w.snap().playing, true, 'a seek back inside the timeline plays on from there'); assert.equal(w.snap().time, 200);
+  // Events are still alive after a finished timeline is left alone.
+  const done = mount(t, {shown: 'details0000000001'}); done.motion.seek(1020); press(done.controls.toggle); assert.equal(done.snap().userPaused, false, 'Play still ended the person’s pause');
+  // Loops: Play from the cap still asks for Replay; a long finite timeline is bounded by its own end.
+  const loops = mount(t); loops.motion.seek(3600000); press(loops.controls.toggle); assert.match(loops.controls.status.textContent, /Replay starts again/); assert.equal(loops.snap().playing, false);
+  const reduced = mount(t, {reduced: true, shown: 'details0000000001'}); press(reduced.controls.toggle); assert.match(reduced.controls.status.textContent, /Motion is reduced/); assert.equal(reduced.running().length, 0);
+  void heading;
+});

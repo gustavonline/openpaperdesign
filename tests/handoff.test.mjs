@@ -60,7 +60,7 @@ test('a manifest names the direction, alternatives, entry point, provenance, fil
   assert.deepEqual([entryRole('assets/Inter-LICENSE.txt'), entryRole('OFL.txt'), entryRole('a/b.woff2'), entryRole('index.html'), entryRole('field.js'), entryRole('x.css'), entryRole('README.md'), entryRole('p.png'), entryRole('m.json'), entryRole('bin')], ['license', 'license', 'font', 'page', 'script', 'style', 'doc', 'image', 'data', 'other']);
   assert.equal(safeArchiveName('../../etc/Source Code (v2).ZIP'), 'Source Code -v2.zip'); assert.equal(safeArchiveName(''), 'source.zip'); assert.equal(safeArchiveName('.zip'), 'source.zip'); assert.match(safeArchiveName('é☃.zip'), /^[A-Za-z0-9._ -]+\.zip$/);
   // The editor's helpers keep a valid manifest: add keeps others, replace keeps id, remove drops a dangling entry point.
-  const added = withResource(undefined, resource, {direction: 'Direction 03'}); assert.equal(handoffProblem(added), null); assert.equal(added.selected.id, 'Direction 03');
+  const added = withResource(undefined, resource, {direction: 'Direction 03'}); assert.equal(handoffProblem(added), null); assert.equal(added.selected.id, 'direction-03'); assert.equal(added.selected.label, 'Direction 03');
   const second = withResource(added, {...resource, id: 'other', sha256: 'b'.repeat(64)}); assert.deepEqual(second.resources.map(r => r.id), [resource.id, 'other']); assert.equal(handoffProblem(second), null); const replaced = withResource(second, {...resource, sha256: 'c'.repeat(64)}); assert.deepEqual(replaced.resources.map(r => r.sha256), ['c'.repeat(64), 'b'.repeat(64)], 'the same id is replaced in place');
   const full = manifestFor(resource), removed = withoutResource(full, resource.id); assert.equal(removed.entrypoint, undefined); assert.equal(handoffProblem(removed), null);
 });
@@ -299,4 +299,39 @@ test('the handoff model and its public guidance ship with the editor files and s
   assert.match(text, /handoff/i); assert.match(text, /\/handoff\.md/);
   const model = await fs.readFile(path.join(RUNTIME, 'handoff-model.js'), 'utf8'); assert.doesNotMatch(model, /\beval\s*\(|new Function|\.innerHTML\s*=|import\s*\(|fetch\s*\(|XMLHttpRequest|WebSocket|localStorage/, 'the model is data rules only');
   for (const source of ['server/handoff.mjs', 'server/zip.mjs']) assert.doesNotMatch(await fs.readFile(path.join(ROOT, source), 'utf8'), /child_process|\bspawn\b|\bexec\w*\(|createWriteStream\([^)]*entry|unzip|extractAll|\.extract\(/, `${source} extracts and runs nothing`);
+});
+
+test('an archive the manifest stops naming keeps its bytes for the grace period counted from that save, whatever the age of the file, so an immediate Undo always works; later attaches collect it, boundedly', async () => {
+  const {markUnreferenced} = await import('../server/handoff.mjs'); assert.equal(typeof markUnreferenced, 'function');
+  const lib = await library(), {id, resource, paper, revision} = await withHandoff(lib), folder = await lib.folder(id), file = path.join(folder, 'handoff', `${resource.sha256}.zip`);
+  const old = new Date(Date.now() - 400 * 24 * 3600 * 1000); await fs.utimes(file, old, old); assert.ok((await fs.stat(file)).mtimeMs < Date.now() - 86400000, 'the attachment is a year old');
+  const without = clone(paper); delete without.handoff; const removed = await lib.save(id, Buffer.from(JSON.stringify(without)), revision);
+  assert.ok(Date.now() - (await fs.stat(file)).mtimeMs < 10000, 'removing it from the manifest starts its grace period now');
+  // Undo right away: the very same bytes are still there, so the manifest saves again.
+  const restored = clone(paper); assert.ok((await lib.save(id, Buffer.from(JSON.stringify(restored)), removed.revision)).saved, 'an immediate Undo of the removal');
+  const again = await lib.save(id, Buffer.from(JSON.stringify(without)), (await lib.read(id)).revision);
+  await attachResource(lib, id, zipOf({'b.txt': 'second'}), {name: 'b.zip'}); await fs.access(file); await attachResource(lib, id, zipOf({'c.txt': 'third'}), {name: 'c.zip'}); await fs.access(file);
+  assert.ok((await lib.save(id, Buffer.from(JSON.stringify(clone(paper))), again.revision)).saved, 'still Undoable after unrelated attaches inside the grace period');
+  // Past the grace period (and unreferenced) the next attach collects it; a referenced archive of any age is never touched.
+  const gone = await lib.read(id), none = clone(gone.paper); delete none.handoff; const cleared = await lib.save(id, Buffer.from(JSON.stringify(none)), gone.revision);
+  const longAgo = new Date(Date.now() - 2 * 3600 * 1000); await fs.utimes(file, longAgo, longAgo); await attachResource(lib, id, zipOf({'d.txt': 'fourth'}), {name: 'd.zip'}); await assert.rejects(fs.access(file), 'collected once it has been unreferenced for the grace period');
+  await assert.rejects(lib.save(id, Buffer.from(JSON.stringify(clone(paper))), cleared.revision), /not stored in this Paper/, 'after that a restore must attach again, and says so');
+  const keep = await withHandoff(lib, {'k.txt': 'kept'}, 'k.zip'), kept = path.join(await lib.folder(keep.id), 'handoff', `${keep.resource.sha256}.zip`); await fs.utimes(kept, old, old); await attachResource(lib, keep.id, zipOf({'e.txt': 'x'}), {name: 'e.zip'}); await fs.access(kept);
+  assert.ok((await fs.stat(kept)).mtimeMs < Date.now() - 86400000, 'a referenced archive is left exactly as it was');
+  // Replacing an archive by another (same manifest slot) starts the old one’s grace too.
+  const swap = await withHandoff(lib, {'s1.txt': 'one'}, 's1.zip'), s1 = path.join(await lib.folder(swap.id), 'handoff', `${swap.resource.sha256}.zip`); await fs.utimes(s1, old, old);
+  const second = (await attachResource(lib, swap.id, zipOf({'s2.txt': 'two'}), {name: 's2.zip'})).resource, cur = await lib.read(swap.id), next = clone(cur.paper); next.handoff.resources = [second]; delete next.handoff.entrypoint; await lib.save(swap.id, Buffer.from(JSON.stringify(next)), cur.revision);
+  assert.ok(Date.now() - (await fs.stat(s1)).mtimeMs < 10000, 'the replaced archive’s grace starts at the replacing save');
+});
+
+test('proving an archive well formed is done once per digest and remembered in a bounded way, while the bytes in hand are still hashed every time: a changed byte is refused even when the digest is cached', async () => {
+  const {inspectStats, verifyResource} = await import('../server/handoff.mjs'), make = tag => { const bytes = zipOf({'index.html': tag, 'pad.bin': randomBytes(300)}); return {bytes, resource: {id: 'x', name: 'x.zip', bytes: bytes.length, sha256: sha256(bytes), entries: inspectArchive(bytes).entries}}; };
+  const a = make('a'), before = inspectStats.runs; for (let i = 0; i < 6; i++) verifyResource(a.bytes, a.resource); assert.equal(inspectStats.runs - before, 1, 'six verifications of the same bytes prove the archive once');
+  const flipped = Buffer.from(a.bytes); flipped[flipped.length >> 1] ^= 1; assert.throws(() => verifyResource(flipped, a.resource), /sha256|corrupt|handoff|Invalid/, 'same size, one changed byte: refused although its original digest is cached');
+  assert.throws(() => verifyResource(a.bytes.subarray(0, a.bytes.length - 1), a.resource), /bytes but its manifest says/); assert.throws(() => verifyResource(a.bytes, {...a.resource, entries: a.resource.entries.slice(1)}), /file list/, 'a manifest that lies about the files is refused with the cached list too');
+  const many = Array.from({length: 18}, (_, i) => make(`v${i}`)); const start = inspectStats.runs; for (const m of many) verifyResource(m.bytes, m.resource); const afterFirst = inspectStats.runs - start; for (const m of many.slice(-16)) verifyResource(m.bytes, m.resource); assert.equal(inspectStats.runs - start, afterFirst, 'the last sixteen are remembered');
+  verifyResource(many[0].bytes, many[0].resource); assert.equal(inspectStats.runs - start, afterFirst + 1, 'the oldest were forgotten: the memory is bounded and re-proving works');
+  // Downloads through the whole stack use it and still refuse tampered stored bytes.
+  const lib = await library(), {id, resource, bytes} = await withHandoff(lib), file = path.join(await lib.folder(id), 'handoff', `${resource.sha256}.zip`);
+  for (let i = 0; i < 3; i++) assert.deepEqual((await readResource(lib, id, resource.id)).bytes, bytes); const tampered = Buffer.from(bytes); tampered[tampered.length >> 1] ^= 1; await fs.writeFile(file, tampered); await assert.rejects(readResource(lib, id, resource.id), error => error.status === 409);
 });
