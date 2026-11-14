@@ -496,7 +496,7 @@ async function downloadOriginal(){
     const entry=nodes.get(target?.key);
     if(!entry)throw new Error('Choose an image to download its original.');
     const original=await fetchCapturedOriginal({captured:target,paperId,scene,node:entry.node,fetchImpl:(url,options)=>fetch(url,options)});
-    await download(original.blob,original.saveAs);message(`Download of the original ${original.saveAs} started. Your browser chooses where it goes.`);
+    const where=await download(original.blob,original.saveAs);message(where==='host'?`Sent the original ${original.saveAs} to the host app’s download. The app chooses where it goes and does not report it back.`:`Download of the original ${original.saveAs} started. Your browser chooses where it goes.`);
   }catch(error){if(error?.name!=='AbortError')message(error?.message||'The original could not be downloaded. Nothing was saved.');}
   back?.focus?.();
 }
