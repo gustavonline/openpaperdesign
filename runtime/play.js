@@ -22,15 +22,18 @@ export function createPlayer(host) {
   let scene = host.scene, preview = host.preview || null, pageId = host.pageId, stopped = false;
   const states = initialStates(preview), trail = [], cleanups = [], entries = [], originals = new Map();
   const system = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-  let reduced = !!system?.matches, userChose = false, viewport = 'auto', playing = false, resumeAfter = false, visible = true, frame = 0, notice = '', noticeTimer = null, shown = null;
+  let reduced = !!system?.matches, userChose = false, viewport = 'auto', playing = false, userPaused = false, visible = true, frame = 0, notice = '', noticeTimer = null, shown = null;
   let timeline = [], timelineMs = 0, scrolled = [], nodeMap = new Map(), lockedRoot = null, sizeWatch = null, resizeFrame = 0, lastRoom = 0;
   // One shared clock drives every timeline animation. A loop never ends, so the clock is allowed to run past the first cycle; `ends` is when each finite
   // animation is over and `loops` are the ones that repeat forever.
   const ends = new Map(), loops = new Set(), keyed = new Map(), handled = new WeakSet();
-  // `frozen`: Play is paused (by the person) or suspended (hidden or offscreen). While frozen, the load timeline is held on its clock AND every event-driven
-  // effect that was moving (a reveal, hover, focus or state transition) is held where it was; none starts, and a change made meanwhile shows its end state at once.
-  // `held` are the event effects that were running when it froze: only those continue on resume, from where they stopped.
-  let frozen = false; const held = new Set();
+  // What Play may do is decided in ONE place, reconcile(), from the facts: `userPaused` (the person paused, or the time control's limit was reached), the document
+  // being hidden, and the preview being offscreen. The visibility callbacks only record a fact and call reconcile(); none of them resumes anything itself, so
+  // clearing one blocker while another remains does nothing, whichever order they arrive in, and the intent to continue is simply "not paused by the person".
+  // `frozen` is the state reconcile() last applied. While frozen the load timeline is held on its clock AND every event-driven effect that was moving (a reveal,
+  // hover, focus or state transition) is held where it was; none starts, and a change made meanwhile shows its end state at once. `held` are the event effects
+  // that were running when it froze: only those continue, from where they stopped. This does not depend on there being a load timeline.
+  let frozen = false; const held = new Set(); const blocked = () => !!globalThis.document?.hidden || !visible;
 
   // ---- The toolbar and the one scroll container. Everything here is created by Play and removed by Play.
   const root = host.container; root.replaceChildren(); root.hidden = false; root.tabIndex = -1;
@@ -86,10 +89,10 @@ export function createPlayer(host) {
     // Escape closes; every other key stays inside Play, so the editor's own shortcuts never see it.
     on(root, 'keydown', event => { key(event); });
     if (system?.addEventListener) { const change = () => { if (!userChose) setReduced(system.matches); }; system.addEventListener('change', change); cleanups.push(() => system.removeEventListener('change', change)); }
-    const away = () => { if (document.hidden) { resumeAfter ||= playing; pause(true); } else if (resumeAfter) { resumeAfter = false; resume(); } };
+    const away = () => reconcile();
     document.addEventListener('visibilitychange', away); cleanups.push(() => document.removeEventListener('visibilitychange', away));
     if (typeof IntersectionObserver === 'function') {
-      const watch = new IntersectionObserver(items => { visible = items.some(item => item.isIntersecting); if (!visible) { resumeAfter ||= playing; pause(true); } else if (resumeAfter) { resumeAfter = false; resume(); } });
+      const watch = new IntersectionObserver(items => { visible = items.some(item => item.isIntersecting); reconcile(); });
       watch.observe(scroller); cleanups.push(() => watch.disconnect());
     }
   }
@@ -109,9 +112,10 @@ export function createPlayer(host) {
     if (lockedRoot !== null && page?.root.includes(lockedRoot)) { const declared = (preview?.variants || []).find(v => v.page === pageId && v.root === lockedRoot); variant = {root: lockedRoot, id: declared?.id || null, label: declared?.label || page.nodes.find(n => n.id === lockedRoot)?.name || 'Artboard', implicit: !declared}; }
     return {room, width, page, variant, rootNode: variant && page?.nodes.find(n => n.id === variant.root)};
   }
-  function build({keepTime = null, autoplay = true} = {}) {
-    const before = focusMemory();
-    teardown(); listen(); pageSelect.replaceChildren(...scene.pages.map(p => make('option', {value: p.id, text: p.name || 'Page'}))); pageSelect.value = pageId; viewSelect.value = viewport;
+  // `fresh`: a build the person asked for (another Page or viewport) starts playing again; a rebuild of the same view (a revision, a resize) keeps their pause.
+  function build({keepTime = null, fresh = true} = {}) {
+    const before = focusMemory(); if (fresh) userPaused = false;
+    teardown(); frozen = blocked() || userPaused; listen(); pageSelect.replaceChildren(...scene.pages.map(p => make('option', {value: p.id, text: p.name || 'Page'}))); pageSelect.value = pageId; viewSelect.value = viewport;
     const {width, room, page, variant, rootNode} = decide(), clone = rootNode && host.cloneRoot(pageId, rootNode.id);
     if (!clone) { shown = null; status.textContent = 'This Page has nothing to play yet.'; scrub.max = '1'; readout.textContent = ''; refocus(before); return; }
     const w = rootNode.rect.w, h = rootNode.rect.h, scale = layoutScale(width, room, w); lastRoom = room;
@@ -133,13 +137,13 @@ export function createPlayer(host) {
     shown = {root: rootNode.id, variant: variant.id, label: variant.label, width, scale, implicit: !!variant.implicit};
     Object.assign(root.dataset, {playPage: pageId, playRoot: String(rootNode.id), playVariant: variant.id || '', playScale: scale.toFixed(3), playWidth: String(Math.round(width))});
     applyTexts(); wireAnimations(scale); wireInteractions(page); on(scroller, 'scroll', updateScroll, {passive: true});
-    timelineMs = timelineEnd(preview, pageId); scrub.max = String(Math.max(1, Math.round(timelineMs)));
+    timelineMs = timelineEnd(preview, pageId); scrub.max = String(Math.max(1, Math.round(timelineMs))); msInput.max = String(ceiling());
     describe(); scroller.scrollTop = 0; updateScroll();
     if (keepTime !== null) seek(keepTime);
     applyMotionMode();
     // Timed controls exist only where there is a timeline: with none (an older Paper, a click-only Page) there is no clock to run, so no frame loop is ever started.
     for (const control of [toggle, replay, scrub, msInput]) { control.disabled = !timeline.length; if (!timeline.length) control.title = 'This Page has no timed motion'; }
-    if (!reduced && autoplay && timeline.length && !frozen) { playTimeline(); setPlaying(true); } else { setPlaying(false); readTime(); }
+    if (reduced) { setPlaying(false); readTime(); } else reconcile();
     refocus(before);
   }
 
@@ -232,16 +236,22 @@ export function createPlayer(host) {
     if (!timeline.length) { setPlaying(false); return; }
     // The time control is bounded (MAX_TIME_MS). Where loops would run past it, Play stops exactly at the limit and says so: the time shown is then the time held,
     // so typing it again reproduces the frame. It never clamps the display while animations go on, and it never resets a loop.
-    if (loops.size && time() >= MAX_TIME_MS) { hold(MAX_TIME_MS); freeze(); setPlaying(false); say(`Paused at the ${MAX_TIME_MS} ms limit of the time control. Replay starts again.`); return; }
+    if (atLimit()) { hold(MAX_TIME_MS); userPaused = true; freeze(); setPlaying(false); say(`Paused at the ${MAX_TIME_MS} ms limit of the time control. Replay starts again.`); return; }
     readTime(); if (ended()) { setPlaying(false); return; }
     frame = frames.requestAnimationFrame(tick);
   }
-  // Holds every timeline animation at one whole millisecond. With loops the limit is the numeric maximum; with finite animations only, the end of the timeline.
+  // The time control's bounds, one policy for every load timeline. Where loops run, the time stops at MAX_TIME_MS (they never end). A timeline of finite animations
+  // ends at its own end, and a valid one may be longer than MAX_TIME_MS (60,000 ms x 100 repeats), so its bound is its end: every time Play can show is then a time
+  // the control accepts. `ceiling` is the largest time the field takes at all.
+  const bound = () => loops.size ? MAX_TIME_MS : Math.ceil(timelineMs), ceiling = () => Math.max(MAX_TIME_MS, bound());
+  const atLimit = () => loops.size > 0 && time() >= MAX_TIME_MS;
+  // Holds every timeline animation at one whole millisecond, never past the bound.
   function seek(at) {
-    const cap = loops.size ? MAX_TIME_MS : timelineMs, t = Math.round(Math.max(0, Math.min(cap, Number.isFinite(at) ? at : 0)));
+    const t = Math.round(Math.max(0, Math.min(bound(), Number.isFinite(at) ? at : 0)));
     hold(t); readTime(); return t;
   }
   function freeze() {
+    if (timeline.length) hold(Math.min(bound(), Math.round(time())));
     frozen = true;
     for (const entry of entries) { const type = entry.record.trigger.type; if (type === 'load' || type === 'scroll') continue; if (entry.animation.playState === 'running') { held.add(entry); entry.animation.pause(); } }
   }
@@ -250,22 +260,30 @@ export function createPlayer(host) {
     for (const entry of held) { const a = entry.animation; if (entries.includes(entry) && !(a.playbackRate > 0 && Number(a.currentTime) >= entry.end)) a.play(); }
     held.clear();
   }
-  // Pausing (the button, the slider, the field) and being hidden or offscreen both freeze everything Play owns, exactly where it is.
-  function pause(quiet = false) { if (timeline.length) hold(Math.min(MAX_TIME_MS, Math.round(time()))); freeze(); if (playing || !quiet) setPlaying(false); else readTime(); }
+  // The person pauses (the button, the slider, the field): everything Play owns is held exactly where it is until they play again.
+  function pause() { userPaused = true; freeze(); setPlaying(false); }
+  // Applies what the facts allow: held if the person paused or Play is hidden or offscreen; otherwise held effects continue from where they stopped and the load
+  // timeline plays on if it has anything left. Safe to call at any time and from any callback: it only ever moves toward what the facts say.
+  function reconcile() {
+    if (stopped) return;
+    if (blocked() || userPaused) { if (!frozen) freeze(); setPlaying(false); return; }
+    if (reduced) return;
+    thaw();
+    if (timeline.length && !ended() && !atLimit()) { playTimeline(); setPlaying(true); } else setPlaying(false);
+  }
   // Plays what still has something to play. A finite animation that is already over stays where it is: the browser would rewind it to its start, which would replay its entrance.
   function playTimeline() { for (const a of timeline) if (loops.has(a) || (Number(a.currentTime) || 0) < ends.get(a)) a.play(); }
   function resume() {
     if (reduced) { say('Motion is reduced. Turn off Reduce motion to play it.'); applyMotionMode(); return; }
-    if (loops.size && time() >= MAX_TIME_MS) { say(`The time control stops at ${MAX_TIME_MS} ms. Replay starts again.`); return; }
-    thaw();
-    if (!timeline.length) return;
-    if (ended()) seek(0);
-    playTimeline(); setPlaying(true);
+    if (atLimit()) { say(`The time control stops at ${MAX_TIME_MS} ms. Replay starts again.`); return; }
+    userPaused = false;
+    if (timeline.length && ended()) seek(0);
+    reconcile();
   }
   // The exact entry. Only a plain non-negative number up to MAX_TIME_MS is a time; anything else is refused and the field goes back to the time that is shown.
   function commitTime() {
     const raw = String(msInput.value).trim(), n = Number(raw);
-    if (!/^\d+(\.\d+)?$/.test(raw) || !Number.isFinite(n) || n > MAX_TIME_MS) { say(`Enter a time from 0 to ${MAX_TIME_MS} ms.`); msInput.value = String(Math.round(time())); return false; }
+    if (!/^\d+(\.\d+)?$/.test(raw) || !Number.isFinite(n) || n > ceiling()) { say(`Enter a time from 0 to ${ceiling()} ms.`); msInput.value = String(Math.round(time())); return false; }
     pause(); const t = seek(n); msInput.value = String(t);
     if (t !== Math.round(n)) say(`The timeline ends at ${t} ms.`);
     return true;
@@ -321,8 +339,7 @@ export function createPlayer(host) {
   // ---- Moving about
   function go(nextPage, nextRoot, scroll = 0) {
     if (!scene.pages.some(p => p.id === nextPage)) return;
-    // Going to another Page is a deliberate act: it starts that Page fresh unless Play is hidden or offscreen (then it waits and starts when shown again).
-    frozen = !!globalThis.document?.hidden || !visible; if (frozen) resumeAfter = true; held.clear();
+    // Going to another Page is a deliberate act: it starts that Page fresh (reconcile() still waits while Play is hidden or offscreen).
     pageId = nextPage; lockedRoot = nextRoot ?? null; build(); scroller.scrollTop = scroll; updateScroll();
   }
   // The Paper changed under Play (a new revision): rebuild from the new data, keeping the Page, scroll place, still-valid states and the time.
@@ -338,8 +355,8 @@ export function createPlayer(host) {
   // Rebuilds what is shown from the current data and keeps everything the person was in the middle of: the clock (a paused time stays that exact time, playing
   // stays playing, finished entrances are not replayed), local states, the scroll place (as a share of the page) and focus. Old animations and observers are cancelled.
   function rebuildInPlace() {
-    const ratio = scroller.scrollTop / Math.max(1, scroller.scrollHeight - scroller.clientHeight), at = timeline.length ? time() : null, was = playing;
-    build({keepTime: at, autoplay: was});
+    const ratio = scroller.scrollTop / Math.max(1, scroller.scrollHeight - scroller.clientHeight), at = timeline.length ? time() : null;
+    build({keepTime: at, fresh: false});
     scroller.scrollTop = Math.round(ratio * Math.max(0, scroller.scrollHeight - scroller.clientHeight)); updateScroll();
   }
   // The window, a panel or the host changed the room Play has. Looked at once per frame, only when the browser says the size changed (no polling), and only

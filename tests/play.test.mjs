@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
 import {createPlayer} from '../runtime/play.js';
+import {previewProblem} from '../runtime/preview-model.js';
 import {syntheticLanding, addMotion} from './fixtures/motion-landing.mjs';
 
 class Style { setProperty(k, v) { this[k] = v; } }
@@ -535,7 +536,7 @@ test('a click-only Page, and navigating or updating to one, leaves no recurring 
   m.byNode(m.named('D primary CTA')).fire('click'); assert.equal(m.container.dataset.playPage, scene.pages[1].id, 'navigation still works'); assert.deepEqual(idle(m), {fired: 0, queued: 0});
   // From a Page with a timeline (the full example) to one without, and back.
   const full = mount(t), fe = full.env; assert.equal(fe.frames.size, 1); const next = quietScene(); full.player.update(next, next.preview); assert.equal(full.player.snapshot.playing, false); assert.deepEqual(idle(full), {fired: 0, queued: 0}, 'updating to a Page with no timeline stops the clock');
-  const back = addMotion(syntheticLanding()); full.player.update(back, back.preview); assert.equal(full.player.snapshot.playing, false, 'the clock is not restarted by an update that was not playing'); full.button('Play').fire('click'); assert.equal(full.player.snapshot.playing, true); assert.equal(fe.frames.size, 1);
+  const back = addMotion(syntheticLanding()); full.player.update(back, back.preview); assert.equal(full.player.snapshot.playing, true, 'nobody paused, so a Page whose motion comes back plays (from the start: it had no clock to keep)'); assert.equal(fe.frames.size, 1); full.button('Pause').fire('click'); const kept = JSON.stringify(full.player.snapshot.time); full.player.update(addMotion(syntheticLanding()), addMotion(syntheticLanding()).preview); assert.equal(full.player.snapshot.playing, false, 'but a pause by the person survives an update'); assert.equal(JSON.stringify(full.player.snapshot.time), kept);
   // Navigating from a timeline Page to a Page without one: the clock stops.
   const two = addMotion(syntheticLanding()); two.preview.animations = two.preview.animations.filter(a => !(a.page === two.pages[1].id && a.trigger.type === 'load')); const n = mount(t, {scene: two}); assert.equal(n.env.frames.size, 1); n.player.go(two.pages[1].id); assert.equal(n.player.snapshot.timelineMs, 0); assert.deepEqual(idle(n), {fired: 0, queued: 0}, 'navigation to a Page with no timeline'); n.player.go(two.pages[0].id); assert.equal(n.env.frames.size, 1, 'and back to one with');
 });
@@ -608,4 +609,105 @@ test('the intent capture is owned by the lifecycle: one capture-phase press list
   // Space or Enter on the focused button: the guard hands the key to Play (not a handler of its own), the default click then arrives once with detail 0.
   let handled = 0; const e = {key: 'Enter', target: toggle, preventDefault() { handled++; }, stopPropagation() {}}; assert.equal(m.player.key(e), false); assert.equal(handled, 0, 'Play does not act on the key itself: no double dispatch with the browser’s click');
   m.player.destroy(); assert.equal(env.added, env.removed); assert.equal((toggle.listeners.get('pointerdown') || []).length, 0); assert.equal((toggle.listeners.get('click') || []).length, 0);
+});
+
+// ---- Second review: automatic suspension is reconciled in one place and independent of any load clock; the time control's bound holds for every timeline.
+const eventOnlyScene = () => { const s = addMotion(syntheticLanding()); s.preview.animations = s.preview.animations.filter(a => a.trigger.type !== 'load'); return s; };
+const finishedScene = () => { const s = addMotion(syntheticLanding()); s.preview.animations = s.preview.animations.filter(a => a.trigger.type !== 'load' || a.iterations !== 'infinite'); return s; };
+const running = list => list.filter(a => a.running).length;
+const WATCH = m => m.env.observers.find(o => o.targets.has(m.find('play-viewport')));
+
+test('an event-only Page (no load animation) freezes on hide or offscreen and thaws on return, with no frame loop and no timed clock', t => {
+  for (const how of ['hide', 'offscreen']) {
+    const m = mount(t, {scene: eventOnlyScene()}), {env} = m, cta = m.byNode(m.named('D primary CTA')), hover = hoverOf(m); assert.equal(env.frames.size, 0); assert.equal(m.player.snapshot.playing, false);
+    cta.fire('pointerenter'); env.advance(50); assert.deepEqual([hover.running, hover.currentTime], [true, 50], 'the hover is moving although there is no clock');
+    const off = () => how === 'hide' ? env.hide(true) : env.intersect(WATCH(m), false), on = () => how === 'hide' ? env.hide(false) : env.intersect(WATCH(m), true);
+    off(); assert.deepEqual([hover.running, hover.currentTime], [false, 50], `${how}: held`); env.advance(200); assert.equal(hover.currentTime, 50, 'no drift');
+    on(); assert.deepEqual([hover.running, hover.currentTime], [true, 50], `${how}: thawed from where it stopped, with no timed Play to press`); env.advance(40); assert.equal(hover.currentTime, 90);
+    cta.fire('pointerleave'); assert.deepEqual([hover.running, hover.playbackRate], [true, -1], 'a later leave animates back; it does not jump'); assert.equal(env.frames.size, 0, 'and still no frame loop'); assert.equal(m.player.snapshot.playing, false);
+  }
+  // Reveal and state effects too.
+  const m = mount(t, {scene: eventOnlyScene()}), {env} = m; env.intersect(seenBy(m, m.named('D section reveal title')), true); m.byNode(m.named('D Together toggle')).fire('click'); env.advance(60); const effects = [revealOf(m), stateOf(m)]; assert.ok(effects.every(a => a.running && a.currentTime === 60));
+  env.hide(true); assert.ok(effects.every(a => !a.running && a.currentTime === 60)); env.hide(false); assert.ok(effects.every(a => a.running && a.currentTime === 60)); env.advance(20); assert.ok(effects.every(a => a.currentTime === 80)); assert.equal(env.frames.size, 0);
+});
+
+test('a Page whose timeline already finished still thaws its event effects after hide/offscreen, and the finished entrances are not replayed', t => {
+  const m = mount(t, {scene: finishedScene()}), {env} = m, cta = m.byNode(m.named('D primary CTA')), hover = hoverOf(m); env.advance(2000); assert.ok(env.runFrame() || true); for (let i = 0; i < 3 && env.runFrame(); i++);
+  assert.equal(m.player.snapshot.playing, false, 'the timeline ended by itself'); const entrance = m.animationsFor(m.named('D hero headline'))[0], plays = entrance.plays;
+  cta.fire('pointerenter'); env.advance(60); assert.equal(hover.running, true); env.hide(true); assert.equal(hover.running, false); env.hide(false); assert.deepEqual([hover.running, hover.currentTime], [true, 60], 'thawed although playing was already false'); assert.equal(entrance.plays, plays, 'the entrance was not replayed'); assert.equal(m.player.snapshot.playing, false, 'and the finished timeline did not restart'); assert.equal(env.frames.size, 0);
+});
+
+test('hidden and offscreen are separate blockers: nothing thaws until both are clear, in either order and with repeated callbacks; the person’s pause and reduced motion are respected', t => {
+  const orders = {
+    'offscreen, then hidden, then foreground while still offscreen, then visible': [['off'], ['hide'], ['show', false], ['on', true]],
+    'hidden, then offscreen, then visible while still hidden, then foreground': [['hide'], ['off'], ['on', false], ['show', true]],
+    'repeated callbacks of each kind': [['off'], ['off'], ['hide'], ['hide'], ['show', false], ['off'], ['on', false], ['hide'], ['show', false], ['on', true]],
+  };
+  for (const [name, steps] of Object.entries(orders)) {
+    const m = mount(t), {env} = m, orb = loopsOf(m)[0], hover = hoverOf(m); m.byNode(m.named('D primary CTA')).fire('pointerenter'); env.advance(100); const clock = m.player.snapshot.time;
+    const state = {hidden: false, offscreen: false}; let anyRunningWhileBlocked = false;
+    for (const [step] of steps) {
+      if (step === 'off') env.intersect(WATCH(m), false); else if (step === 'hide') env.hide(true);
+      else if (step === 'show') env.hide(false); else if (step === 'on') env.intersect(WATCH(m), true);
+    }
+    // Replay the steps tracking the blockers to check the invariant after every one.
+    const m2 = mount(t), e2 = m2.env, orb2 = loopsOf(m2)[0], hover2 = hoverOf(m2); m2.byNode(m2.named('D primary CTA')).fire('pointerenter'); e2.advance(100);
+    let hidden = false, off = false;
+    for (const [step, arg] of steps) {
+      if (step === 'off') { e2.intersect(WATCH(m2), false); off = true; } else if (step === 'hide') { e2.hide(true); hidden = true; } else if (step === 'show') { e2.hide(false); hidden = false; } else if (step === 'on') { e2.intersect(WATCH(m2), true); off = false; }
+      const blocked = hidden || off;
+      assert.equal(m2.live().some(a => a.running), !blocked, `${name}: after “${step}” (hidden ${hidden}, offscreen ${off}) running must be ${!blocked}`); assert.equal(m2.player.snapshot.playing, !blocked); assert.equal(e2.frames.size, blocked ? 0 : 1);
+      if (blocked) { const frozenAt = m2.live().map(a => a.currentTime); e2.advance(300); assert.deepEqual(m2.live().map(a => a.currentTime), frozenAt, `${name}: no drift while blocked`); }
+    }
+    assert.equal(orb2.currentTime, 100, `${name}: the clock is where it was when it froze`); assert.equal(hover2.currentTime, 100); assert.ok(hover2.running && orb2.running);
+  }
+  // The person's pause: clearing every blocker does not play; reduced motion: nothing ever moves.
+  const p = mount(t), pe = p.env; pe.advance(100); p.button('Pause').fire('click'); pe.hide(true); pe.intersect(WATCH(p), false); pe.hide(false); pe.intersect(WATCH(p), true); assert.equal(p.live().some(a => a.running), false); assert.equal(p.player.snapshot.playing, false);
+  p.button('Play').fire('click'); assert.equal(p.player.snapshot.playing, true); pe.hide(true); p.button('Play'); pe.intersect(WATCH(p), false); pe.hide(false); assert.equal(p.live().some(a => a.running), false, 'still offscreen: nothing runs'); pe.intersect(WATCH(p), true); assert.equal(p.live().some(a => a.running), true);
+  const r = mount(t, {reduced: true}); r.env.hide(true); r.env.hide(false); r.env.intersect(WATCH(r), false); r.env.intersect(WATCH(r), true); assert.equal(r.live().some(a => a.running), false); assert.equal(r.env.frames.size, 0);
+  // A person pausing WHILE offscreen: when it returns it stays paused; pressing Play while offscreen waits for it to return.
+  const q = mount(t), qe = q.env; qe.intersect(WATCH(q), false); q.button('Play').fire('click'); assert.equal(q.live().some(a => a.running), false, 'Play pressed while offscreen starts nothing yet'); qe.intersect(WATCH(q), true); assert.equal(q.live().some(a => a.running), true, 'it plays when it is back');
+});
+
+test('rebuild, navigation, update, resize and viewport while a blocker remains start nothing; closing leaves no callback that can; and each blocker clears on its own', t => {
+  const m = mount(t), {env} = m; env.advance(1500); env.hide(true); env.intersect(WATCH(m), false);
+  const next = addMotion(syntheticLanding()); m.player.update(next, next.preview); resizeTo(m, 390); m.player.setViewport('1440'); m.player.go(m.scene.pages[1].id); m.player.go(m.scene.pages[0].id);
+  assert.equal(m.live().some(a => a.running), false, 'nothing runs after rebuilds while hidden and offscreen'); assert.equal(env.frames.size, 0);
+  env.hide(false); assert.equal(m.live().some(a => a.running), false, 'foreground alone: still offscreen'); assert.equal(env.frames.size, 0);
+  const watcher = env.observers.filter(o => !o.disconnected).find(o => o.targets.has(m.find('play-viewport'))); env.intersect(watcher, true); assert.equal(m.live().some(a => a.running), true); assert.equal(m.player.snapshot.playing, true);
+  // Closing while blocked and then late callbacks: nothing moves.
+  const c = mount(t), ce = c.env, w = WATCH(c); ce.hide(true); c.player.destroy(); ce.hide(false); w.callback([{isIntersecting: true}]); assert.equal(c.live().length, 0); assert.equal(ce.frames.size, 0); assert.equal(c.container.children.length, 0);
+});
+
+// ---- Third finding: one bound policy for every load timeline.
+const longScene = ({delay = 0, iterations = 100, durationMs = 60000, loop = false} = {}) => {
+  const s = addMotion(syntheticLanding()); s.preview.animations = []; const pid = s.pages[0].id, id = s.pages[0].nodes.find(n => n.name === 'D hero headline').id;
+  s.preview.animations.push({id: 'long', page: pid, node: id, trigger: {type: 'load'}, keyframes: [{opacity: 0}, {opacity: 1}], durationMs, iterations, ...(delay ? {delayMs: delay} : {}), easing: 'linear'});
+  if (loop) s.preview.animations.push({id: 'spin', page: pid, node: s.pages[0].nodes.find(n => n.name === 'D hero background orb').id, trigger: {type: 'load'}, keyframes: [{y: 0}, {y: -10}], durationMs: 1000, iterations: 'infinite'});
+  return s;
+};
+
+test('a valid finite timeline longer than the numeric limit keeps the control and the clock consistent: every displayed time is accepted, and it ends at its own end', t => {
+  const scene = longScene(); assert.equal(previewProblem(scene.preview, scene), null, '60,000 ms x 100 is valid'); const m = mount(t, {scene}), {env} = m, a = m.animationsFor(m.named('D hero headline'))[0], field = msField(m), snap = () => m.player.snapshot;
+  assert.equal(snap().timelineMs, 6000000); assert.equal(field.max, '6000000', 'the field’s own limit is the timeline’s end'); assert.equal(m.find('play-scrub').max, '6000000');
+  m.player.pause(); m.player.seek(3599950); m.button('Play').fire('click'); env.advance(150); env.runFrame(); assert.equal(snap().playing, true, 'still playing past 3,600,000: it is a valid time'); assert.equal(snap().time, 3600100); assert.equal(field.value, '3600100');
+  m.button('Pause').fire('click'); assert.equal(snap().time, 3600100); const frame = m.live().map(frameOf); m.player.seek(0); field.value = '3600100'; field.fire('change'); assert.equal(a.currentTime, 3600100, 'the displayed time is accepted'); assert.deepEqual(m.live().map(frameOf), frame, 'and gives the same frame'); assert.equal(m.find('play-status').textContent.includes('Enter a time'), false);
+  // Slider end, direct seek past the end, numeric past the end, replay.
+  const scrub = m.find('play-scrub'); scrub.value = scrub.max; scrub.fire('input'); assert.equal(snap().time, 6000000, 'the slider’s end is the timeline’s end'); m.player.seek(9999999); assert.equal(snap().time, 6000000, 'a seek past the end holds at the end');
+  field.value = '6000001'; field.fire('change'); assert.match(m.find('play-status').textContent, /Enter a time from 0 to 6000000 ms\./); assert.equal(snap().time, 6000000); field.value = '6000000'; field.fire('change'); assert.equal(a.currentTime, 6000000);
+  // Playing to the natural end: it stops there and the end time is accepted.
+  m.player.seek(5999900); m.button('Play').fire('click'); env.advance(300); env.runFrame(); assert.equal(snap().playing, false, 'ended by itself'); assert.equal(snap().time, 6000000); field.value = '6000000'; field.fire('change'); assert.equal(snap().time, 6000000);
+  const replay = env.elements.find(e => e.attrs['aria-label'] === 'Replay from the start'); replay.fire('click'); assert.equal(snap().time, 0); assert.equal(a.running, true); assert.equal(snap().playing, true);
+});
+
+test('a delay plus finite repeats, and a long finite animation beside a loop, follow the same policy at their boundaries', t => {
+  const delayed = longScene({delay: 60000}), m = mount(t, {scene: delayed}), {env} = m, a = m.animationsFor(m.named('D hero headline'))[0], snap = () => m.player.snapshot;
+  assert.equal(previewProblem(delayed.preview, delayed), null); assert.equal(snap().timelineMs, 6060000); assert.equal(msField(m).max, '6060000');
+  m.player.pause(); m.player.seek(3599999); m.button('Play').fire('click'); env.advance(2); env.runFrame(); assert.equal(snap().time, 3600001); assert.equal(snap().playing, true); m.player.pause(); const frame = m.live().map(frameOf), shown = snap().time; m.player.seek(0); m.player.seek(shown); assert.deepEqual(m.live().map(frameOf), frame);
+  m.player.seek(6059990); m.button('Play').fire('click'); env.advance(50); env.runFrame(); assert.equal(snap().time, 6060000); assert.equal(snap().playing, false); assert.equal(a.currentTime, a.end);
+  // Beside a loop the clock is bounded at the numeric limit for everything, and the same pause/re-enter works exactly there.
+  const mixed = longScene({loop: true}), x = mount(t, {scene: mixed}), xe = x.env, xs = () => x.player.snapshot; assert.equal(msField(x).max, '3600000'); x.player.pause(); x.player.seek(3599950); x.button('Play').fire('click'); xe.advance(150); xe.runFrame();
+  assert.equal(xs().playing, false); assert.equal(xs().time, 3600000, 'held at the limit, never past it'); assert.ok(x.live().every(l => l.currentTime === 3600000 && !l.running)); const f = x.live().map(frameOf); x.player.seek(0); msField(x).value = '3600000'; msField(x).fire('change'); assert.deepEqual(x.live().map(frameOf), f);
+  // A short finite timeline is unchanged: values past its end clamp to it, with the message.
+  const short = mount(t, {scene: finishedScene()}); msField(short).value = '99999'; msField(short).fire('change'); assert.equal(short.player.snapshot.time, short.player.snapshot.timelineMs); assert.match(short.find('play-status').textContent, /The timeline ends at \d+ ms\./);
 });
