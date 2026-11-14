@@ -5,7 +5,7 @@ import {findInvitationLink} from './access-code.js';
 const VERSION='0.7.0-preview.29',pending=new Map();let sequence=0,scope,current,activeTransport,booted=false,input,output,invoked,handled=false,navigating=false,queued,downloadMode;
 const invocation=new Promise(resolve=>invoked=resolve),nativeFetch=globalThis.fetch.bind(globalThis),nativeAdd=globalThis.addEventListener.bind(globalThis);
 const sharedViews=new Map();
-function rpc(method,params={}){return new Promise((resolve,reject)=>{const id=`paper-native-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(new Error('Paper did not respond. Try again.'));},method==='tools/call'?90000:method==='ui/download-file'?300000:15000);pending.set(id,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id,method,params},'*');});}
+function rpc(method,params={}){return new Promise((resolve,reject)=>{const id=`paper-native-${++sequence}`,timer=setTimeout(()=>{pending.delete(id);reject(Object.assign(new Error('Paper did not respond. Try again.'),{timedOut:true}));},method==='tools/call'?90000:method==='ui/download-file'?300000:15000);pending.set(id,{resolve,reject,timer});parent.postMessage({jsonrpc:'2.0',id,method,params},'*');});}
 async function tool(name,args){const result=await rpc('tools/call',{name,arguments:args});if(result.isError)throw new Error(result.content?.find(c=>c.type==='text')?.text||'Paper could not complete the request.');return result.structuredContent||JSON.parse(result.content.find(c=>c.type==='text').text);}
 async function home(args={}){const answer=await tool('paper_ui',{key:__paperUIKey,workspaceId:'personal',origin:'http://127.0.0.1:0',instance:'',path:'/api/home',method:Object.keys(args).length?'POST':'GET',...(Object.keys(args).length?{headers:{'content-type':'application/json'},body:base64(new TextEncoder().encode(JSON.stringify(args)))}:{})});return JSON.parse(new TextDecoder().decode(bytes(answer.body)));}
 function status(text,action=()=>openHome(),label='Open Home'){
@@ -26,16 +26,20 @@ function notice(text){
   node.textContent=String(text).slice(0,300);clearTimeout(node._timer);node._timer=setTimeout(()=>node.remove(),9000);
 }
 // One request, one file, never repeated. The host answers that it took the request, not where or whether the file ended up: success here means only "accepted".
-// A refusal, an unsupported host or a cancelled save is thrown as one plain sentence for the caller to show without leaving the Paper.
+// What is said about a failure is only what is known. A reply that refuses establishes a refusal ("Nothing was saved"). A request that was never sent establishes that
+// too. But a reply that does not arrive (the timer here cannot cancel what the host is doing) establishes NOTHING: the host may have saved the file, or be waiting for the
+// person's answer, so that is reported as unconfirmed (`unconfirmed: true`), with no claim either way and never retried or replaced by another route here.
+// A native view whose host offers no download route does not fall back to a direct link: in a sandboxed app that is blocked or unobservable, so it says plainly that it is unsupported.
 async function download(blob,name){
-  if(downloadMode){
-    let result;
-    try{result=await rpc('ui/download-file',downloadMode==='blob'?{blob,name}:downloadContents(name,blob.type,new Uint8Array(await blob.arrayBuffer())));}
-    catch{throw new Error('The host app could not take this file: it was declined, cancelled or is not supported here. Nothing was saved.');}
-    if(result?.isError)throw new Error('The host app did not accept this file: it was declined or cancelled. Nothing was saved.');
-    return true;
+  if(!downloadMode){const error=new Error('This host app does not offer file downloads to Paper, so nothing was saved. Open Paper in a browser to export.');error.unsupported=true;throw error;}
+  let result;
+  try{result=await rpc('ui/download-file',downloadMode==='blob'?{blob,name}:downloadContents(name,blob.type,new Uint8Array(await blob.arrayBuffer())));}
+  catch(error){
+    if(error?.timedOut){const unconfirmed=new Error('The host app has not confirmed this file. It may still be saved or be waiting for your answer: check the destination before trying again.');unconfirmed.unconfirmed=true;throw unconfirmed;}
+    if(error?.fromHost)throw new Error('The host app declined this file. Nothing was saved.');
+    throw new Error('This file could not be sent to the host app. Nothing was saved.');
   }
-  const object=URL.createObjectURL(blob),link=document.createElement('a');link.href=object;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(object),30000);
+  if(result?.isError)throw new Error('The host app declined this file. Nothing was saved.');
   return true;
 }
 async function navigate(value){
@@ -89,7 +93,7 @@ async function openHome(){
 async function applyInvocation(){if(handled||!output)return false;handled=true;if(output.isError){status(output.content?.find(c=>c.type==='text')?.text||'Paper could not complete this action.');return true;}if(output.structuredContent?.guest){await openGuest(output.structuredContent.guest);return true;}if(input?.action==='stop'||output.structuredContent?.stopped){status('Server stopped. Your Papers are saved.');return true;}if(output.structuredContent?.url){await navigate(output.structuredContent.url);return true;}return false;}
 nativeAdd('message',event=>{
   const data=event.data;if(event.source!==parent||data?.jsonrpc!=='2.0')return;
-  if(pending.has(data.id)){const call=pending.get(data.id);clearTimeout(call.timer);pending.delete(data.id);data.error?call.reject(new Error(data.error.message)):call.resolve(data.result);}
+  if(pending.has(data.id)){const call=pending.get(data.id);clearTimeout(call.timer);pending.delete(data.id);data.error?call.reject(Object.assign(new Error(data.error.message),{fromHost:true})):call.resolve(data.result);}
   else if(data.method==='ui/notifications/host-context-changed'){if(['dark','light'].includes(data.params?.theme))document.documentElement.dataset.theme=data.params.theme;}
   else if(!handled&&data.method==='ui/notifications/tool-input')input=data.params?.arguments;
   else if(!handled&&data.method==='ui/notifications/tool-result'){output=data.params;invoked();if(booted)void applyInvocation();}

@@ -1749,7 +1749,7 @@ async function exportImageCommand(kind) {
   try {
     const result = await exportImage({kind, file, canChoose: !inPaperSurface && savePickerSupport(window), picker: options => window.showSaveFilePicker(options), render: () => renderSelection(keys, kind, scale), deliver: async (blob, name) => { await download(blob, name); }});
     message(result.state === 'saved' ? `Saved ${result.name}.` : result.state === 'cancelled' ? 'Export cancelled. Nothing was saved.' : inPaperSurface ? `Sent ${result.name} to the host app’s download. The app chooses where it goes and does not report it back.` : `Download of ${result.name} started. Your browser chooses where it goes.`);
-  } catch (error) { if (error?.name !== 'AbortError') message(`Export failed: ${error?.message || error}`); }
+  } catch (error) { if (error?.name !== 'AbortError') message(error?.unconfirmed ? error.message : `Export failed: ${error?.message || error}`); }
   finally { exporting = false; }
 }
 // Draws the chosen layers, as the canvas draws them, in an untransformed off-screen copy: only those layers (others hidden, holding layers drawing
@@ -1825,7 +1825,7 @@ async function exportArtboard(kind) {
     await Promise.all([...clone.querySelectorAll('img')].map(img => img.decode()));
     await download(new Blob([await standaloneHtml(clone, name, w, h)], { type: 'text/html' }), `${slug(name)}.html`);
     message(`Download of “${name}” as an HTML file (${w} × ${h}) was started.`);
-  } catch (error) { message(`Export failed: ${error.message || error}`); }
+  } catch (error) { message(error?.unconfirmed ? error.message : `Export failed: ${error.message || error}`); }
   finally { holder.remove(); }
 }
 
