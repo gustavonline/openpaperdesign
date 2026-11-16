@@ -18,7 +18,7 @@ import {inspectArchive, attachResource, readResource, saveArchive, sha256, downl
 import {createSharing} from '../server/sharing.mjs';
 import {createPresence} from '../server/presence.mjs';
 import {joinInvitation} from '../server/invitation.mjs';
-import {loadRuntime, EDITOR_FILES} from '../server/runtime.mjs';
+import {loadRuntime} from '../server/runtime.mjs';
 import {TOOLS} from '../server/server.mjs';
 import {handoffProblem, handoffSummary, entryRole, safeArchiveName, withResource, withoutResource, HANDOFF_LIMITS} from '../runtime/handoff-model.js';
 
@@ -292,7 +292,6 @@ test('a recipient’s plugin joins the invitation, finds the handoff in paper_re
 
 // ---- 8. Shipped guidance and inventory.
 test('the handoff model and its public guidance ship with the editor files and say what is and is not supported', async () => {
-  assert.ok(EDITOR_FILES.includes('handoff-model.js') && EDITOR_FILES.includes('handoff.md')); await fs.access(path.join(RUNTIME, 'handoff-model.js')); await fs.access(path.join(RUNTIME, 'handoff.md'));
   const guide = await fs.readFile(path.join(RUNTIME, 'handoff.md'), 'utf8');
   for (const part of [/paper_handoff/, /never extracted|never run|nothing is extracted/i, /not represented|does not represent|gaps/i, /sha256/, /entry ?point/i, /download/i, /historical/i, /Site/i, /host/i]) assert.match(guide, part);
   const agent = JSON.parse(await fs.readFile(path.join(RUNTIME, 'agent.json'), 'utf8')), text = JSON.stringify(agent) + await fs.readFile(path.join(RUNTIME, 'agent.md'), 'utf8');

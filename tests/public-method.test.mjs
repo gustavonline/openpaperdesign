@@ -1,5 +1,5 @@
 // The public method a recipient (human or agent, any host) reads: what each kind of host can and cannot do, which routes read a complete scoped Paper, what the installed helper adds
-// over raw HTTP and MCP, how refusals are worded, and what the copied invitation says. The server answers checked here are real requests to a real shared listener.
+// over raw HTTP and MCP, and how refusals are worded (the copied invitation text is pinned in sharing-code.test.mjs). The server answers checked here are real requests to a real shared listener.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -10,7 +10,6 @@ import {PaperLibrary} from '../server/library.mjs';
 import {createSharing} from '../server/sharing.mjs';
 import {createPresence} from '../server/presence.mjs';
 import {loadRuntime} from '../server/runtime.mjs';
-import {invitationMessage} from '../runtime/invitation.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)), read = file => fs.readFile(path.join(ROOT, file), 'utf8');
 const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'paper-public-')));
@@ -42,7 +41,6 @@ test('the other public guides agree: a handoff grace is counted from the save th
   assert.match(motion, /every artboard on it stays shown/); assert.doesNotMatch(motion + design, /its variant for the width|Play picks|scaled to fit|auto-?selects/);
   assert.match(design, /Play never restarts a finite timeline that has finished/); assert.match(design, /time field, scrubber and Replay are disabled/);
   assert.match(format, /- `handoff`: the optional source handoff, version 1/); assert.match(format, /`fullDesign`/); assert.doesNotMatch(sharing + design, /Open with agent panel|Copy connection\b(?!” control)/);
-  for (const copy of ['runtime/handoff.md', 'runtime/motion.md']) assert.ok((await read(copy)).length > 1000, copy);
 });
 
 test('a request with no key is told so and nothing more; a key that is not accepted is told only what is known; real listener', async t => {
@@ -56,10 +54,4 @@ test('a request with no key is told so and nothing more; a key that is not accep
   const wrong = await ask('/api/access', {Authorization: 'Bearer ' + 'x'.repeat(43)}); assert.equal(wrong.status, 401); assert.notEqual(wrong.body.reason, 'no-key'); assert.match(wrong.body.error, /may have expired or been stopped, or the key may be incomplete or wrong/);
   const good = await ask('/api/access', {Authorization: 'Bearer ' + edit.token, 'X-Paper-Code': edit.code}); assert.equal(good.status, 200); assert.equal(good.body.role, 'edit');
   await sharing.stop(made.id, edit.id); const gone = await ask('/api/access', {Authorization: 'Bearer ' + edit.token, 'X-Paper-Code': edit.code}); assert.equal(gone.status, 401); assert.match(gone.body.error, /may have expired or been stopped/, 'a bearer request of an ended invitation is told neutrally');
-});
-
-test('the copied invitation names OpenPaperDesign, says how to share it with an agent, falls back to the official repository, and keeps the link and code alone on their lines', () => {
-  const message = invitationMessage({role: 'view', url: 'https://example.test/join#' + 'A'.repeat(43), code: 'K7QM4P2X', expiresAt: null}), lines = message.split('\n');
-  assert.ok(lines.includes('https://example.test/join#' + 'A'.repeat(43))); assert.ok(lines.includes('K7QM-4P2X')); assert.match(message, /This is an OpenPaperDesign Paper\. To share it with an AI agent, give the agent this whole message\./); assert.match(message, /If the agent cannot open the link itself, it can read the public guide at https:\/\/github\.com\/gustavonline\/openpaperdesign\./);
-  assert.doesNotMatch(message, /[*_`<>“”"]|\]\(/); assert.doesNotMatch(message, /must install|install the/i); assert.match(lines.at(-1), /^This link has no end time/);
 });

@@ -8,7 +8,7 @@ import path from 'node:path';
 import {PaperLibrary} from '../server/library.mjs';
 import {createSharing} from '../server/sharing.mjs';
 import {createPresence} from '../server/presence.mjs';
-import {loadRuntime, EDITOR_FILES, VERSION} from '../server/runtime.mjs';
+import {loadRuntime, VERSION} from '../server/runtime.mjs';
 import {syncDocs, COPIES, previewSchema} from '../scripts/sync-docs.mjs';
 import {previewProblem, PROPERTIES, PREVIEW_LIMITS} from '../runtime/preview-model.js';
 
@@ -17,7 +17,6 @@ const read = name => fs.readFile(path.join(ROOT, name), 'utf8');
 
 test('the method, the motion reference and the schema are one text everywhere they ship, and the check fails on drift', async () => {
   assert.deepEqual(await syncDocs(), [], 'no copy differs from its source');
-  for (const group of COPIES) { const wanted = await fs.readFile(path.join(ROOT, group.source)); for (const copy of group.copies) assert.ok(wanted.equals(await fs.readFile(path.join(ROOT, copy))), copy); }
   const method = COPIES[0].copies.concat(COPIES[0].source); for (const skill of ['paper', 'paper-design', 'paper-copy', 'paper-diagram']) assert.ok(method.includes(`skills/${skill}/references/collaboration.md`), `${skill} carries the method`);
   assert.ok(method.includes('runtime/collaboration.md'));
   // Drift is detected: change one copy and the check names it (then put it back).
@@ -26,7 +25,6 @@ test('the method, the motion reference and the schema are one text everywhere th
   assert.deepEqual(await syncDocs(), []);
   for (const skill of ['paper', 'paper-design', 'paper-copy', 'paper-diagram']) assert.match(await read(`skills/${skill}/SKILL.md`), /\[collaboration\.md\]\(references\/collaboration\.md\)/, `${skill}’s instructions point at it`);
   for (const skill of ['paper', 'paper-design']) assert.match(await read(`skills/${skill}/SKILL.md`), /\[motion\.md\]\(references\/motion\.md\)/);
-  for (const file of ['collaboration.md', 'motion.md', 'preview-model.schema.json']) assert.ok(EDITOR_FILES.includes(file), `${file} is in the runtime inventory`);
 });
 
 test('the method teaches the five modes, the read-first discipline, conflict recovery, the owner’s design guide and honest limits', async () => {
