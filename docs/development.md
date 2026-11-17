@@ -31,4 +31,4 @@ checkout and are not moved with it.
 The owner selects the model and effort for a task or delegates that choice. Provider
 login and model listings do not prove a useful task; access is proven by the task it
 actually supports. Source checks and native UI/access proof are recorded separately.
-Future work starts from current main and carries this project bootstrap forward.
+Independent work starts from current main, which carries this bootstrap; a continuation reuses its task's workspace.
