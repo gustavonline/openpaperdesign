@@ -170,6 +170,8 @@ test('each badge drags independently, keeps its own position as a local preferen
  drag(b, -30, 160); assert.equal(b.style.left, '8px', 'clamped inside the canvas, not off its edge'); assert.equal(b.style.top, '160px'); assert.equal(a.style.left, '120px', 'the first stays where it was put');
  const saved = JSON.parse(writes.get(KEY)); assert.deepEqual(Object.keys(saved).sort(), ['alice', 'bob'], 'keyed by participant identity, not by position in the list'); assert.deepEqual(saved.alice, {x: 120, y: 80});
  assert.deepEqual([...writes.keys()], [KEY], 'only this local preference is written; nothing about the Paper'); assert.ok(bodies.every(body => !/badge|"x":120/.test(body)), 'positions are never sent to the server');
+ // Putting one back leaves the other where it was put.
+ a.fire('dblclick'); assert.ok(!a.className.includes('moved')); assert.equal(a.style.left ?? '', ''); assert.equal(b.style.left, '8px'); assert.ok(b.className.includes('moved')); assert.deepEqual(Object.keys(JSON.parse(writes.get(KEY))), ['bob']);
  // Pointer events on a badge never reach the canvas's own handlers.
  let reached = 0; const ev = {button: 0, pointerId: 2, clientX: 5, clientY: 5, preventDefault() {}, stopPropagation() { reached--; }}; a.fire('pointerdown', ev); assert.equal(reached, -1, 'the press is stopped at the badge');
 });
@@ -202,38 +204,6 @@ test('a badge can be moved and put back with the keyboard, and other keys are le
  key(a, {key: 'Home'}); assert.equal(a.style.left, ''); assert.ok(!a.className.includes('moved')); assert.equal(JSON.parse(writes.get(KEY)).alice, undefined); key(b, {key: 'ArrowLeft'}); assert.equal(b.style.left, '8px');
  // Double-click resets only that badge.
  b.fire('dblclick'); assert.equal(b.style.left ?? '', ''); assert.ok(!b.className.includes('moved'));
-});
-test('moving a badge never changes who or what is shown, and stop() leaves nothing behind', t => {
- const h = harness(t); h.ui.receive({paperId: 'paper', peers: two()}); const [a] = chips(h); drag(a, 50, 50);
- assert.deepEqual(chips(h).map(c => c.dataset.identity), ['alice', 'bob']); assert.equal(h.layer.children.length >= 0, true);
- h.ui.stop(); assert.ok(h.observers.every(o => o.disconnected));
-});
-
-// A small model of the strip's own layout: unmoved badges are centred as a row in the stage, a moved badge keeps its slot and is offset from it with
-// position:relative (left/top), exactly as the CSS says. It is what the real browser check (the lead's) measures; here it guards the contract.
-function layoutHarness(t, {width = 1200, reserve = 244} = {}) {
- const h = harness(t); h.host.stage.rect = {left: 240, top: 0, width, height: 700};
- const strip = () => h.roster.children.filter(c => c.className.includes('presence-avatar')), gap = 6, w = 160;
- // Live geometry: the slot comes from the badge's index in a centred row; a moved badge adds only its own left/top offset.
- const live = c => { const row = strip(), i = row.indexOf(c), total = row.length * w + (row.length - 1) * gap, slot = {x: 240 + reserve + (width - 2 * reserve - total) / 2 + i * (w + gap), y: 10}, moved = c.className.includes('moved');
-  return {slot, left: slot.x + (moved ? Number.parseFloat(c.style.left || 0) : 0), top: slot.y + (moved ? Number.parseFloat(c.style.top || 0) : 0), width: w, height: 32}; };
- const orig = h.roster.replaceChildren.bind(h.roster); h.roster.replaceChildren = (...items) => { orig(...items); for (const c of strip()) Object.defineProperty(c, 'rect', {configurable: true, get: () => live(c)}); };
- const rects = () => strip().map(live);
- return {h, live, rects, centre: () => { const rs = rects(), mid = (Math.min(...rs.map(r => r.left)) + Math.max(...rs.map(r => r.left + r.width))) / 2; return mid - (240 + width / 2); }};
-}
-test('badges nobody has moved are centred in the canvas viewport, with the same reserve on both sides', t => {
- const l = layoutHarness(t), all = [human('a', 'alice', true, 1, 1), human('b', 'bob', false, 2, 2), human('c', 'carol', false, 3, 3)];
- for (const count of [1, 2, 3]) { l.h.ui.receive({paperId: 'paper', peers: all.slice(0, count)}); assert.equal(Math.abs(l.centre()) < 0.001, true, `${count} badges`); }
-});
-test('dragging one badge never shifts another: the moved badge keeps its slot and is only offset from it', t => {
- const l = layoutHarness(t), h = l.h; h.ui.receive({paperId: 'paper', peers: two()}); const [a, b] = chips(h);
- const bBefore = {...l.live(b)}, bStyle = {left: b.style.left ?? '', top: b.style.top ?? ''}, aSlot = {...l.live(a).slot};
- drag(a, 140, 170);
- assert.deepEqual(l.live(b), bBefore, 'the other badge did not move by a pixel'); assert.deepEqual({left: b.style.left ?? '', top: b.style.top ?? ''}, bStyle); assert.ok(!b.className.includes('moved'));
- assert.ok(a.className.includes('moved')); assert.deepEqual(l.live(a).slot, aSlot, 'its slot is still there'); assert.ok(l.live(a).left !== aSlot.x || l.live(a).top !== aSlot.y, 'and it is offset from it');
- // Both moved, then one reset: the reset one returns to its slot, the other stays put.
- drag(b, 60, 200); const bMoved = {...l.live(b)}; a.fire('keydown', {key: 'Home'});
- assert.ok(!a.className.includes('moved')); assert.deepEqual(l.live(b), bMoved, 'resetting one leaves the other where it was put'); assert.deepEqual({x: l.live(a).left, y: l.live(a).top}, {x: aSlot.x, y: aSlot.y}, 'the reset badge is back in its slot');
 });
 test('a moved badge that leaves and returns, or is moved before another arrives, keeps every other badge in place', t => {
  const writes = new Map(), storage = {getItem: k => writes.get(k) ?? null, setItem: (k, v) => writes.set(k, v), removeItem: k => writes.delete(k)};

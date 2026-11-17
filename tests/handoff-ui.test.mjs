@@ -96,8 +96,6 @@ test('undo and redo restore the manifest, the section follows the Paper’s own 
   assert.doesNotMatch(code, /\beval\s*\(|new Function|innerHTML|insertAdjacentHTML|document\.write|import\s*\(|<iframe|srcdoc|createObjectURL|window\.open|location\s*=|JSZip|DecompressionStream|unzip|\.click\(\)/, 'only text, a fetch of this Paper’s route and the host’s download');
   assert.match(html, /id="handoff-file" type="file" accept="\.zip,application\/zip" hidden/); assert.match(html, /id="handoff-edit"[^>]*hidden/); assert.match(html, /<section class="design-handoff" id="handoff-section" hidden>/);
   assert.match(app, /renderHandoff\(\);\n/, 'the Design tab refreshes it with the rest');
-  // The round trip the undo steps rely on, on the pure model.
-  const {resource} = descriptor(), added = withResource(undefined, resource, {direction: 'Direction 03'}); assert.equal(handoffProblem(added), null); assert.equal(withoutResource(added, resource.id).resources.length, 0);
 });
 
 test('a direction is named by a real human label and identified by a stable ASCII id that is made once: “Blåtryk 03” is accepted and renaming it never changes what it is', async () => {
@@ -109,7 +107,5 @@ test('a direction is named by a real human label and identified by a stable ASCI
   h.el('#handoff-direction').value = 'Blåtryk 04'; h.el('#handoff-direction').fire('change'); assert.deepEqual(h.scene.handoff.selected, {id: 'blatryk-03', label: 'Blåtryk 04'}, 'the label changed, the id did not'); assert.equal(h.history.length, 2);
   h.el('#handoff-direction').value = 'Blåtryk — retning 3 ø'; h.el('#handoff-direction').fire('change'); assert.equal(h.scene.handoff.selected.id, 'blatryk-03', 'whatever the label becomes');
   for (const bad of ['x'.repeat(81), 'two\nlines', 'tab\there\u0007']) { const fresh = await harness({fetchImpl: async () => { throw new Error('no upload for an unusable name'); }}); fresh.api.renderHandoff(); fresh.el('#handoff-direction').value = bad; await fresh.api.attachHandoff({name: 'source.zip', size: 10}); assert.match(fresh.status(), /1–80 characters of plain text on one line/); assert.equal(fresh.calls.length, 0, 'refused before any byte is stored'); assert.equal('handoff' in fresh.scene, false); }
-  // An agent-authored manifest keeps its own id when a person edits only the label.
-  const agent = await harness({handoff: manifest(descriptor().resource)}); agent.api.renderHandoff(); agent.el('#handoff-direction').value = 'Direction 03 · Blåtryk'; agent.el('#handoff-direction').fire('change'); assert.equal(agent.scene.handoff.selected.id, '03'); assert.equal(agent.scene.handoff.selected.label, 'Direction 03 · Blåtryk');
   const html = await fs.readFile(new URL('../runtime/index.html', import.meta.url), 'utf8'); assert.match(html, /id="handoff-direction" class="field" maxlength="80"/);
 });

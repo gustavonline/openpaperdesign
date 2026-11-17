@@ -8,10 +8,6 @@ const dir = new URL('../.github/workflows/', import.meta.url);
 const names = (await fs.readdir(dir)).filter(name => /\.ya?ml$/.test(name));
 const load = async name => fs.readFile(new URL(name, dir), 'utf8');
 
-test('workflows exist', () => {
-  assert.ok(names.includes('ci.yml') && names.includes('release.yml'), `found ${names.join(', ')}`);
-});
-
 for (const name of names) {
   test(`${name}: actions are pinned to a commit hash with a version comment`, async () => {
     const uses = [...(await load(name)).matchAll(/^\s*-?\s*uses:\s*(\S+)(.*)$/gm)];

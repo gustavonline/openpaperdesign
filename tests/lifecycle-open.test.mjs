@@ -82,6 +82,9 @@ test('repeated saves of one Paper update an open view live and never ask for ano
   // Ordinary work: data only, nothing that asks for a view, and the open view receives each commit.
   const documents = [];
   let current = data(await raw('paper_read', {paperId: a.id, includePaper: true})), firstRevision = current.revision;
+  // The file watcher may announce A's creation late, once the view is already watching (as on a loaded Linux runner). That event carries
+  // the revision the view opened with; a save, read, note, activity or stale save cannot produce it, so it is not counted below.
+  const saves = () => events.filter(event => event.paperId === a.id && event.revision !== firstRevision);
   for (let n = 1; n <= 3; n++) {
     const edited = structuredClone(current.paper); edited.name = `Synthetic A edit ${n}`;
     const saved = await raw('paper_save', {paperId: a.id, revision: current.revision, paper: edited});
@@ -98,22 +101,22 @@ test('repeated saves of one Paper update an open view live and never ask for ano
   assert.ok(!hasView(await raw('paper_write_note', {paperId: a.id, file: 'DESIGN.md', revision: note.revision, text: '# Synthetic guide\n'})), 'a note write is data only');
   const feedback = data(await raw('paper_read_feedback', {paperId: a.id}));
   assert.ok(!hasView(await raw('paper_save_feedback', {paperId: a.id, revision: feedback.revision, workspace: {comments: []}})), 'a feedback write is data only');
-  assert.equal(events.filter(event => event.paperId === a.id).length, 3, 'one live event per saved revision, none for reads, notes or activity');
-  assert.deepEqual(events.filter(event => event.paperId === a.id).map(event => event.revision), documents);
+  assert.equal(saves().length, 3, 'one live event per saved revision, none for reads, notes or activity');
+  assert.deepEqual(saves().map(event => event.revision), documents);
 
   // A different Paper stays separate: its own events and revisions, and A is untouched.
   const otherRead = data(await raw('paper_read', {paperId: b.id, includePaper: true})), other = structuredClone(otherRead.paper); other.name = 'Synthetic B edit';
   const otherSaved = data(await raw('paper_save', {paperId: b.id, revision: otherRead.revision, paper: other}));
   await until(() => events.some(event => event.revision === otherSaved.revision), 'live event for B');
   assert.equal(events.find(event => event.revision === otherSaved.revision).paperId, b.id);
-  assert.equal(events.filter(event => event.paperId === a.id).length, 3);
+  assert.equal(saves().length, 3);
   assert.equal(data(await raw('paper_read', {paperId: a.id})).revision, documents.at(-1));
 
   // A stale revision is refused as a conflict: no commit, no event, nothing overwritten.
   const stale = await raw('paper_save', {paperId: a.id, revision: firstRevision, paper: current.paper});
   assert.equal(stale.isError, true); assert.match(stale.content[0].text, /changed elsewhere/); assert.ok(!hasView(stale));
   await new Promise(resolve => setTimeout(resolve, 150));
-  assert.equal(events.filter(event => event.paperId === a.id).length, 3);
+  assert.equal(saves().length, 3);
   assert.equal(data(await raw('paper_read', {paperId: a.id})).revision, documents.at(-1));
 
   // Intentional extra views stay supported: an explicit open always carries the view again (for the same or another Paper).

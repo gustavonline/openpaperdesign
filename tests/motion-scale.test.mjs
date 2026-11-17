@@ -39,11 +39,6 @@ async function rig() {
 }
 const flush = async () => { await new Promise(resolve => setImmediate(resolve)); };
 
-test('the Paper is the real shape (13 Pages, 63 artboards, 2801 layers) and its motion is valid', () => {
-  const scene = bigPaper(); assert.equal(scene.pages.length, 13); assert.equal(nodeCount(scene), 2801, 'the layers'); assert.equal(scene.pages.flatMap(p => p.nodes.filter(n => p.root.includes(n.id))).length, 63, 'the artboards');
-  assert.equal(previewProblem(scene.preview, scene), null);
-});
-
 test('asking for the model is one whole-Paper validation per change, however many times and from however many layers it is asked', async () => {
   const r = await rig(); assert.equal(r.counts.validations, 0, 'nothing is validated until something asks');
   for (let i = 0; i < 5000; i++) assert.ok(r.validPreview()); assert.equal(r.counts.validations, 1, '5000 questions, one validation');

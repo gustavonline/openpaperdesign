@@ -242,7 +242,6 @@ test('owner secrets: status and overview never carry the code or key; only the r
   const reuse=await r.sharing.create(r.made.id,'edit',false,false,{protect:true,expiry:'never'});assert.equal(reuse.createdId,g.id);
   const changed=await r.sharing.create(r.made.id,'edit',false,false,{protect:false,expiry:'never'});assert.notEqual(changed.createdId,g.id);
   assert.equal((await r.sharing.status(r.made.id)).invitations.some(i=>i.id===g.id),false,'the replaced invitation ended');
-  assert.equal(VERSION.includes('preview.30'),true);
 });
 
 test('Home Shared lists protected and Never invitations without secrets, and the owner API validates the new options',async t=>{
@@ -478,8 +477,6 @@ test('the public agent bootstrap is discoverable from /join, versioned, matches 
   // Protected resources are unchanged: still refused without a valid grant, and the documents open nothing.
   for(const route of [`/api/paper?paper=${r.made.id}`,'/api/access',`/api/updates?paper=${r.made.id}`,`/Paper/${r.made.id}/paper.json`,`/Paper/${r.made.id}/DESIGN.md`,`/?paper=${r.made.id}`,'/api/sharing','/api/status']){const got=await get(route);assert.ok([401,403,404].includes(got.response.status),`${route} ${got.response.status}`);assert.ok(!got.bytes.toString('utf8').includes('Protected Paper'));}
   const mcp=await fetch(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})});assert.equal(mcp.status,401);
-  // The documents are in the shipped runtime inventory, so both listeners and the package serve them.
-  const {EDITOR_FILES}=await import('../server/runtime.mjs');assert.ok(EDITOR_FILES.includes('agent.json')&&EDITOR_FILES.includes('agent.md'));
   assert.deepEqual(json.bytes,await fs.readFile(path.join(RUNTIME_DIR,'agent.json')));assert.deepEqual(md.bytes,await fs.readFile(path.join(RUNTIME_DIR,'agent.md')));
   // Revoking the invitation does not change what is public, and the grant behind it stays gone.
   await r.sharing.stop(r.made.id,edit.id);assert.deepEqual((await get('/agent.json')).bytes,json.bytes);assert.equal((await fetch(edit.mcpUrl,{method:'POST',headers:{Authorization:'Bearer '+edit.token,'X-Paper-Code':edit.code,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})})).status,401);

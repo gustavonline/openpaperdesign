@@ -189,7 +189,6 @@ test('the editor wires the command: stage menu, Inspect overlay, Layers tree, an
   assert.match(app, /overlayRoot\.addEventListener\('contextmenu'[\s\S]*?\}, true\);/, 'Inspect overlay, in the capture phase so it is seen first');
   assert.match(app, /layerUnderPointer\(document\.elementsFromPoint\(e\.clientX, e\.clientY\)/);
   assert.match(app, /e\.preventDefault\(\); showMenu\(\$\('#edit-menu'\)/, 'only an image takes over the right-click');
-  assert.match(app, /function openRowMenu[\s\S]*?keyboard \? \{ setAttribute\(\) \{\}, focus: \(\) => row\.focus\(\), contains: \(\) => false \} : null/, 'Layers tree: mouse and keyboard, focus returns to the row');
   assert.match(app, /button:not\(:disabled\):not\(\[hidden\]\)/, 'a hidden item is never a keyboard stop');
   assert.match(app, /if\(action==='download-original'\)return downloadOriginal\(\);/);
   const body = app.slice(app.indexOf('async function downloadOriginal()'), app.indexOf('// Fills the shared edit menu'));

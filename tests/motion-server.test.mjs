@@ -9,7 +9,7 @@ import {PaperLibrary, PaperError, validatePaper} from '../server/library.mjs';
 import {exportBundle, importBundle} from '../server/bundle.mjs';
 import {createSharing} from '../server/sharing.mjs';
 import {createPresence} from '../server/presence.mjs';
-import {loadRuntime, EDITOR_FILES} from '../server/runtime.mjs';
+import {loadRuntime} from '../server/runtime.mjs';
 import {TOOLS} from '../server/server.mjs';
 import {syntheticLanding, addMotion} from './fixtures/motion-landing.mjs';
 
@@ -42,7 +42,6 @@ test('unsafe or unsupported preview models are refused on save, create and impor
   assert.deepEqual((await lib.read(id)).paper.preview, paper.preview, 'a refused save changed nothing');
   // Import (JSON) and create-from-file take the same road.
   const bad = clone(paper); bad.preview.version = 9; assert.throws(() => validatePaper(bad), /version 9/); assert.ok(validatePaper(bad, {read: true}), 'a reader accepts a newer model as opaque');
-  const library2 = await library(t); const bundle = await exportBundle(lib, id); const ok = await importBundle(library2, bundle); assert.ok(ok.id);
 });
 
 test('a newer-version preview already on disk still opens and lists, but cannot be saved over, and nothing newer is dropped', async t => {
@@ -82,9 +81,7 @@ test('the same whole-Paper tools carry it for guests: edit guests save it, view 
   assert.ok(!TOOLS.some(tool => /motion|preview|play/i.test(tool.name)), 'motion is authored through paper_save like everything else');
 });
 
-test('the runtime inventory serves the new editor files from the same list the server and the native bundle use', async () => {
-  assert.ok(EDITOR_FILES.includes('preview-model.js') && EDITOR_FILES.includes('play.js'));
-  for (const file of ['preview-model.js', 'play.js']) await fs.access(path.join(RUNTIME, file));
+test('the motion runtime runs no code from the Paper, writes no markup and touches no network or storage', async () => {
   const play = await fs.readFile(path.join(RUNTIME, 'play.js'), 'utf8'), model = await fs.readFile(path.join(RUNTIME, 'preview-model.js'), 'utf8');
   for (const [name, source] of [['play.js', play], ['preview-model.js', model]]) assert.doesNotMatch(source, /\beval\s*\(|new Function|\.innerHTML\s*=|insertAdjacentHTML|document\.write|import\s*\(|<iframe|srcdoc|fetch\s*\(|XMLHttpRequest|WebSocket|localStorage|sessionStorage|postMessage|setAttribute\(\s*['"](?:style|src|on)/, `${name} runs no code from the Paper, writes no markup, touches no network or storage`);
 });

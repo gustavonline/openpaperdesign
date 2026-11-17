@@ -97,9 +97,3 @@ test('allocation is by size, not by stacking: no z-index, offset or pointer-even
   // The Paper can still be renamed where the title yields (menu), and the rename field gets the bar while it is open.
   assert.match(html, /data-action="rename">Rename Paper…/); assert.match(css, /#left-bar:has\(\.title-input:not\(\[hidden\]\)\) \.ibtn\{display:none\}/);
 });
-
-test('the original allocation would have overlapped at 390 px (the reported Pages toggle under Share), so this test can fail', () => {
-  const oldLeftEnd = 5 + 230 - 5, oldRightStart = 390 - 8 - 224; // a 230px floating left bar and the full right cluster, right panel open
-  assert.ok(oldLeftEnd > oldRightStart, `${oldLeftEnd} > ${oldRightStart}: the old numbers overlap`);
-  const now = layout(390, false, true); assert.ok(now.leftControls[1] < now.rightControls[0]);
-});

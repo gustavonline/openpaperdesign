@@ -107,7 +107,6 @@ test('several layers under different animated parents all follow the same pointe
 test('Shift locks the axis the person sees, not a model axis; Alt does not matter while posed; the first three pixels still do not start a drag (the editor’s own threshold)', async () => {
   const w = await world({chain: [{}, {rotate: 40, sx: 1.3}]}), leaf = w.mover[0], before = centre(leaf); drag(w, 80, 30, {shiftKey: true});
   const shown = visibleDelta(ancestorsOf(w), {x: centre(leaf).x - before.x, y: centre(leaf).y - before.y}); nearPoint({x: shown.x * w.camera.z, y: shown.y * w.camera.z}, {x: 80, y: 0}, 'locked to the screen horizontal');
-  const v = await world({chain: [{}, {rotate: 40, sx: 1.3}]}); drag(v, 10, 90, {shiftKey: true}); const u = centre(v.mover[0]), s = visibleDelta(ancestorsOf(v), {x: u.x - 150 - 70 + 0, y: u.y - 100 - 47.5}); void s;
   const a = await world({chain: [{}, {rotate: 40, sx: 1.3}]}), c0 = centre(a.mover[0]); drag(a, 40, 40, {altKey: true}); const d = visibleDelta(ancestorsOf(a), {x: centre(a.mover[0]).x - c0.x, y: centre(a.mover[0]).y - c0.y}); nearPoint({x: d.x * a.camera.z, y: d.y * a.camera.z}, {x: 40, y: 40}, 'Alt');
   const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8'); assert.match(app, /if \(gesture\.moved\)|if \(!gesture\.moved && Math\.hypot\(dx, dy\) < 3\) return;/);
 });

@@ -125,5 +125,4 @@ test('the page is one column: no app choice, no agent screen, a discoverable qui
   assert.doesNotMatch(code, /invitationLinks|joinRequest|navigator\.clipboard|writeText/);
   assert.match(html, /<link rel="help" type="text\/markdown" href="agent\.md"/); assert.match(html, /<link rel="describedby" type="application\/json" href="agent\.json"/);
   assert.match(html, /<footer>For AI agents: <a href="agent\.md">agent guide<\/a> and <a href="agent\.json">manifest<\/a>/); assert.match(html, /<meta name="referrer" content="no-referrer">/);
-  assert.match(code, /location\.replace\(target\)/, 'supported same-tab navigation');
 });

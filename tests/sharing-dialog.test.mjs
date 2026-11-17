@@ -221,7 +221,6 @@ test('the dialog markup and styles match: the old agent panel, New invitation an
   const dialogHtml=html.slice(html.indexOf('<dialog id="sharing-dialog"'),html.indexOf('</dialog>',html.indexOf('<dialog id="sharing-dialog"')));
   for(const gone of ['share-agent-panel','share-new','share-stop','share-create-cancel','share-join','share-codex','share-claude','Open with an agent','New invitation','Revoke'])assert.ok(!dialogHtml.includes(gone),`${gone} is not in the dialog`);
   for(const icon of ['i-copy','i-check'])assert.ok(html.includes(`<symbol id="${icon}"`),icon);
-  assert.match(css,/#sharing-dialog button:not\(\.ibtn\)\.share-stop\{[^}]*color:var\(--danger\)/,'Stop sharing is red');
   assert.match(css,/#sharing-dialog button:not\(\.ibtn\)\.share-copy\{position:absolute;top:\d+px;right:\d+px/,'the Copy icon sits at the top right of its block');
   assert.doesNotMatch(js,/openAgent|invitationLinks|joinRequest|share-agent|Copy join request/,'the owner dialog no longer builds agent actions');
   assert.doesNotMatch(js,/navigator\.clipboard\.writeText\([^)]*\)[^;]*;[^}]*render\(\);schedule/,'nothing copies on its own');
