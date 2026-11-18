@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=271dd71bf261"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
+<head><script>try{const theme=localStorage.getItem('openpaperdesign:theme')||localStorage.getItem('osm-paper:theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}addEventListener('storage',e=>{if(e.key==='openpaperdesign:theme'){if(e.newValue==='dark'||e.newValue==='light')document.documentElement.dataset.theme=e.newValue;else delete document.documentElement.dataset.theme;}});</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paper</title><link rel="icon" href="data:,"><link rel="stylesheet" href="chrome.css?v=cf976c37db1d"><link rel="stylesheet" href="canvas.css?v=0634d935f7e4"><link rel="stylesheet" href="notion.css?v=bd1dc64ee143"></head>
 <body class="right-open">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
@@ -206,9 +206,11 @@
 </div>
 <!-- Exports of the artwork as it is rendered (no editor chrome), and the whole Paper as its file. -->
 <div id="export-menu" data-canvas-chrome class="float menu" role="menu" aria-label="Share and export" hidden>
-  <button type="button" role="menuitem" id="open-sharing">Share this Paper…</button>
+  <div class="menu-label menu-heading owner-only" id="share-live-heading">Live on this computer</div>
+  <button type="button" role="menuitem" id="open-sharing" aria-describedby="share-live-heading">Share this Paper…<kbd>invite</kbd></button>
   <button type="button" role="menuitem" id="copy-paper-link" hidden>Copy link</button>
   <hr class="owner-only">
+  <div class="menu-label menu-heading" id="export-copy-heading">Export a copy</div>
   <div class="menu-label" id="export-target"></div>
   <button type="button" role="menuitem" data-export="png">PNG image<kbd>transparent</kbd></button>
   <button type="button" role="menuitem" data-export="jpeg">JPEG image<kbd>white background</kbd></button>
