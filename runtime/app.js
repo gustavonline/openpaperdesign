@@ -553,7 +553,7 @@ async function dropImages(e){
   if(inspection){message('Switch to Edit to add images to the canvas.');return;}
   if(importing){message('Images are still being added. Drop again in a moment.');return;}
   const files=[...e.dataTransfer.files],candidate=boards.get(e.target.closest?.('[data-board]')?.dataset.board),board=candidate?.artboard?keyOf(candidate.page,candidate.node.id):null,before=scene;
-  importing=true;
+  importing=true;let nextX=0;
   try{
     const result=await importImageFiles(files,{
       read:file=>file.arrayBuffer(),measure:measureImage,
@@ -562,8 +562,10 @@ async function dropImages(e){
       place:(item,index)=>{
         scene.assets[item.asset]=item.path;if(item.saveAs){scene.assetNames??={};scene.assetNames[item.asset]??=item.saveAs;}
         const size=imageSize(item.size,{z:camera.z,w:stage.clientWidth,h:stage.clientHeight}),name=(item.saveAs||'Image').replace(/\.[^.]+$/,'').slice(0,80)||'Image';
-        // Centred on the drop point (then stepped for further files), whatever the camera: insertTemplate maps screen to world.
-        insertTemplate({name,root:1,nodes:[{id:1,type:'rect',name,rect:{x:0,y:0,w:size.w,h:size.h},style:{fills:[{type:'image',asset:item.asset,mode:'fit',...(item.saveAs?{name:item.saveAs}:{})}],opacity:1},visible:true,locked:false}]},{board,x:e.clientX-size.w*camera.z/2+index*28,y:e.clientY-size.h*camera.z/2+index*28});
+        // The first file is centred on the drop point and further files follow it in a row to the right, 24px apart on screen, so a later,
+        // larger image never covers an earlier one. Whatever the camera: insertTemplate maps screen to world.
+        const w=size.w*camera.z,x=index?nextX:e.clientX-w/2;nextX=x+w+24;
+        insertTemplate({name,root:1,nodes:[{id:1,type:'rect',name,rect:{x:0,y:0,w:size.w,h:size.h},style:{fills:[{type:'image',asset:item.asset,mode:'fit',...(item.saveAs?{name:item.saveAs}:{})}],opacity:1},visible:true,locked:false}]},{board,x,y:e.clientY-size.h*camera.z/2});
       },
     });
     message(importSummary(result));
