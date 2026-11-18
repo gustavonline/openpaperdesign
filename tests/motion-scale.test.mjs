@@ -37,7 +37,6 @@ async function rig() {
   const make = new Function('state', 'previewProblem', `let previewEdits = 0; let scene = state.scene; ${code}\nreturn {validPreview, edit: () => { previewEdits++; }, setScene: next => { scene = next; }, scene: () => scene};`);
   return {...make(state, countingProblem), counts, scene};
 }
-const flush = async () => { await new Promise(resolve => setImmediate(resolve)); };
 
 test('asking for the model is one whole-Paper validation per change, however many times and from however many layers it is asked', async () => {
   const r = await rig(); assert.equal(r.counts.validations, 0, 'nothing is validated until something asks');
@@ -80,9 +79,5 @@ test('building a 2801-layer scene with motion: the layers say they are dirty 280
   };
   const before = await run(false), after = await run(true);
   assert.ok(after <= 2, `with the kept answer it is ${after}`); assert.ok(before > after, 'the runtime’s own batching already bounds the questions; the kept answer bounds each one');
-  // The pattern the review measured: every layer built asks six times (the toggle’s repaint) and the old host validated the whole Paper for each question.
-  const scene = bigPaper(), counts = {validations: 0}, {code} = await appSlice(), make = new Function('state', 'previewProblem', `let previewEdits = 0; let scene = state.scene; ${code}\nreturn {validPreview};`), kept = make({scene}, (preview, paper) => { counts.validations++; return previewProblem(preview, paper); }).validPreview;
-  let asks = 0; for (let layer = 0; layer < nodeCount(scene); layer++) for (let i = 0; i < 6; i++) { asks++; kept(); }
-  assert.equal(asks, 16806); assert.equal(counts.validations, 1, 'one whole-Paper validation for 16,806 questions, where the uncached host did 16,806');
-  console.log(`# validation count, 2801 layers: ${asks} questions -> ${counts.validations} validation (was ${asks}); runtime run: ${before} -> ${after}`); await flush();
+  // Repeated questions to the kept answer without an edit are the first test's (5000 questions, one validation).
 });

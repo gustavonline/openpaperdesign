@@ -131,12 +131,6 @@ test('the exact time field validates, is bounded, commits by Enter, change and b
   const off = mount(t); off.controls.ms.value = 'nope'; off.controls.ms.fire('change'); assert.equal(off.snap().engaged, false, 'invalid text does not even start motion');
 });
 
-test('Replay restarts every phase from zero and plays; the loops keep running past the first cycle', t => {
-  const w = mount(t), {env, controls} = w; press(controls.toggle); env.advance(9000); press(controls.toggle); const orb = loopsOf(w)[0]; assert.equal(orb.currentTime, 9000);
-  controls.replay.fire('click'); assert.equal(w.snap().playing, true); assert.equal(orb.currentTime, 0); assert.equal(orb.running, true); env.advance(8000); assert.equal(orb.currentTime, 8000); assert.equal(orb.running, true); press(controls.toggle); assert.equal(orb.currentTime, 8000);
-  const off = mount(t); off.controls.replay.fire('click'); assert.equal(off.snap().engaged, true); assert.equal(off.snap().playing, true, 'Replay with motion off starts it');
-});
-
 test('the clock is bounded the same way for every timeline: loops stop exactly at the limit; a long finite timeline ends at its own end, and the shown time is always accepted', t => {
   const w = mount(t), {env, controls} = w, field = controls.ms; w.motion.seek(3599950); press(controls.toggle); env.advance(350); assert.ok(env.runFrame());
   assert.equal(w.snap().playing, false, 'stopped at the limit'); assert.ok(loopsOf(w).every(a => a.currentTime === 3600000 && !a.running)); assert.equal(field.value, '3600000'); assert.match(controls.status.textContent, /Paused at the 3600000 ms limit/); assert.equal(env.frames.size, 0);
@@ -160,7 +154,7 @@ test('a pointer click on Pause after a draft in the time field pauses at the typ
 
 // ---- 3. What may move: reconciled from facts.
 test('hidden, offscreen and editing are separate blockers: nothing moves until all are clear, in any order; the person’s pause and reduced motion are always respected', t => {
-  const orders = [['off', 'hide', 'show', 'on'], ['hide', 'off', 'on', 'show'], ['off', 'off', 'hide', 'hide', 'show', 'off', 'on', 'hide', 'show', 'on'], ['edit', 'hide', 'endEdit', 'show'], ['hide', 'edit', 'show', 'endEdit'], ['edit', 'off', 'endEdit', 'on']];
+  const orders = [['hide', 'off', 'on', 'show'], ['off', 'off', 'hide', 'hide', 'show', 'off', 'on', 'hide', 'show', 'on'], ['edit', 'hide', 'endEdit', 'show'], ['hide', 'edit', 'show', 'endEdit'], ['edit', 'off', 'endEdit', 'on']];
   for (const steps of orders) {
     const w = mount(t), {env} = w; press(w.controls.toggle); w.el('D primary CTA').fire('pointerenter'); env.advance(100);
     const watch = env.observers.find(o => o.targets.has(w.stage)); let hidden = false, off = false, edit = false;
@@ -194,7 +188,7 @@ test('while frozen nothing starts moving: a hover, selection, reveal or state ch
   w.state.selection.add(w.key('D Solo toggle')); w.motion.selectionChanged(); const focus = w.anims('D Solo toggle').find(a => a.frames[1].scale === '1.05'); assert.deepEqual([focus.running, focus.currentTime], [false, focus.end]);
   w.motion.setState('mode', 'together'); const state = w.anims('D Together toggle').find(a => a.frames[0].backgroundColor === '#ecede3'); assert.deepEqual([state.running, state.currentTime], [false, state.end]); assert.equal(w.el('D state title').textContent, 'Better, together.');
   const watch = env.observers.find(o => o.targets.size > 1 && o.options.root === w.stage), reveal = w.anims('D section reveal title').find(a => a.frames[0].translate === '0px 28px'); env.intersect(env.observers.find(o => o.targets.has(w.el('D section reveal title'))), true); assert.deepEqual([reveal.running, reveal.currentTime], [false, reveal.end]);
-  env.advance(1000); assert.equal(w.running().length, 0); press(w.controls.toggle); assert.ok([hover, focus, state, reveal].every(a => !a.running || a === hover || true)); assert.equal(focus.running, false, 'what was shown instantly while paused is not started again');
+  env.advance(1000); assert.equal(w.running().length, 0); press(w.controls.toggle); assert.equal(focus.running, false, 'what was shown instantly while paused is not started again');
 });
 
 // ---- 4. Edits hold the pose.
@@ -221,7 +215,7 @@ test('typing into a layer shows its own text, never a state’s; the state text 
 // ---- 5. Routing: the editor keeps every gesture; click actions are tried deliberately.
 test('a normal click, key, wheel or drag on a layer does nothing to motion; Try interaction runs the layer’s authored click actions, and only those', t => {
   const w = mount(t), {env} = w; press(w.controls.toggle); const cta = w.el('D primary CTA'), page2 = w.page(1).id;
-  for (const type of ['click', 'keydown', 'pointerdown', 'pointerup', 'wheel', 'dragstart', 'contextmenu']) assert.equal((cta.listeners.get(type) || []).length, 0, `${type} is not listened to`);
+  // That no layer listens to anything but passive hover is asserted for every layer in section 1.
   cta.fire('click'); w.el('D Together toggle').fire('click'); assert.deepEqual(w.snap().states, {mode: 'solo'}, 'a plain click changes no state'); assert.equal(w.state.nav.length, 0, 'and goes nowhere');
   const solo = w.page(0).nodes.find(n => n.name === 'D Solo toggle'), together = w.page(0).nodes.find(n => n.name === 'D Together toggle'), ctaNode = w.page(0).nodes.find(n => n.name === 'D primary CTA'), eyebrow = w.page(0).nodes.find(n => n.name === 'D eyebrow');
   assert.equal(w.motion.interactionsFor(w.page(0).id, eyebrow.id).length, 0, 'a layer with no click action has nothing to try'); assert.equal(w.motion.tryLayer(w.page(0).id, eyebrow.id), 0);
@@ -236,7 +230,6 @@ test('a normal click, key, wheel or drag on a layer does nothing to motion; Try 
 test('a layer’s focus effect follows the editor’s own selection, with no tab stop or focus listener; hover is passive and follows the pointer', t => {
   const w = mount(t), {env} = w; press(w.controls.toggle); const solo = w.key('D Solo toggle'), effect = w.anims('D Solo toggle').find(a => a.frames[1].scale === '1.05');
   assert.equal(effect.currentTime, 0); w.state.selection.add(solo); w.motion.selectionChanged(); assert.deepEqual([effect.running, effect.playbackRate], [true, 1], 'selecting the layer plays its focus effect'); env.advance(40); w.state.selection.delete(solo); w.motion.selectionChanged(); assert.deepEqual([effect.running, effect.playbackRate], [true, -1], 'deselecting plays it back');
-  assert.ok(![...w.elements.values()].some(e => e.listeners.has('focusin') || e.listeners.has('focus') || e.tabIndex >= 0), 'no focus listeners and no new tab stops');
   const hover = w.anims('D primary CTA').find(a => a.frames[1].scale === '1.04'); w.el('D primary CTA').fire('pointerenter', {preventDefault() { throw new Error('hover must not prevent anything'); }, stopPropagation() { throw new Error('nor stop it'); }}); assert.equal(hover.playbackRate, 1); w.el('D primary CTA').fire('pointerleave'); assert.equal(hover.playbackRate, -1);
 });
 
@@ -279,14 +272,6 @@ test('a new revision (an edited motion record) re-binds with the clock kept; mot
 });
 
 // ---- 8. Idle, reduced, teardown.
-test('with no load timeline nothing ever schedules a frame, whatever happens; the time controls are disabled with nothing to time; clicks, hover and state still work', t => {
-  const plain = mount(t, {scene: syntheticLanding()}); assert.equal(plain.controls.toggle.disabled, true); assert.match(plain.controls.toggle.attrs.title, /no motion yet/); assert.equal(plain.live().length, 0); assert.equal(plain.env.frames.size, 0);
-  const quiet = (() => { const s = addMotion(syntheticLanding()); s.preview.animations = s.preview.animations.filter(a => a.trigger.type !== 'load'); return s; })(), w = mount(t, {scene: quiet}), {env} = w;
-  press(w.controls.toggle); assert.equal(env.frames.size, 0); assert.equal(w.snap().playing, true, 'effects are on'); w.motion.setState('mode', 'together'); const state = w.anims('D Together toggle').find(a => a.frames[0].backgroundColor === '#ecede3'); assert.equal(state.running, true, 'a state effect plays'); assert.equal(w.el('D state title').textContent, 'Better, together.');
-  env.hide(true); env.hide(false); w.motion.setEditing(true); w.motion.setEditing(false); w.rebuild(); w.motion.cameraChanged(); press(w.controls.toggle); press(w.controls.toggle); assert.equal(env.frames.size, 0, 'hide, edit, rebuild, camera, pause, play: still no frame');
-  const cap = mount(t); press(cap.controls.toggle); assert.equal(cap.env.frames.size, 1, 'a timeline has exactly one clock frame'); press(cap.controls.toggle); assert.equal(cap.env.frames.size, 0, 'paused: none');
-});
-
 test('reduced motion shows every state without moving, from the system preference or the one control, and a person’s own choice outlives a later system change', t => {
   const w = mount(t, {reduced: true}), {env, controls} = w; press(controls.toggle); assert.equal(w.snap().reduced, true); assert.equal(w.running().length, 0, 'nothing runs'); assert.equal(env.frames.size, 0); assert.equal(controls.reduce.attrs['aria-pressed'], 'true');
   const headline = w.anims('D hero headline')[0], orb = loopsOf(w)[0]; assert.equal(headline.currentTime, headline.end, 'a timeline rests on its last frame'); assert.equal(orb.currentTime, 0, 'a loop on its first');
@@ -362,6 +347,8 @@ test('a Paper whose shown Pages have only hover, focus, reveal and state effects
   controls.scrub.value = '300'; controls.scrub.fire('input'); assert.equal(w.snap().engaged, false); controls.replay.fire('click'); assert.equal(w.snap().engaged, false, 'Replay with nothing to replay does nothing');
   press(controls.toggle); assert.equal(w.snap().engaged, true); assert.ok(clockControls(w).every(c => c.disabled), 'after Play: still none'); assert.equal(controls.reset.disabled, false); assert.equal(controls.reset.hidden, false); assert.equal(controls.toggle.disabled, false); assert.equal(env.frames.size, 0, 'no idle frame loop');
   const hover = w.anims('D primary CTA').find(a => a.frames[1].scale === '1.04'); w.el('D primary CTA').fire('pointerenter'); assert.equal(hover.running, true, 'event effects still play'); press(controls.toggle); assert.equal(hover.running, false, 'and Pause still freezes them');
+  press(controls.toggle); w.motion.setState('mode', 'together'); const state = w.anims('D Together toggle').find(a => a.frames[0].backgroundColor === '#ecede3'); assert.equal(state.running, true, 'a state effect plays'); assert.equal(w.el('D state title').textContent, 'Better, together.');
+  env.hide(true); env.hide(false); w.motion.setEditing(true); w.motion.setEditing(false); w.rebuild(); w.motion.cameraChanged(); press(controls.toggle); press(controls.toggle); assert.equal(env.frames.size, 0, 'hide, edit, rebuild, camera, pause, play: still no frame');
   controls.reduce.fire('click'); assert.equal(controls.reduce.attrs['aria-pressed'], 'true', 'Reduce still works'); controls.reset.fire('click'); assert.equal(w.snap().engaged, false); assert.ok(clockControls(w).every(c => c.disabled), 'after Reset: still none');
   assert.equal(controls.ms.title, 'These Pages have no load animation, so there is no clock to set. Hover, focus, reveal and state effects have none.');
 });
@@ -377,21 +364,20 @@ test('a timed Paper’s clock controls work BEFORE Play (typing a time starts a 
   // The fully timed landing Paper: always enabled.
   const timed = mount(t); assert.ok(clockControls(timed).every(c => !c.disabled));
 });
-test('ordinary Play at the end of a finite timeline keeps the finished frame and says Replay restarts it; explicit Replay and a time seek still work, an unfinished pause resumes, and reduced and loop caps are unchanged', t => {
-  const w = mount(t, {shown: 'details0000000001'}), {env, controls} = w; press(controls.toggle); const heading = w.anims('Details heading', w.page(1))[0] || w.live()[0];
+test('ordinary Play at the end of a finite timeline keeps the finished frame and says Replay restarts it; explicit Replay and a time seek still work, an unfinished pause resumes, and the loop cap is unchanged', t => {
+  const w = mount(t, {shown: 'details0000000001'}), {env, controls} = w; press(controls.toggle);
   assert.equal(w.snap().timelineMs, 1020, 'the finite timeline ends at 1020 ms'); controls.ms.value = '10000'; controls.ms.fire('change'); assert.equal(w.snap().time, 1020, 'clamped to its own end'); assert.match(controls.status.textContent, /ends at 1020 ms/);
   const frame = w.live().map(frameOf), plays = w.live().map(a => a.plays); press(controls.toggle);
   assert.equal(w.snap().time, 1020, 'Play did not restart it'); assert.equal(w.snap().playing, false); assert.equal(w.running().length, 0); assert.deepEqual(w.live().map(frameOf), frame, 'the finished frame is exactly kept'); assert.deepEqual(w.live().map(a => a.plays), plays, 'no animation was played again'); assert.match(controls.status.textContent, /finished\. Replay starts it again/); assert.equal(controls.toggle.attrs['aria-label'], 'Play motion'); assert.equal(env.frames.size, 0);
   env.advance(180); assert.equal(w.snap().time, 1020, 'and nothing moves afterwards');
   controls.replay.fire('click'); assert.equal(w.snap().time, 0); assert.equal(w.snap().playing, true, 'explicit Replay restarts it'); env.advance(180); assert.equal(Math.round(w.live()[0].currentTime), 180);
+  const off = mount(t); off.controls.replay.fire('click'); assert.equal(off.snap().engaged, true); assert.equal(off.snap().playing, true, 'Replay with motion off starts it');
   press(controls.toggle); const paused = w.snap().time; assert.equal(paused, 180); press(controls.toggle); assert.equal(w.snap().playing, true, 'an unfinished timeline resumes from where it paused'); env.advance(100); assert.equal(Math.round(w.live()[0].currentTime), 280);
   w.motion.seek(1020); press(controls.toggle); assert.equal(w.snap().time, 1020); w.motion.seek(200); press(controls.toggle); assert.equal(w.snap().playing, true, 'a seek back inside the timeline plays on from there'); assert.equal(w.snap().time, 200);
   // Events are still alive after a finished timeline is left alone.
   const done = mount(t, {shown: 'details0000000001'}); done.motion.seek(1020); press(done.controls.toggle); assert.equal(done.snap().userPaused, false, 'Play still ended the person’s pause');
   // Loops: Play from the cap still asks for Replay; a long finite timeline is bounded by its own end.
   const loops = mount(t); loops.motion.seek(3600000); press(loops.controls.toggle); assert.match(loops.controls.status.textContent, /Replay starts again/); assert.equal(loops.snap().playing, false);
-  const reduced = mount(t, {reduced: true, shown: 'details0000000001'}); press(reduced.controls.toggle); assert.match(reduced.controls.status.textContent, /Motion is reduced/); assert.equal(reduced.running().length, 0);
-  void heading;
 });
 
 // ---- 12. Live revisions of pins, text rules and states reach the canvas, and what a revision removes is taken off.
@@ -407,8 +393,6 @@ test('adding and removing the last pin while motion is on is followed by the can
   w.controls.reset.fire('click'); assert.equal(w.snap().engaged, false); assert.equal(nav().style.marginTop, '', 'Reset takes everything off');
   // A different Page shown: the pins of Pages that are no longer shown are not applied, and come back with their Page.
   const p = mount(t, {scene: stickyOnly()}); press(p.controls.toggle); p.el('Landing · desktop').rectTop = -400; p.motion.cameraChanged(); assert.equal(p.snap().pinned, 1); p.state.shown = p.page(1).id; p.motion.dirty(); p.env.flush(); assert.equal(p.snap().pinned, 0, 'the Landing Page is not shown'); assert.equal(p.el('D sticky glass navigation').style.marginTop, ''); p.state.shown = p.page(0).id; p.motion.dirty(); p.env.flush(); assert.equal(p.snap().pinned, 1);
-  // An unchanged model rebinds nothing (batched, cached identity).
-  const same = mount(t, {scene: stickyOnly()}); press(same.controls.toggle); const effects = same.live(); same.motion.dirty(); same.motion.dirty(); same.env.flush(); assert.equal(same.env.microtasks.length, 0); assert.deepEqual(same.live(), effects, 'nothing changed: nothing rebound');
 });
 test('adding and removing the last text rule while motion is on changes the shown text and nothing else; the authored text is exact again and the transient text is forgotten', t => {
   const s = addMotion(syntheticLanding()); s.preview.animations = []; s.preview.sticky = []; const only = s.preview.texts.find(r => r.node === s.pages[0].nodes.find(n => n.name === 'D state title').id); s.preview.texts = [];

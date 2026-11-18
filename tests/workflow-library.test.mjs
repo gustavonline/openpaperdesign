@@ -1,16 +1,15 @@
 // Source-tree workflow: a disposable Paper is created, saved, reopened, protected from stale writes,
-// exported as a bundle, imported, and served over MCP. Nothing outside the temp folder is touched.
+// exported as a bundle and imported. Nothing outside the temp folder is touched. Serving MCP over stdio with no
+// node_modules is checked on the unpacked archive (workflow-package.test.mjs); the source tree's stdio server is driven
+// by lifecycle-open and agent-motion-http.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {PaperLibrary, PaperError} from '../server/library.mjs';
 import {exportBundle, importBundle} from '../server/bundle.mjs';
-import {smoke} from '../scripts/smoke.mjs';
 
-const root = fileURLToPath(new URL('..', import.meta.url));
 const disposable = async t => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'paper-test-'));
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
@@ -45,8 +44,4 @@ test('bundle export imports as a new Paper, and a damaged bundle is refused', as
   assert.equal((await target.read(imported.id)).paper.name, 'Portable');
   await assert.rejects(importBundle(target, bundle.subarray(0, bundle.length - 10)), error => error instanceof PaperError && error.status === 400);
   assert.equal((await target.list()).length, 1, 'a refused import must not leave a Paper behind');
-});
-
-test('source tree serves MCP over stdio without node_modules in use', {timeout: 60000}, async () => {
-  await smoke(root);
 });

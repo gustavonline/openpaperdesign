@@ -8,7 +8,7 @@ Target domain: **https://openpaperdesign.gustavonline.com/**. Existing Cloudflar
 
 ```sh
 python3 -m http.server 4389 --bind 127.0.0.1 --directory site
-node --test tests/site.mjs
+node --test tests/site.test.mjs
 ```
 
 Check desktop/mobile, themes, navigation, gallery and Copy commands / Copy install prompt, including clipboard failure. The Online menu links to the owner’s existing menu for resources, one-on-one collaboration and custom projects. No new lead form is installed.

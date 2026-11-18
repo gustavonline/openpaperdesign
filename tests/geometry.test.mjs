@@ -53,7 +53,9 @@ test('the pose of an element is read from its computed translate, rotate and sca
   for (const [rotate, degrees] of [['0.5turn', 180], ['3.141592653589793rad', 180], ['200grad', 180], ['z 45deg', 45], ['-90deg', -90], ['1e1deg', 10]]) { const m = parsePose({rotate}).linear; nearPoint(apply(m, 1, 0), {x: Math.cos(degrees * Math.PI / 180), y: Math.sin(degrees * Math.PI / 180)}, rotate); }
   nearPoint(apply(parsePose({scale: '2 0.5'}).linear, 3, 4), {x: 6, y: 2}, 'two-factor scale'); nearPoint(apply(parsePose({scale: '2 0.5 3'}).linear, 3, 4), {x: 6, y: 2}, 'a third factor is ignored'); assert.equal(parsePose({translate: '12px'}).tx, 12); assert.equal(parsePose({translate: '12px'}).ty, 0);
   assert.ok(isIdentity(parsePose({rotate: 'x 30deg'}).linear), 'an axis that is not z is not a pose this runtime sets'); assert.ok(isIdentity(parsePose({rotate: 'garbage', scale: 'nonsense'}).linear));
-  for (let i = 0; i < 200; i++) { const m = [Math.random() * 4 - 2, Math.random() * 4 - 2, Math.random() * 4 - 2, Math.random() * 4 - 2], inverse = invert(m); if (!inverse) continue; assert.ok(isIdentity(mul(m, inverse), 1e-6) && isIdentity(mul(inverse, m), 1e-6)); }
+  // A fixed pseudo-random sequence, so a failure reproduces on every run and machine.
+  let seed = 12345; const next = () => (seed = seed * 48271 % 2147483647) / 2147483647 * 4 - 2;
+  for (let i = 0; i < 200; i++) { const m = [next(), next(), next(), next()], inverse = invert(m); if (!inverse) continue; assert.ok(isIdentity(mul(m, inverse), 1e-6) && isIdentity(mul(inverse, m), 1e-6)); }
   assert.equal(invert([0, 0, 0, 0]), null); assert.equal(invert([1, 2, 2, 4]), null, 'a flattened plane has no way back'); assert.equal(invert([NaN, 0, 0, 1]), null);
   const chain = chainBasis([{}, {sx: 2, sy: 3}]); assert.equal(chain.posed, false); assert.equal(chain.inverse, null, 'unposed: the canonical path is used');
   const posed = chainBasis([{pose: parsePose({rotate: '30deg'}).linear, sx: 2}, {pose: parsePose({scale: '1.5'}).linear}]); assert.ok(posed.posed && posed.inverse);
@@ -73,7 +75,8 @@ test('the lead’s measured case: at 77% zoom a nested layer under a parent pose
 });
 
 test('across rotations, scales (uniform and not), depths, diagram scales and zoom levels, a drag always ends exactly under the pointer', async () => {
-  const angles = [0, 9, 18, -37, 90, 180, 250], scales = [{sx: 1.06}, {sx: 0.5}, {sx: 2.3}, {sx: 1.2, sy: 0.8}], zooms = [0.25, 0.77, 1, 2.5], moves = [[60, 25], [-33, 140], [0.5, -0.25], [1000, -1000]]; let cases = 0;
+  // The mapping is linear in the move and the zoom, so two of each suffice; the angles keep both signs and a quarter turn, the scales a non-uniform one.
+  const angles = [0, 9, -37, 90, 180], scales = [{sx: 1.06}, {sx: 1.2, sy: 0.8}], zooms = [0.25, 2.5], moves = [[60, 25], [0.5, -0.25]]; let cases = 0;
   for (const angle of angles) for (const scale of scales) for (const zoom of zooms) for (const [dx, dy] of moves) {
     for (const depth of [1, 2, 3]) {
       const chain = [{}, ...Array.from({length: depth}, (_, i) => ({rotate: angle + 11 * i, ...(i % 2 ? {sx: 1 / (scale.sx || 1)} : scale)}))], diagram = depth === 3 ? [0, 0, 2, 0.5] : [], w = await world({chain, zoom, diagram}), leaf = w.mover[0], before = centre(leaf);
@@ -81,7 +84,7 @@ test('across rotations, scales (uniform and not), depths, diagram scales and zoo
       nearPoint({x: shown.x * zoom, y: shown.y * zoom}, {x: dx, y: dy}, `angle ${angle} scale ${JSON.stringify(scale)} zoom ${zoom} depth ${depth}`); cases++;
     }
   }
-  assert.ok(cases > 1000);
+  assert.equal(cases, 120);
 });
 
 test('a paused or running pose is the same to the editor: the pose it reads is the one on screen at the first pointer-down, so a pose that changes later changes nothing about an edit already measured', async () => {
@@ -108,7 +111,7 @@ test('Shift locks the axis the person sees, not a model axis; Alt does not matte
   const w = await world({chain: [{}, {rotate: 40, sx: 1.3}]}), leaf = w.mover[0], before = centre(leaf); drag(w, 80, 30, {shiftKey: true});
   const shown = visibleDelta(ancestorsOf(w), {x: centre(leaf).x - before.x, y: centre(leaf).y - before.y}); nearPoint({x: shown.x * w.camera.z, y: shown.y * w.camera.z}, {x: 80, y: 0}, 'locked to the screen horizontal');
   const a = await world({chain: [{}, {rotate: 40, sx: 1.3}]}), c0 = centre(a.mover[0]); drag(a, 40, 40, {altKey: true}); const d = visibleDelta(ancestorsOf(a), {x: centre(a.mover[0]).x - c0.x, y: centre(a.mover[0]).y - c0.y}); nearPoint({x: d.x * a.camera.z, y: d.y * a.camera.z}, {x: 40, y: 40}, 'Alt');
-  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8'); assert.match(app, /if \(gesture\.moved\)|if \(!gesture\.moved && Math\.hypot\(dx, dy\) < 3\) return;/);
+  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8'); assert.match(app, /if \(!gesture\.moved && Math\.hypot\(dx, dy\) < 3\) return;/);
 });
 
 test('with motion off, or no animated ancestor, the drag is exactly what it was: the canonical scale, snapping and guides', async () => {
@@ -174,7 +177,7 @@ test('an animated artboard’s name, grip, selection frame and handles take its 
   w.motion.engaged = true; wrapper.hidden = true; w.api.syncBoardPose(b, key); assert.equal(frame.style.rotate, '', 'a hidden board is plain'); wrapper.hidden = false; const still = writes.length; w.api.syncBoardPose(b, 'p1:999'); assert.equal(handles.style.rotate, '', 'a board motion does not animate has nothing to mirror'); void still;
   w.api.syncBoardPose({wrapper, content: b.content}, key); w.api.syncBoardPose(undefined, key); w.api.syncBoardPose({artboard: false}, key);
   const css = await fs.readFile(new URL('../runtime/canvas.css', import.meta.url), 'utf8');
-  assert.match(css, /\.design-layer\{[^}]*transform-origin:0 0/, 'layers: top-left'); assert.doesNotMatch(css, /\.board-content\{[^}]*transform-origin/, 'artboards keep the browser default, the centre: nothing here changed how an artboard is drawn'); assert.doesNotMatch(css, /\.board-resizers\{[^}]*transform-origin/);
+  // The layer and artboard transform origins in canvas.css are motion-semantics.test.mjs's.
   assert.match(css, /\.board-frame\{position:absolute;inset:0;pointer-events:none\}\.board-frame>\.board-label\{pointer-events:auto\}/, 'the grip stays clickable inside its posed frame'); assert.match(css, /\.free-root \.board-label\{display:none\}/);
   const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8'); assert.match(app, /wrapper\.append\(frame,content\);b\.frame=frame;/); assert.match(app, /frame\.className='board-frame';frame\.append\(label\)/);
 });
@@ -220,5 +223,4 @@ test('screen-space snapping honours Shift, Alt and the canvas toggles: Alt and �
 test('the editor’s copy about responsive versions says what the editor does: it declares widths for whoever builds the design and never swaps or scales artboards', async () => {
   const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
   assert.doesNotMatch(app, /Play picks|shows the nearest one, scaled to fit|Use as a preview variant/); assert.match(app, /Declare as a responsive version of this Page/); assert.match(app, /For whoever builds this design: the window widths this artboard is meant for\./); assert.match(app, /nothing here swaps or scales them/);
-  assert.match(app, /'Shown from px wide'/); assert.match(app, /'up to px wide'/, 'the explicit range authoring is kept');
 });

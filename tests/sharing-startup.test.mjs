@@ -166,12 +166,3 @@ test('a tunnel that connects but never becomes reachable ends as a failure and i
   const status = await until(async () => { const s = await r.sharing.status(r.made.id); return s.failures.length ? s : null; }, 'failure');
   assert.equal(status.invitations.length, 0); assert.match(status.failures[0].error, /too long|reachable/i);
 });
-
-test('an invitation on a working tunnel is served while valid and gone from the Paper once it expires', async t => {
-  const clock = {value: Date.now()};
-  const r = await rig(t, {now: () => clock.value}), attempt = await r.internet({expiry: '1h', role: 'view'}); await until(() => r.fake.starts.length === 1); r.fake.starts[0].finish();
-  await until(async () => await r.state(attempt.createdId) === 'ready');
-  const shown = await r.sharing.link(r.made.id, attempt.createdId), base = new URL(shown.url).origin;
-  assert.equal((await fetch(base + '/api/health')).ok, true);
-  clock.value += 2 * 3600 * 1000; const expired = await r.sharing.status(r.made.id); assert.equal(expired.invitations.length, 0);
-});

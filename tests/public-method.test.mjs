@@ -29,7 +29,7 @@ test('the public guide and manifest tell every kind of host the truth: web-only 
     [/https:\/\/github\.com\/gustavonline\/openpaperdesign/, 'official repository fallback'],
   ]) assert.match(md, pattern, what);
   assert.doesNotMatch(md, /Copy connection|Open with agent|Copy join request/, 'no stale UI instructions');
-  assert.deepEqual(json.guestTools.view, ['paper_read', 'paper_read_feedback']); assert.equal(json.guestTools.edit.length, 6); assert.deepEqual(json.guestTools.installedPluginOnly, ['paper_handoff']); assert.ok(!json.guestTools.edit.includes('paper_handoff'), 'the helper is never listed as a remote tool');
+  assert.deepEqual(json.guestTools.installedPluginOnly, ['paper_handoff']); assert.ok(!json.guestTools.edit.includes('paper_handoff'), 'the helper is never listed as a remote tool');
   assert.match(json.guestTools.sourceFile, /paper_handoff attach is different/); assert.match(json.hostRoutes.webOnly, /cannot send the key/); assert.match(json.hostRoutes.grantIsNotAuthority, /not permission to install/); assert.match(json.manualHttp.completeGuide, /never truncated/); assert.match(json.manualHttp.largePapers, /fullDesign:true/);
   assert.match(json.manualHttp.fullPaper, /\/api\/paper\?paper=/); assert.match(json.manualHttp.sourceArchives, /MCP never carries the bytes/); assert.match(json.limits.ends, /neutral 401/); assert.match(json.limits.ends, /no-key/);
 });

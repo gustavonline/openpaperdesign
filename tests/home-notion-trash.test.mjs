@@ -18,11 +18,12 @@ const factory=()=>({
 const home=createHome(()=>{throw Error('Passive Home must not start a server')},{notionFactory:factory});
 const make=async name=>{const p=await library.create({name});states.set(p.id,{link:{pageId:'notion-page',url:'https://www.notion.so/0123456789abcdef0123456789abcdef'},autosync:{enabled:true}});return p;};
 
-test('local-only and legacy Trash requests preserve Notion while stopping autosync',async()=>{
+test('local-only and legacy Trash requests preserve Notion while stopping autosync; Home shows the last known linkage without starting a server',async()=>{
  const p=await make('Keep cloud');const moved=await home({action:'trash',paperId:p.id});
  assert.equal(moved.copies,'local');assert.equal(states.get(p.id).localTrashed,true);assert.ok(!events.includes('notion-trash:'+p.id));
  assert.equal((await home({action:'trash-list'})).items.find(i=>i.paperId===p.id).notion.link.pageId,'notion-page');
  await home({action:'restore',trashId:moved.trashId});assert.equal((await library.read(p.id)).paper.name,'Keep cloud');assert.ok(!events.includes('notion-restore:'+p.id));
+ const data=await home();assert.ok(data.papers.some(p=>p.notion?.link));
 });
 test('an unverified remote Trash result keeps the local Paper recoverable in place',async()=>{
  const p=await make('Uncertain');failTrash=true;
@@ -36,9 +37,6 @@ test('explicit two-copy Trash and Restore coordinate remote verification before 
  failRestore=true;await assert.rejects(home({action:'restore',trashId:moved.trashId,copies:'both'}),/restore not verified/);failRestore=false;
  await assert.rejects(library.folder(p.id));
  await home({action:'restore',trashId:moved.trashId,copies:'both'});assert.equal((await library.read(p.id)).paper.name,'Both copies');assert.equal(states.get(p.id).remoteTrashed,false);
-});
-test('Home exposes last known Notion linkage without starting a server',async()=>{
- const data=await home();assert.ok(data.papers.some(p=>p.notion?.link));
 });
 
 test('optional Notion metadata failure never prevents opening the local library',async()=>{
