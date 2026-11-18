@@ -25,16 +25,11 @@ const addText=(text,extra={})=>paper=>{
   page.nodes[0].children.push(id);
 };
 
-test('a blank Paper is genuinely empty, not an unavailable preview',async()=>withLibrary(async library=>{
-  const {id}=await library.create({name:'Blank'});
-  const shown=await paperPreview(library,id,1e6);
-  assert.equal(shown.preview.state,'empty');
-  assert.match(decode(shown.src),/<rect /);
-}));
-
-test('saved artwork gets a drawn preview and refreshes with each revision',async()=>withLibrary(async library=>{
+test('a blank Paper is genuinely empty; saved artwork gets a drawn preview that refreshes with each revision; over the budget it reports unavailable instead of a blank card',async()=>withLibrary(async library=>{
   const {id}=await library.create({name:'Poster'});
   const first=await paperPreview(library,id,1e6);
+  assert.equal(first.preview.state,'empty','a blank Paper is genuinely empty, not an unavailable preview');
+  assert.match(decode(first.src),/<rect /);
   await edit(library,id,addText('A clear direction'));
   const second=await paperPreview(library,id,1e6);
   assert.equal(second.preview.state,'art');
@@ -42,6 +37,8 @@ test('saved artwork gets a drawn preview and refreshes with each revision',async
   assert.match(decode(second.src),/A clear direction/);
   assert.equal((await paperPreview(library,id,1e6)).src,second.src,'an unchanged Paper reuses its preview');
   await edit(library,id,addText('Second change'));
+  const over=await paperPreview(library,id,10);
+  assert.equal(over.src,null);assert.equal(over.preview.state,'unavailable');
   assert.match(decode((await paperPreview(library,id,1e6)).src),/Second change/);
 }));
 
@@ -77,12 +74,6 @@ test('a stale saved thumbnail never replaces newer artwork; a fresh one is used'
   assert.equal((await paperPreview(library,id,1e6)).preview.source,'file');
   await fs.writeFile(file,'not a png');await fs.utimes(file,now,now);
   assert.equal((await paperPreview(library,id,1e6)).preview.source,'drawn');
-}));
-
-test('a preview over the budget reports unavailable instead of a blank card',async()=>withLibrary(async library=>{
-  const {id}=await library.create({name:'Budget'});await edit(library,id,addText('Hello'));
-  const shown=await paperPreview(library,id,10);
-  assert.equal(shown.src,null);assert.equal(shown.preview.state,'unavailable');
 }));
 
 const tree=async root=>{

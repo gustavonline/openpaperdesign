@@ -76,8 +76,7 @@ test('the same whole-Paper tools carry it for guests: edit guests save it, view 
   assert.equal((await lib.read(made.id)).paper.preview.animations[0].durationMs, 321, 'the refused save changed nothing');
   // Stale revision: the usual 409 flow, no blind retry and no merge of motion.
   const stale = await call(edit, 'paper_save', {paper: tuned, revision: read.revision}); assert.equal(stale.result.isError, true); assert.match(JSON.stringify(stale), /changed|revision|conflict/i);
-  // No new tool, and the per-role inventory is unchanged (view 2, edit 6).
-  assert.equal((await call(view, 'tools/list')).result.tools.length, 2); assert.equal((await call(edit, 'tools/list')).result.tools.length, 6);
+  // No new tool (the per-role inventory itself is checked in sharing-code and handoff tests).
   assert.ok(!TOOLS.some(tool => /motion|preview|play/i.test(tool.name)), 'motion is authored through paper_save like everything else');
 });
 

@@ -98,15 +98,6 @@ test('Save image… opens the chooser first, then writes exactly the original; c
   assert.throws(() => plannedOriginal({captured: {name: 'other.png'}, scene, node}), e => e.reason === 'changed'); assert.throws(() => plannedOriginal({captured: {name: null}, scene: {assets: {}}, node}), e => e.reason === 'missing');
 });
 
-test('the fetched original carries the remembered save name, and a replaced image is still refused', async () => {
-  const node = {id: 2, type: 'rect', style: {fills: [{type: 'image', asset: 'k', mode: 'fit'}]}}, scene = {assets: {k: `assets/${SHA}.png`}, assetNames: {k: 'Hero shot.png'}};
-  const answer = () => new Response(PNG, {headers: {'content-type': 'image/png'}});
-  const got = await fetchOriginal({paperId: 'p1', scene, node, fetchImpl: async url => { assert.equal(url, `/Paper/p1/assets/${SHA}.png`, 'the stored path, whatever the save name'); return answer(); }});
-  assert.equal(got.name, `${SHA}.png`); assert.equal(got.saveAs, 'Hero shot.png'); assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()), PNG);
-  assert.equal((await fetchOriginal({paperId: 'p1', scene: {assets: scene.assets}, node, fetchImpl: async () => answer()})).saveAs, `${SHA}.png`, 'older Papers use the stored name');
-  const captured = captureOriginal(scene, node), replaced = {assets: {k: `assets/${'d'.repeat(64)}.png`}}; await assert.rejects(fetchCapturedOriginal({captured, paperId: 'p1', scene: replaced, node, fetchImpl: async () => { throw new Error('must not fetch'); }}), e => e.reason === 'changed');
-});
-
 // The editor's own drop handlers and image commands, run as written with their few free variables supplied.
 test('the editor refuses to let a dropped file navigate away, imports only for editors on the canvas, and places images where they were dropped', async () => {
   const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');

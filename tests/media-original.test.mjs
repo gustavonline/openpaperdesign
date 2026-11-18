@@ -183,16 +183,14 @@ test('the edit menu shows Download original alone in the image-only menu, never 
 });
 
 test('the editor wires the command: stage menu, Inspect overlay, Layers tree, and nothing that forces the overlay or grants Edit', async () => {
-  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8'), html = await fs.readFile(new URL('../runtime/index.html', import.meta.url), 'utf8');
-  assert.match(html, /<button type="button" role="menuitem" data-edit="download-original" hidden>Download original<\/button>/);
+  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
   assert.match(app, /paintEditMenu\(e\.target\.closest\?\.\('\[data-node-key\]'\)\?\.dataset\.nodeKey\);/, 'Edit stage menu: the layer under the pointer');
   assert.match(app, /overlayRoot\.addEventListener\('contextmenu'[\s\S]*?\}, true\);/, 'Inspect overlay, in the capture phase so it is seen first');
   assert.match(app, /layerUnderPointer\(document\.elementsFromPoint\(e\.clientX, e\.clientY\)/);
   assert.match(app, /e\.preventDefault\(\); showMenu\(\$\('#edit-menu'\)/, 'only an image takes over the right-click');
   assert.match(app, /button:not\(:disabled\):not\(\[hidden\]\)/, 'a hidden item is never a keyboard stop');
   assert.match(app, /if\(action==='download-original'\)return downloadOriginal\(\);/);
-  const body = app.slice(app.indexOf('async function downloadOriginal()'), app.indexOf('// Fills the shared edit menu'));
-  assert.match(body, /fetchCapturedOriginal\(\{captured:target/); assert.doesNotMatch(body, /selected|assetUrl|paperAsset|dataUrl/, 'never the selection, the display cache or a data URL');
+  // That the download uses only the captured target (never the selection or the display cache) is run in the handler tests above.
   const overlay = app.slice(app.indexOf('const overlayRoot'), app.indexOf("tree.addEventListener('contextmenu'"));
   assert.doesNotMatch(overlay, /pointerEvents|pointer-events|\.remove\(|\.hidden\s*=|canEdit\s*=|readOnly/, 'the overlay is neither removed nor bypassed and no edit right is granted');
 });

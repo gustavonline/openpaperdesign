@@ -53,7 +53,9 @@ test('the pose of an element is read from its computed translate, rotate and sca
   for (const [rotate, degrees] of [['0.5turn', 180], ['3.141592653589793rad', 180], ['200grad', 180], ['z 45deg', 45], ['-90deg', -90], ['1e1deg', 10]]) { const m = parsePose({rotate}).linear; nearPoint(apply(m, 1, 0), {x: Math.cos(degrees * Math.PI / 180), y: Math.sin(degrees * Math.PI / 180)}, rotate); }
   nearPoint(apply(parsePose({scale: '2 0.5'}).linear, 3, 4), {x: 6, y: 2}, 'two-factor scale'); nearPoint(apply(parsePose({scale: '2 0.5 3'}).linear, 3, 4), {x: 6, y: 2}, 'a third factor is ignored'); assert.equal(parsePose({translate: '12px'}).tx, 12); assert.equal(parsePose({translate: '12px'}).ty, 0);
   assert.ok(isIdentity(parsePose({rotate: 'x 30deg'}).linear), 'an axis that is not z is not a pose this runtime sets'); assert.ok(isIdentity(parsePose({rotate: 'garbage', scale: 'nonsense'}).linear));
-  for (let i = 0; i < 200; i++) { const m = [Math.random() * 4 - 2, Math.random() * 4 - 2, Math.random() * 4 - 2, Math.random() * 4 - 2], inverse = invert(m); if (!inverse) continue; assert.ok(isIdentity(mul(m, inverse), 1e-6) && isIdentity(mul(inverse, m), 1e-6)); }
+  // A fixed pseudo-random sequence, so a failure reproduces on every run and machine.
+  let seed = 12345; const next = () => (seed = seed * 48271 % 2147483647) / 2147483647 * 4 - 2;
+  for (let i = 0; i < 200; i++) { const m = [next(), next(), next(), next()], inverse = invert(m); if (!inverse) continue; assert.ok(isIdentity(mul(m, inverse), 1e-6) && isIdentity(mul(inverse, m), 1e-6)); }
   assert.equal(invert([0, 0, 0, 0]), null); assert.equal(invert([1, 2, 2, 4]), null, 'a flattened plane has no way back'); assert.equal(invert([NaN, 0, 0, 1]), null);
   const chain = chainBasis([{}, {sx: 2, sy: 3}]); assert.equal(chain.posed, false); assert.equal(chain.inverse, null, 'unposed: the canonical path is used');
   const posed = chainBasis([{pose: parsePose({rotate: '30deg'}).linear, sx: 2}, {pose: parsePose({scale: '1.5'}).linear}]); assert.ok(posed.posed && posed.inverse);
@@ -174,7 +176,7 @@ test('an animated artboard’s name, grip, selection frame and handles take its 
   w.motion.engaged = true; wrapper.hidden = true; w.api.syncBoardPose(b, key); assert.equal(frame.style.rotate, '', 'a hidden board is plain'); wrapper.hidden = false; const still = writes.length; w.api.syncBoardPose(b, 'p1:999'); assert.equal(handles.style.rotate, '', 'a board motion does not animate has nothing to mirror'); void still;
   w.api.syncBoardPose({wrapper, content: b.content}, key); w.api.syncBoardPose(undefined, key); w.api.syncBoardPose({artboard: false}, key);
   const css = await fs.readFile(new URL('../runtime/canvas.css', import.meta.url), 'utf8');
-  assert.match(css, /\.design-layer\{[^}]*transform-origin:0 0/, 'layers: top-left'); assert.doesNotMatch(css, /\.board-content\{[^}]*transform-origin/, 'artboards keep the browser default, the centre: nothing here changed how an artboard is drawn'); assert.doesNotMatch(css, /\.board-resizers\{[^}]*transform-origin/);
+  // The layer and artboard transform origins in canvas.css are motion-semantics.test.mjs's.
   assert.match(css, /\.board-frame\{position:absolute;inset:0;pointer-events:none\}\.board-frame>\.board-label\{pointer-events:auto\}/, 'the grip stays clickable inside its posed frame'); assert.match(css, /\.free-root \.board-label\{display:none\}/);
   const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8'); assert.match(app, /wrapper\.append\(frame,content\);b\.frame=frame;/); assert.match(app, /frame\.className='board-frame';frame\.append\(label\)/);
 });

@@ -93,7 +93,7 @@ test('conflict offers a separate copy and a separate page, never an overwrite',a
   const h=harness([{...connected,syncState:'conflict',remote:'changed'}]);await h.ui.save();
   assert.ok(h.buttons().includes('Open Notion version as separate local Paper'));
   assert.ok(h.buttons().includes('Save my Paper elsewhere…'));
-  assert.equal(h.buttons().some(label=>/Save changes|Save again/.test(label)),false);
+  // No Save changes / Save again (an overwrite) for a conflict is the per-state table above.
 });
 
 test('returning focus revalidates an open dialog and redraws state-driven views',async t=>{

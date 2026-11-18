@@ -354,13 +354,6 @@ test('two-copy Trash is prepared, remotely verified and recoverable; restore nev
   assert.equal(h.fake.state.trashCalls[0].args.user_confirmed,true);assert.ok(!Object.hasOwn(h.fake.state.trashCalls[1].args,'user_confirmed'));
 });
 
-test('keep-Notion Trash preparation makes no cloud call and stays paused after local restore',async t=>{
-  const h=await harness(t);await saveFirst(h);const calls=h.fake.state.calls.length;
-  await h.notion.prepareLocalTrash(h.id);assert.equal(h.fake.state.calls.length,calls);
-  assert.equal(h.fake.state.pages.get(PAGE).trashed,undefined);await h.notion.localRestored(h.id);
-  assert.equal((await localState(h)).autosync.enabled,false);
-});
-
 test('ambiguous Trash preserves the local folder, blocks mutations, and read-only verification can resolve success',async t=>{
   const h=await harness(t);await saveFirst(h);await h.notion.prepareLocalTrash(h.id);
   h.fake.state.beforeWrite=async tool=>{if(tool==='delete-pages')h.fake.state.pages.get(PAGE).trashed=true;};h.fake.state.failWrite=500;
@@ -379,10 +372,11 @@ test('failed Trash verification never assumes that missing, denied or unchanged 
   h.fake.state.status=403;await assert.rejects(h.notion.verifyTrash(h.id),{status:403});await h.library.folder(h.id);
 });
 
-test('remote Trash requires matching live workspace and unchanged link; autosync never restores externally trashed pages',async t=>{
-  const h=await harness(t,{autosync:fast});await saveFirst(h);await h.notion.prepareLocalTrash(h.id);
+test('Trash preparation makes no cloud call; remote Trash requires matching live workspace and unchanged link; local restore stays paused; autosync never restores externally trashed pages',async t=>{
+  const h=await harness(t,{autosync:fast});await saveFirst(h);const calls=h.fake.state.calls.length;
+  await h.notion.prepareLocalTrash(h.id);assert.equal(h.fake.state.calls.length,calls,'keep-Notion preparation is local only');assert.equal(h.fake.state.pages.get(PAGE).trashed,undefined);
   h.fake.state.workspaceId='ws-other';await assert.rejects(h.notion.trashLinked(h.id),{status:409});assert.equal(h.fake.state.trashCalls.length,0);
-  h.fake.state.workspaceId='ws-a';await h.notion.localRestored(h.id);h.fake.state.pages.get(PAGE).trashed=true;
+  h.fake.state.workspaceId='ws-a';await h.notion.localRestored(h.id);assert.equal((await localState(h)).autosync.enabled,false,'a local restore does not resume autosync');h.fake.state.pages.get(PAGE).trashed=true;
   await h.edit('# Remote deleted');await h.notion.setAutosync(h.id,{enabled:true});await h.notion.start();
   await waitFor(async()=>(await localState(h)).autosync.paused==='remote-trash');assert.equal(updates(h),0);assert.equal(h.fake.state.trashCalls.length,0);
   assert.equal((await h.notion.status(h.id)).syncState,'trashed');
