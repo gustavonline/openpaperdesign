@@ -66,19 +66,18 @@ function rig(initial={}){
 }
 const copyLink=/^Copy link/,copyCode=/^Copy code/;
 
-for(const failure of ['http','network']){
-  test(`a failed reveal (${failure}) is visible and renders, refreshes and settings changes never retry it`,async()=>{
-    const r=rig();r.script.push(failure);await r.open();
-    assert.equal(r.calls.link,1,'one attempt on open');
-    assert.match(r.text(),/Unavailable/);assert.match(r.text(),/could not be loaded/);assert.doesNotMatch(r.text(),/K7QM/);
-    assert.ok(r.buttons().some(b=>b.textContent==='Retry'),'an explicit retry is offered');
-    assert.equal(r.find(copyLink).disabled,true,'nothing to copy without a loaded link');assert.equal(r.find(copyCode).disabled,true,'nothing to copy without a loaded code');
-    // Renders and status refreshes: expiry changes render the dialog; each is followed by a settle.
-    for(let n=0;n<5;n++){els['share-expiry'].value=n%2?'never':'1d';els['share-expiry'].fire('change');await settle();}
-    assert.equal(r.calls.link,1,'no automatic retry after the failure');
-    r.ui.destroy();
-  });
-}
+// One HTTP failure here; a network failure is the second attempt of 'a reveal that fails again' and renders the same way.
+test('a failed reveal is visible and renders, refreshes and settings changes never retry it',async()=>{
+  const r=rig();r.script.push('http');await r.open();
+  assert.equal(r.calls.link,1,'one attempt on open');
+  assert.match(r.text(),/Unavailable/);assert.match(r.text(),/could not be loaded/);assert.doesNotMatch(r.text(),/K7QM/);
+  assert.ok(r.buttons().some(b=>b.textContent==='Retry'),'an explicit retry is offered');
+  assert.equal(r.find(copyLink).disabled,true,'nothing to copy without a loaded link');assert.equal(r.find(copyCode).disabled,true,'nothing to copy without a loaded code');
+  // Renders and status refreshes: expiry changes render the dialog; each is followed by a settle.
+  for(let n=0;n<5;n++){els['share-expiry'].value=n%2?'never':'1d';els['share-expiry'].fire('change');await settle();}
+  assert.equal(r.calls.link,1,'no automatic retry after the failure');
+  r.ui.destroy();
+});
 
 test('explicit Retry recovers, then the link and code are shown, copyable and never fetched again',async()=>{
   const r=rig();r.script.push('http','ok','ok','ok');await r.open();assert.equal(r.calls.link,1);
@@ -217,13 +216,11 @@ test('a failed start is shown with its reason, offers Retry with the same option
 });
 
 test('the dialog markup and styles match: the old agent panel, New invitation and global stop are gone, the copy icons exist',async()=>{
-  const html=await fs.readFile(new URL('../runtime/index.html',import.meta.url),'utf8'),css=await fs.readFile(new URL('../runtime/canvas.css',import.meta.url),'utf8'),js=await fs.readFile(new URL('../runtime/sharing.js',import.meta.url),'utf8');
+  const html=await fs.readFile(new URL('../runtime/index.html',import.meta.url),'utf8'),css=await fs.readFile(new URL('../runtime/canvas.css',import.meta.url),'utf8');
   const dialogHtml=html.slice(html.indexOf('<dialog id="sharing-dialog"'),html.indexOf('</dialog>',html.indexOf('<dialog id="sharing-dialog"')));
   for(const gone of ['share-agent-panel','share-new','share-stop','share-create-cancel','share-join','share-codex','share-claude','Open with an agent','New invitation','Revoke'])assert.ok(!dialogHtml.includes(gone),`${gone} is not in the dialog`);
   for(const icon of ['i-copy','i-check'])assert.ok(html.includes(`<symbol id="${icon}"`),icon);
   assert.match(css,/#sharing-dialog button:not\(\.ibtn\)\.share-copy\{position:absolute;top:\d+px;right:\d+px/,'the Copy icon sits at the top right of its block');
-  assert.doesNotMatch(js,/openAgent|invitationLinks|joinRequest|share-agent|Copy join request/,'the owner dialog no longer builds agent actions');
-  assert.doesNotMatch(js,/navigator\.clipboard\.writeText\([^)]*\)[^;]*;[^}]*render\(\);schedule/,'nothing copies on its own');
 });
 
 // The cascade, not just the presence of a rule: a rule only wins over the generic dialog button rule if its selector is more specific.

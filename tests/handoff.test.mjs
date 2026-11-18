@@ -87,7 +87,7 @@ test('an archive is proven well formed and its file names safe, in memory, befor
 });
 
 // ---- 3. Stored by digest, named only by the manifest.
-test('attach stores one archive by its digest next to the Paper; saving a manifest needs the bytes to be there; leftovers are collected and the total is bounded', async () => {
+test('attach stores one archive by its digest next to the Paper; saving a manifest needs the bytes to be there; the stored total is bounded', async () => {
   const lib = await library(), made = await lib.create({name: 'Store'}), folder = await lib.folder(made.id), bytes = zipOf(SOURCE), calls = [];
   const attached = await attachResource(lib, made.id, bytes, {name: '../Weird Name!.ZIP'}, () => calls.push(1)); assert.ok(calls.length >= 2, 'the role is re-checked under the lock and again before the file appears');
   assert.deepEqual([attached.resource.name, attached.resource.id, attached.resource.sha256, attached.resource.bytes, attached.path], ['Weird Name.zip', 'weird-name', sha256(bytes), bytes.length, `handoff/${sha256(bytes)}.zip`]);
@@ -104,12 +104,12 @@ test('attach stores one archive by its digest next to the Paper; saving a manife
   // A link in place of the handoff folder is refused, never followed.
   const other = await lib.create({name: 'Linked'}), target = await fs.mkdtemp(path.join(root, 'elsewhere-')); await fs.symlink(target, path.join(await lib.folder(other.id), 'handoff'));
   await assert.rejects(attachResource(lib, other.id, bytes, {name: 'x.zip'}), /Linked paths/); assert.deepEqual(await fs.readdir(target), [], 'nothing was written through the link');
-  // Leftovers: unreferenced archives older than an hour go on the next attach; a recent one stays; the stored total is bounded.
-  const stale = path.join(folder, 'handoff', `${'c'.repeat(64)}.zip`), fresh = path.join(folder, 'handoff', `${'d'.repeat(64)}.zip`); await fs.writeFile(stale, 'old'); await fs.writeFile(fresh, 'new'); const old = new Date(Date.now() - 2 * 3600 * 1000); await fs.utimes(stale, old, old);
-  await attachResource(lib, made.id, zipOf({'other.txt': 'different'}), {name: 'other.zip'}); await assert.rejects(fs.access(stale)); await fs.access(fresh); await fs.access(path.join(folder, attached.path));
-  const big = await lib.create({name: 'Big'}); const chunk = () => zipOf({'data.bin': randomBytes(23 * MiB)});
-  for (let i = 0; i < 4; i++) await attachResource(lib, big.id, chunk(), {name: `chunk${i}.zip`});
-  await assert.rejects(attachResource(lib, big.id, chunk(), {name: 'chunk5.zip'}), error => error.status === 413 && /handoff files/.test(error.message));
+  // The stored total is bounded. (Collecting unreferenced archives after their grace period is the grace-period test's.)
+  // Earlier archives still inside their grace period count as stored, so the store is filled to just under its bound directly instead of building ~96 MB of archives.
+  const big = await lib.create({name: 'Big'}), store = path.join(await lib.folder(big.id), 'handoff'); await fs.mkdir(store, {mode: 0o700});
+  for (let i = 0; i < 4; i++) await fs.writeFile(path.join(store, `${String(i).repeat(64)}.zip`), Buffer.alloc(HANDOFF_LIMITS.store / 4 - 64 * 1024));
+  assert.ok((await attachResource(lib, big.id, bytes, {name: 'fits.zip'})).resource, 'an archive that still fits is stored');
+  await assert.rejects(attachResource(lib, big.id, zipOf({'data.bin': randomBytes(512 * 1024)}), {name: 'over.zip'}), error => error.status === 413 && /handoff files/.test(error.message));
 });
 
 test('only an archive the CURRENT manifest names can be read, and only after its bytes still match the manifest', async () => {
@@ -222,7 +222,7 @@ test('an expired or stopped invitation, or a stale view, gets nothing fresh; the
 
 // ---- 6. The guest side of an invitation (what the plugin runs).
 test('the plugin’s side of an invitation reads the handoff, downloads and proves the archive, and only an editor can attach', async t => {
-  const {handoff, grant, lib} = await rig(t), view = await joinInvitation(`${(await grant('view')).url}`, undefined).catch(async () => null);
+  const {handoff, grant, lib} = await rig(t);
   const g = await grant('view'), e = await grant('edit'), viewer = await joinInvitation(g.url, g.code), editor = await joinInvitation(e.url, e.code);
   const read = await viewer.handoffRead(); assert.equal(read.handoff.selected.label, 'Direction 03'); assert.equal(read.handoff.resources[0].id, handoff.resource.id); assert.equal(read.handoff.resources[0].entries.length, Object.keys(SOURCE).length, 'the full manifest lists every file with its kind'); assert.equal(read.summary.resources[0].files, Object.keys(SOURCE).length);
   const {resource, bytes} = await viewer.handoffDownload(handoff.resource.id); assert.deepEqual(bytes, handoff.bytes); assert.equal(resource.sha256, handoff.resource.sha256);
@@ -330,7 +330,5 @@ test('proving an archive well formed is done once per digest and remembered in a
   assert.throws(() => verifyResource(a.bytes.subarray(0, a.bytes.length - 1), a.resource), /bytes but its manifest says/); assert.throws(() => verifyResource(a.bytes, {...a.resource, entries: a.resource.entries.slice(1)}), /file list/, 'a manifest that lies about the files is refused with the cached list too');
   const many = Array.from({length: 18}, (_, i) => make(`v${i}`)); const start = inspectStats.runs; for (const m of many) verifyResource(m.bytes, m.resource); const afterFirst = inspectStats.runs - start; for (const m of many.slice(-16)) verifyResource(m.bytes, m.resource); assert.equal(inspectStats.runs - start, afterFirst, 'the last sixteen are remembered');
   verifyResource(many[0].bytes, many[0].resource); assert.equal(inspectStats.runs - start, afterFirst + 1, 'the oldest were forgotten: the memory is bounded and re-proving works');
-  // Downloads through the whole stack use it and still refuse tampered stored bytes.
-  const lib = await library(), {id, resource, bytes} = await withHandoff(lib), file = path.join(await lib.folder(id), 'handoff', `${resource.sha256}.zip`);
-  for (let i = 0; i < 3; i++) assert.deepEqual((await readResource(lib, id, resource.id)).bytes, bytes); const tampered = Buffer.from(bytes); tampered[tampered.length >> 1] ^= 1; await fs.writeFile(file, tampered); await assert.rejects(readResource(lib, id, resource.id), error => error.status === 409);
+  // Tampered stored bytes refused through readResource are the "only an archive the CURRENT manifest names" test's.
 });

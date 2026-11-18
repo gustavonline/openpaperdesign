@@ -24,7 +24,7 @@ async function harness(source = addMotion(syntheticLanding()), {canEdit = true, 
   const make = new Function('state', 'document', '$', 'selection', 'nodes', 'entries', 'message', 'pushHistory', 'copy', 'commitFields', 'motion', 'previewProblem', 'withRecord', 'withoutRecord', 'uniqueId', 'presetRecord', 'PRESETS', 'PROPERTIES', 'EASINGS', 'isArtboard',
     `const scene = new Proxy({}, {get: (_, k) => state.scene[k], set: (_, k, v) => { state.scene[k] = v; return true; }, deleteProperty: (_, k) => delete state.scene[k], has: (_, k) => k in state.scene}); let canEdit = state.canEdit; let selected = null;
      ${code}
-     return {renderMotion, motionEdit, select: key => { selected = key; selection.clear(); if (key) selection.add(key); }, setCanEdit: v => { canEdit = v; }};`);
+     return {renderMotion, motionEdit, ensureState, select: key => { selected = key; selection.clear(); if (key) selection.add(key); }, setCanEdit: v => { canEdit = v; }};`);
   const api = make(state, {createElement: tag => new El(tag), createTextNode: text => Object.assign(new El('#text'), {_text: text})}, selector => selector === '#motion-section' ? box : selector === '#motion-body' ? body : selector === '#motion-try' ? tryButton : null, selection, nodes, entries, text => messages.push(text), action => history.push(action), v => JSON.parse(JSON.stringify(v)), () => {}, motion, previewProblem, withRecord, withoutRecord, uniqueId, presetRecord, PRESETS, PROPERTIES, EASINGS, isArtboard);
   api.setCanEdit(canEdit);
   const pick = (page, name) => { const node = page.nodes.find(n => n.name === name); api.select(`${page.id}:${node.id}`); api.renderMotion(); return node; };
@@ -63,6 +63,9 @@ test('each control makes one checked, undoable change: preset, trigger, timing, 
   // Each history step carries both sides, so undo puts the previous model back exactly.
   assert.ok(h.history.every(step => step.kind === 'preview' && step.before !== undefined && step.after !== undefined));
   assert.equal(h.history[0].before.animations.length + 1, h.history[0].after.animations.length);
+  // A change that changes nothing adds no step; a view-only editor is refused honestly, not hidden.
+  const steps = h.history.length; assert.equal(h.api.motionEdit(prev => prev), true); assert.equal(h.history.length, steps, 'no step for no change');
+  h.api.setCanEdit(false); assert.equal(h.api.motionEdit(prev => prev), false); assert.match(h.messages.at(-1), /view-only/); assert.equal(h.history.length, steps);
 });
 
 test('click actions: go to a Page, go back and set a state (defining it the first time), and remove', async () => {
@@ -75,9 +78,12 @@ test('click actions: go to a Page, go back and set a state (defining it the firs
   const stateField = h.field('State'), valueField = h.field('Set to'); stateField.value = 'mode'; stateField.fire('change'); assert.equal(model().interactions[2].actions[0].state, 'mode'); assert.ok(model().states.some(s => s.id === 'mode'));
   valueField.value = 'together'; valueField.fire('change'); assert.equal(model().interactions[2].actions[0].value, 'together'); assert.deepEqual(model().states.find(s => s.id === 'mode').values, ['default', 'on', 'together'], 'a value is added to the state; none is taken away');
   const messages = h.messages.length; stateField.value = 'bad name!'; stateField.fire('change'); assert.match(h.messages.at(-1), /letters, digits/); assert.equal(h.messages.length, messages + 1); assert.equal(previewProblem(model(), h.state.scene), null);
-  for (const card of h.body.all().filter(e => e.attrs['aria-label']?.startsWith('Click action'))) { /* each can be removed */ }
   while (model()?.interactions?.length) { const remove = h.body.all().find(e => e.tag === 'button' && e.attrs['aria-label']?.startsWith('Remove click action')); remove.fire('click'); h.api.renderMotion(); }
   assert.deepEqual(model()?.interactions ?? [], [], 'every click action can be removed');
+  // A state is extended without taking a value away, at most 8 values; a first value of 'default' gets 'other' as its alternative.
+  let full = h.api.ensureState(null, 'mode', 'together'); assert.equal(h.api.ensureState(full, 'mode', 'together'), full, 'a value already there changes nothing');
+  for (const v of 'abcdefg') full = h.api.ensureState(full, 'mode', v); assert.equal(full.states[0].values.length, 8); assert.equal(h.api.ensureState(full, 'mode', 'extra'), full, 'at most 8 values');
+  assert.deepEqual(h.api.ensureState(null, 'x', 'default').states[0].values, ['other', 'default']);
   const lone = await harness(syntheticLanding()), only = {...lone.scene, pages: [lone.scene.pages[0]]}; lone.state.scene = only; lone.pick(only.pages[0], 'D primary CTA'); assert.equal(lone.field('Add a click action').children.find(o => o.value === 'navigate').disabled, true, 'there is nowhere to go with one Page');
 });
 

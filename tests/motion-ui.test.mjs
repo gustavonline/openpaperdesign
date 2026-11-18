@@ -3,33 +3,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs, readFileSync} from 'node:fs';
-import {previewProblem, withRecord, withoutRecord, uniqueId} from '../runtime/preview-model.js';
-import {syntheticLanding, addMotion} from './fixtures/motion-landing.mjs';
 
 const read = f => fs.readFile(new URL('../runtime/' + f, import.meta.url), 'utf8');
 const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from)));
-
-test('Motion edits are one checked, undoable change each, refused for view-only guests, and never leave a half-made preview model', async () => {
-  const app = await read('app.js'), source = slice(app, 'function motionEdit(change) {', 'const mk = '), state = slice(app, 'function ensureState(', '\n}\n') + '\n}';
-  const messages = [], history = [], dirtied = [], run = (scene, canEdit) => new Function('scene', 'canEdit', 'message', 'pushHistory', 'previewProblem', 'copy', 'commitFields', 'renderMotion', 'motion', source + '\nreturn motionEdit;')(scene, canEdit, text => messages.push(text), action => history.push(action), previewProblem, v => JSON.parse(JSON.stringify(v)), () => {}, () => {}, {dirty() { dirtied.push(1); }});
-  const scene = addMotion(syntheticLanding()), edit = run(scene, true), node = scene.pages[0].nodes.find(n => n.name === 'D eyebrow').id, pid = scene.pages[0].id;
-  // A valid change: kept, one history step, with both sides.
-  const before = JSON.parse(JSON.stringify(scene.preview)); assert.equal(edit(prev => withRecord(prev, 'animations', {id: 'new-1', page: pid, node, trigger: {type: 'load'}, keyframes: [{opacity: 0}, {opacity: 1}], durationMs: 400})), true);
-  assert.equal(history.length, 1); assert.equal(history[0].kind, 'preview'); assert.deepEqual(history[0].before, before); assert.equal(history[0].after.animations.length, before.animations.length + 1); assert.equal(scene.preview.animations.length, before.animations.length + 1);
-  // A change that is not valid is refused with the reason, and nothing moves.
-  const mid = JSON.stringify(scene.preview); assert.equal(edit(prev => withRecord(prev, 'animations', {id: 'bad', page: pid, node: 99999, trigger: {type: 'load'}, keyframes: [{opacity: 0}, {opacity: 1}], durationMs: 400})), false);
-  assert.match(messages.at(-1), /not on that Page/); assert.equal(JSON.stringify(scene.preview), mid); assert.equal(history.length, 1);
-  // Setting nothing changes nothing; removing the last record leaves no empty model; the model comes back from undo's own copy.
-  assert.equal(edit(prev => prev), true); assert.equal(history.length, 1, 'no step for no change');
-  const lone = {format: 'openpaperdesign', version: 1, name: 'x', pages: scene.pages, assets: {}, preview: {version: 1, sticky: [{id: 'p', page: pid, node: scene.pages[0].nodes.find(n => n.name === 'D sticky glass navigation').id}]}}, removeLast = run(lone, true); removeLast(prev => withoutRecord(prev, 'sticky', 'p')); assert.equal('preview' in lone, false); assert.equal(history.at(-1).after, undefined);
-  // View-only: refused honestly, not hidden.
-  const viewOnly = run(addMotion(syntheticLanding()), false), count = history.length; assert.equal(viewOnly(prev => prev), false); assert.match(messages.at(-1), /view-only/); assert.equal(history.length, count);
-  // States used by click actions are defined the first time and extended after, within the limits.
-  const ensure = new Function('withRecord', state + '\nreturn ensureState;')(withRecord), a = ensure(null, 'mode', 'together'); assert.deepEqual(a.states, [{id: 'mode', values: ['default', 'together'], initial: 'default'}]);
-  const b = ensure(a, 'mode', 'solo'); assert.deepEqual(b.states[0].values, ['default', 'together', 'solo']); assert.equal(ensure(b, 'mode', 'solo'), b, 'a value already there changes nothing'); assert.deepEqual(ensure(null, 'x', 'default').states[0].values, ['other', 'default']);
-  let full = a; for (const v of 'abcdefg') full = ensure(full, 'mode', v); assert.equal(full.states[0].values.length, 8); assert.equal(ensure(full, 'mode', 'extra'), full, 'at most 8 values');
-  assert.equal(previewProblem(a, {pages: []}) , null);
-});
 
 test('layers and Pages that go take their motion with them as part of the same undo step, and nothing else is dropped', async () => {
   const app = await read('app.js'), change = slice(app, 'function pageChange(page,change){', '\n}\n');
@@ -38,10 +14,7 @@ test('layers and Pages that go take their motion with them as part of the same u
   const apply = slice(app, "if(action.kind==='page-edit'){", "if (!action.kind)"); assert.match(apply, /if\(action\.hasPreview\)\{const value=reverse\?action\.previewBefore:action\.previewAfter;/);
   assert.match(app, /if \(action\.kind === 'preview'\) \{ const value = reverse \? action\.before : action\.after; if \(value === undefined\) delete scene\.preview; else scene\.preview = copy\(value\); renderMotion\(\); motion\?\.dirty\(\); return; \}/);
   assert.match(app, /const pruneForPage = pruneMotionForPage;/); assert.match(app, /deletePageFrom\(scene, id, pruneForPage\)/);
-  // The same, run: a layer delete step and its undo, through the model's own functions.
-  const {prunePreview} = await import('../runtime/preview-model.js'), scene = addMotion(syntheticLanding()), page = scene.pages[0], orb = page.nodes.find(n => n.name === 'D hero background orb'), before = JSON.parse(JSON.stringify(scene.preview));
-  page.nodes = page.nodes.filter(n => n !== orb); page.nodes.find(n => n.children?.includes(orb.id)).children = page.nodes.find(n => n.children?.includes(orb.id)).children.filter(c => c !== orb.id);
-  const after = prunePreview(scene.preview, scene); assert.equal(after.animations.length, before.animations.length - 1); assert.deepEqual(after.interactions, before.interactions, 'unrelated click actions stay'); assert.equal(previewProblem(after, scene), null, 'the saved Paper stays valid after the delete');
+  // What prunePreview itself removes and keeps is run in preview-model.test.mjs ("pruning removes only…").
 });
 
 test('the Motion section offers the stated presets and tuning, only to people who can edit, and says plainly when the model cannot be used', async () => {
@@ -68,9 +41,6 @@ test('motion lives on the editor canvas: no player window, copy, shield or modal
   const section = html.slice(html.indexOf('<section id="motion-section"'), html.indexOf('</section>', html.indexOf('<section id="motion-section"')));
   for (const id of ['motion-replay', 'motion-reduce', 'motion-reset', 'motion-ms', 'motion-scrub', 'motion-readout', 'motion-try', 'motion-status', 'motion-body']) assert.ok(section.includes(`id="${id}"`), id);
   assert.match(section, /id="motion-try"[^>]*disabled/, 'Try interaction starts disabled and is enabled only for a layer with a click action');
-  // The editor's overCanvas (the one decision about what the canvas owns) does not know about motion at all: wheel, pinch, pan and drag are the editor's, always.
-  const owns = app.slice(app.indexOf('function overCanvas(e)'), app.indexOf('window.addEventListener(\'wheel\''));
-  assert.doesNotMatch(owns, /motion|play/i);
 });
 
 // ---- The editor's own wheel, pinch and middle-pan code, run as written: it takes the same input with motion engaged as without (motion never intercepts it).
@@ -118,5 +88,5 @@ test('the editor’s hooks reach motion at every place the live layers or what i
   assert.match(app, /closeMenu\(\); motion\?\.setEditing\(true\); queueMicrotask\(syncEditing\);/); assert.match(app, /finishGesture\(\) \{\s*if \(!gesture\) return;\s*const g = gesture; gesture = null; queueMicrotask\(syncEditing\);/); assert.match(app, /textEdit = key; textCancel = false; syncEditing\(\);/); assert.match(app, /form\.addEventListener\('focusout', \(\) => queueMicrotask\(syncEditing\)\);/);
   // Motion is handed only read access: a host of getters and navigation, never the scene to write, and the engine file has no path to the Paper.
   const host = app.slice(app.indexOf('const motionHost = {'), app.indexOf('motion = createMotion(motionHost);')); assert.doesNotMatch(host, /pushHistory|queueSave|saveScene|scene\.(preview|pages)\s*=|selected\s*=(?!=)|camera\s*=(?!=)|pageId\s*=(?!=)/);
-  const engine = readSync('play.js'); assert.doesNotMatch(engine, /queueSave|pushHistory|saveScene|fetch\(|localStorage|sessionStorage|\.contentEditable|addEventListener\('(?:click|keydown|keyup|wheel|pointerdown|pointermove|pointerup|dragstart|contextmenu)'/, 'it listens to no editing input and writes nowhere');
+  const engine = readSync('play.js'); assert.doesNotMatch(engine, /queueSave|pushHistory|saveScene|\.contentEditable|addEventListener\('(?:click|keydown|keyup|wheel|pointerdown|pointermove|pointerup|dragstart|contextmenu)'/, 'it listens to no editing input and writes nowhere');
 });

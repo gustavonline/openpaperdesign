@@ -58,16 +58,13 @@ async function server(t) {
 
 const hasView = result => !!result._meta?.ui?.resourceUri || result.structuredContent !== undefined || !!result._meta?.['openai/outputTemplate'];
 
-test('only paper_home and paper_join are declared to display a view', async t => {
-  const {request} = await server(t);
+test('only paper_home and paper_join display a view; repeated saves of one Paper update an open view live and never ask for another one; other Papers, extra opens and stale saves stay separate', async t => {
+  const {request, raw, data, watch, workspace} = await server(t);
+  // Declared in tools/list: only the two tools that show something carry a view.
   const tools = (await request('tools/list')).result.tools;
   assert.deepEqual(tools.filter(tool => tool._meta?.ui?.resourceUri || tool._meta?.['openai/outputTemplate']).map(tool => tool.name).sort(), ['paper_home', 'paper_join']);
   for (const name of ['paper_read', 'paper_save', 'paper_save_feedback', 'paper_write_note', 'paper_add_asset', 'paper_activity', 'paper_create', 'paper_open', 'paper_list']) assert.ok(tools.some(tool => tool.name === name) && !tools.find(tool => tool.name === name)._meta?.ui?.resourceUri, name);
   assert.match(tools.find(tool => tool.name === 'paper_home').description, /do not call open again after each save/i);
-});
-
-test('repeated saves of one Paper update an open view live and never ask for another one; other Papers, extra opens and stale saves stay separate', async t => {
-  const {raw, data, watch, workspace} = await server(t);
   const opened = data(await raw('paper_open', {workspace}));
   const a = data(await raw('paper_create', {name: 'Synthetic A'})), b = data(await raw('paper_create', {name: 'Synthetic B'}));
   const events = await watch(opened.apiBase);

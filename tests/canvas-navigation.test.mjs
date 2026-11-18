@@ -33,7 +33,7 @@ test('a Page with nothing to show gets one fixed, sensible camera every time', (
 
 test('there is no separate house control: All Papers lives in the Paper menu, and stays hidden from a recipient who has no Home of their own', async () => {
   const html = await fs.readFile(new URL('../runtime/index.html', import.meta.url), 'utf8'), app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(html, /go-home|i-home/); assert.doesNotMatch(app, /go-home|homeRoute/, 'no dead wiring');
+  assert.doesNotMatch(app, /go-home|homeRoute/, 'no dead wiring (the markup is checked in topbar-layout)');
   assert.match(html, /<button id="home" class="ibtn" type="button" title="Paper menu"[^>]*aria-controls="project-menu"><svg class="icon"><use href="#i-grid"\/><\/svg><\/button>/); assert.match(html, /<button type="button" role="menuitem" data-action="home">All Papers<\/button>/);
   // The existing boundaries: a plain-browser recipient has neither the Paper menu's Home nor the menu button; a recipient in their own plugin app keeps the menu (their own Home).
   assert.match(app, /if \(access\.shared\) \{ for \(const item of document\.querySelectorAll\(inPaperSurface\?'\[data-action="new"\],\.owner-only':'\[data-action="home"\],\[data-action="new"\],\.owner-only'\)\) item\.hidden = true; \}/); assert.match(app, /if\(access\.shared&&!inPaperSurface\)\$\('#home'\)\.hidden=true;/);

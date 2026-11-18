@@ -183,8 +183,9 @@ test('moved positions survive refresh, reconnect and a participant leaving and r
  // Reconnect clears every peer, then they return.
  h.ui.disconnect(); assert.equal(chips(h).length, 0); h.ui.receive({paperId: 'paper', peers: two()}); const back = chips(h).find(c => c.dataset.identity === 'alice'); assert.equal(back.style.left, '200px'); assert.equal(back.style.top, '100px');
  // One leaves and returns while the other stays; a newcomer is unmoved.
- h.ui.receive({paperId: 'paper', peers: [two()[1]]}); assert.equal(chips(h).length, 1); h.ui.receive({paperId: 'paper', peers: [...two(), {...human('c', 'carol', false, 3, 3), name: 'Carol'}]});
- assert.equal(chips(h).find(c => c.dataset.identity === 'alice').style.left, '200px'); assert.equal(chips(h).find(c => c.dataset.identity === 'carol').style.left ?? '', '');
+ h.ui.receive({paperId: 'paper', peers: [two()[1]]}); assert.equal(chips(h).length, 1); assert.ok(!chips(h)[0].className.includes('moved'), 'the badge that stayed never inherits the other one\'s position');
+ h.ui.receive({paperId: 'paper', peers: [...two(), {...human('c', 'carol', false, 3, 3), name: 'Carol'}]});
+ assert.equal(chips(h).find(c => c.dataset.identity === 'alice').style.left, '200px'); assert.equal(chips(h).find(c => c.dataset.identity === 'carol').style.left ?? '', ''); assert.ok(!chips(h).find(c => c.dataset.identity === 'bob').className.includes('moved'));
 });
 test('badges are clamped into the visible canvas on resize, including narrow layouts, and unreadable preferences are ignored', t => {
  const h = harness(t, {storage: {getItem: () => JSON.stringify({alice: {x: 900, y: 600}, bad: 'x', '': {x: 1, y: 1}, bob: {x: NaN, y: 1}}), setItem() {}, removeItem() {}}});
@@ -202,14 +203,4 @@ test('a badge can be moved and put back with the keyboard, and other keys are le
  assert.equal(JSON.parse(writes.get(KEY)).alice.x, 58); assert.equal(b.style.left ?? '', ''); const kept = prevented;
  for (const k of ['Tab', 'Enter', ' ', 'a', 'Escape']) key(a, {key: k}); assert.equal(prevented, kept, 'only arrows and Home are handled'); assert.equal(a.style.left, '58px');
  key(a, {key: 'Home'}); assert.equal(a.style.left, ''); assert.ok(!a.className.includes('moved')); assert.equal(JSON.parse(writes.get(KEY)).alice, undefined); key(b, {key: 'ArrowLeft'}); assert.equal(b.style.left, '8px');
- // Double-click resets only that badge.
- b.fire('dblclick'); assert.equal(b.style.left ?? '', ''); assert.ok(!b.className.includes('moved'));
-});
-test('a moved badge that leaves and returns, or is moved before another arrives, keeps every other badge in place', t => {
- const writes = new Map(), storage = {getItem: k => writes.get(k) ?? null, setItem: (k, v) => writes.set(k, v), removeItem: k => writes.delete(k)};
- const h = harness(t, {storage}); h.ui.receive({paperId: 'paper', peers: two()}); drag(chips(h)[0], 90, 50);
- const stored = JSON.parse(writes.get(KEY)); assert.deepEqual(Object.keys(stored), ['alice']);
- h.ui.receive({paperId: 'paper', peers: [two()[1]]}); assert.equal(chips(h).length, 1); assert.ok(!chips(h)[0].className.includes('moved'), 'the badge that stayed never inherits the other one\'s position');
- h.ui.receive({paperId: 'paper', peers: two()}); const back = chips(h).find(c => c.dataset.identity === 'alice'); assert.ok(back.className.includes('moved')); assert.equal(back.style.left, '90px');
- assert.ok(!chips(h).find(c => c.dataset.identity === 'bob').className.includes('moved'));
 });

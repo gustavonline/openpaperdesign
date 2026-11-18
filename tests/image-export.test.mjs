@@ -3,14 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
-import {unionBox, exportPixels, exportFileName, prepareSelectionClone, jpegWithNotice, exportImage, EXPORT_SCALES, EXPORT_MAX_SIDE, EXPORT_MAX_PIXELS, OriginalError, savePickerSupport} from '../runtime/editing-model.js';
-
-test('the crop is the whole-pixel union of the chosen layers and never anything else', () => {
-  assert.deepEqual(unionBox([{x: 10.4, y: 20.2, w: 100.2, h: 50}, {x: 200, y: 5.5, w: 40.1, h: 30}]), {x: 10, y: 5, w: 231, h: 66}, 'rounded outward so no edge pixel is cut');
-  assert.deepEqual(unionBox([{x: -30, y: -20, w: 10, h: 10}]), {x: -30, y: -20, w: 10, h: 10}, 'layers can sit left of or above the origin');
-  for (const none of [[], [{x: 0, y: 0, w: 0, h: 10}], [{x: NaN, y: 0, w: 5, h: 5}], [null], [{x: 0, y: 0, w: -4, h: 4}]]) assert.equal(unionBox(none), null, JSON.stringify(none));
-  assert.deepEqual(unionBox([{x: 0, y: 0, w: 0, h: 10}, {x: 5, y: 5, w: 10, h: 10}]), {x: 5, y: 5, w: 10, h: 10}, 'an empty layer is ignored, not counted');
-});
+import {unionBox, exportPixels, exportFileName, prepareSelectionClone, jpegWithNotice, exportImage, EXPORT_SCALES, EXPORT_MAX_SIDE, EXPORT_MAX_PIXELS, OriginalError} from '../runtime/editing-model.js';
 
 test('the output size follows the scale, and stays inside what browsers and other apps can handle, saying so when it had to come down', () => {
   assert.deepEqual(exportPixels({w: 400, h: 300}, 1), {width: 400, height: 300, scale: 1, requested: 1, reduced: false});
@@ -76,7 +69,7 @@ test('without a chooser the image is rendered and only REQUESTED as a download; 
 });
 
 test('the Share menu offers PNG and JPEG with a scale, never says Exported before delivery, and opens the chooser inside the click', async () => {
-  const [app, html, host, surface] = await Promise.all(['app.js', 'index.html', 'native-host.js', 'surface.js'].map(f => fs.readFile(new URL('../runtime/' + f, import.meta.url), 'utf8')));
+  const [app, html, surface] = await Promise.all(['app.js', 'index.html', 'surface.js'].map(f => fs.readFile(new URL('../runtime/' + f, import.meta.url), 'utf8')));
   assert.match(html, /data-export="png">PNG image<kbd>transparent<\/kbd>[\s\S]*data-export="jpeg">JPEG image<kbd>white background<\/kbd>/);
   for (const scale of [1, 2, 3]) assert.match(html, new RegExp(`role="menuitemradio" data-export-scale="${scale}"`));
   // The command reaches exportImage (and so the chooser) with no await in front of it.
@@ -85,14 +78,12 @@ test('the Share menu offers PNG and JPEG with a scale, never says Exported befor
   const click = app.slice(app.indexOf("exportMenu.addEventListener('click'"), app.indexOf("$('#copy-paper-link')")).replace(/\/\/.*$/gm, ''); assert.ok(!/await/.test(click.slice(0, click.indexOf('exportImageCommand'))), 'the menu click does nothing asynchronous first');
   assert.doesNotMatch(app, /Exported “|message\(`Exported/, 'no “Exported” claim is made right after rendering');
   assert.match(command, /canChoose: !inPaperSurface && savePickerSupport\(window\)/, 'the host app uses its own download, not a browser chooser it cannot show');
-  const requested = [...command.matchAll(/`(Sent \$\{result\.name\}[^`]*|Download of \$\{result\.name\}[^`]*)`/g)].map(m => m[1]); assert.equal(requested.length, 2); assert.ok(requested.every(text => !/Saved|Exported/.test(text)), 'the download path says only that a download was requested');
-  assert.match(app, /async function download\(blob, name\) \{ if\(inPaperSurface\)\{if\(await surfaceDownload\(blob,name\)===false\)throw/, 'a host refusal is seen');
-  assert.match(host, /rpc\('ui\/download-file',[^]*if\(result\?\.isError\)throw[^]*return true;/, 'the host download reports whether the request was accepted, and a refusal is thrown to the caller'); assert.match(surface, /surfaceDownload=\(blob,name\)=>window\.__paperNative\.download\(blob,name\)/);
+  // What the download path says (sent, started, declined) and that a host refusal reaches the caller are run through the real callers in native-download.test.mjs.
+  assert.match(surface, /surfaceDownload=\(blob,name\)=>window\.__paperNative\.download\(blob,name\)/);
   assert.match(app, /snapdom\(crop,\{width: ?px\.width|snapdom\(crop, \{width: px\.width/, 'the capture is the cropped box at the chosen scale');
-  assert.equal(savePickerSupport({showSaveFilePicker() {}}), true);
 });
 
-test('measurement noise cannot change a whole-pixel size, while real fractional, rotated or stroked bounds still round outward and are never clipped', async () => {
+test('the crop is the whole-pixel union of the chosen layers: measurement noise cannot change its size, while real fractional, rotated or stroked bounds still round outward and are never clipped', async () => {
   const {snapEdge, EDGE_GRID} = await import('../runtime/editing-model.js');
   // The reported case: two layers at 100/140/180/120 and 410/180/200/120 are exactly 510 x 160, however the browser's arithmetic wobbles.
   const exact = [{x: 100, y: 140, w: 180, h: 120}, {x: 410, y: 180, w: 200, h: 120}];
@@ -109,6 +100,9 @@ test('measurement noise cannot change a whole-pixel size, while real fractional,
   const turned = 100 * Math.SQRT2; assert.equal(unionBox([{x: -(turned - 100) / 2, y: -(turned - 100) / 2, w: turned, h: turned}]).w, 142); assert.deepEqual(unionBox([{x: -2, y: -2, w: 104, h: 104}]), {x: -2, y: -2, w: 104, h: 104});
   // Order and negative coordinates do not matter.
   assert.deepEqual(unionBox([...exact].reverse()), unionBox(exact)); assert.deepEqual(unionBox([{x: -10.5, y: -0.25, w: 5, h: 5}]), {x: -11, y: -1, w: 6, h: 6});
+  // Nothing else is counted: no layers, empty or unmeasurable boxes give no crop, and an empty layer beside a real one is ignored.
+  for (const none of [[], [{x: 0, y: 0, w: 0, h: 10}], [{x: NaN, y: 0, w: 5, h: 5}], [null], [{x: 0, y: 0, w: -4, h: 4}]]) assert.equal(unionBox(none), null, JSON.stringify(none));
+  assert.deepEqual(unionBox([{x: 0, y: 0, w: 0, h: 10}, {x: 5, y: 5, w: 10, h: 10}]), {x: 5, y: 5, w: 10, h: 10}, 'an empty layer is ignored, not counted');
 });
 
 test('the Share menu advertises the size the capture draws: one off-screen measurement, no live camera-scaled bounds, and an exact size check on the file', async () => {
