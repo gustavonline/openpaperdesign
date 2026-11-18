@@ -26,6 +26,12 @@ Choose copy by its function:
 | Interface or dashboard | Specific action labels, real states, and the next useful step. Errors explain recovery when known; help adds information instead of repeating the control. |
 | Banner or promotional design | A message, supported benefit and call to action when the brief calls for them. Preserve an approved slogan; do not add a campaign voice to an ordinary planning artifact. |
 
+## Lead with an outcome the reader can picture
+
+When a Paper introduces an offer, product, or project to an audience, identify the reader, a task they care about, and what the brief supports them being able to do. Use that outcome early when it helps them understand why the offer matters. Add one real example or useful next step when it clarifies the claim. For example, “Try AI on a real task” can lead into making a meeting brief using the notes and decisions the reader already has.
+
+Keep promises within the brief and preserve approved wording, terms, and qualifications. In functional UI and diagrams, describe the actual action, state, or relationship. A button that opens a report should still say “Open report.” Return the copy to Design so the meaningful text and next action are easy to find at the intended viewing size.
+
 ## Write only the useful message
 
 Prefer concrete terms the reader knows. Use the same name for the same concept. Remove generic praise, unsupported promises, repeated conclusions and subtitles that merely restate the title or illustration. Treat stock phrases and forced contrasts as reasons to inspect the meaning, not a blacklist of words or punctuation.

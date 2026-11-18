@@ -19,6 +19,8 @@ Use the existing guide's format. For a new guide, the following subjects usually
 - **Components and states:** existing primitives, size/radius/edge rules, hover/selected/focus/disabled/loading behavior when applicable.
 - **Motion and imagery:** supported behavior, assets, crop and attribution where relevant.
 
+For recurring audience-facing work, record the approved reader, outcome, examples, and terminology in the project’s guide when those decisions affect future designs. Link to [Paper Copy’s reader-outcome guidance](../../paper-copy/SKILL.md#lead-with-an-outcome-the-reader-can-picture) for the method. Check the resulting reading order at the intended viewing size.
+
 Leave unsupported values out. Retain useful human prose and accepted decisions. If a caller requests the Google DESIGN.md interchange format, follow its current spec and available validator/exporter; a plain Paper guide needs no npm CLI or additional token package.
 
 ## Apply deliberately
