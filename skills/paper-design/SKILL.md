@@ -23,6 +23,8 @@ For new direction or system work, read [design-system guidance](references/desig
 
 When writing or changing text, use [Paper Copy](../paper-copy/SKILL.md) after establishing the brief and before final composition. A roadmap needs a real goal and useful steps, not an unsolicited marketing headline. Keep approved copy and the reader's necessary qualifications; leave authoring explanations in notes. Reuse the same brief and return here for layout and the rendered review. Geometry-only changes with unchanged approved text can skip this pass.
 
+On audience-facing designs, use [Paper Copy’s reader-outcome guidance](../paper-copy/SKILL.md#lead-with-an-outcome-the-reader-can-picture) to decide what belongs up front. Give the outcome and existing next action room in the reading order. Check that a concrete example can be found without competing with the artwork. Preserve the project’s illustrations, type, colour, and character when the brief calls for a copy or hierarchy revision.
+
 ## Compose in the native source
 
 Open/list/read the requested Paper before creating another. [Paper workspace operations](../paper/SKILL.md) describes the bundled MCP/CLI and revision-checked save; use it when opening a workspace or when the save contract is unfamiliar. The plugin supplies those tools, so no external Paper/Figma service is assumed.
