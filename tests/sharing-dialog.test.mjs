@@ -17,7 +17,9 @@ class El {
   setAttribute(k,v){this.attrs[k]=v;}
   addEventListener(type,fn){this.listeners.set(type,[...(this.listeners.get(type)||[]),fn]);}
   fire(type,event={}){for(const fn of this.listeners.get(type)||[])fn({preventDefault(){},...event});}
-  focus(){} select(){} scrollIntoView(){}
+  focus(){globalThis.document.activeElement=this;} select(){} scrollIntoView(){}
+  getAttribute(k){return this.attrs[k];} contains(el){return el===this||this.all().includes(el);} get classList(){return {contains:c=>this.className.split(' ').includes(c)};}
+  querySelectorAll(s){return s==='button'?this.all().filter(e=>e.tagName==='BUTTON'):[];}
   all(){return this.children.flatMap(c=>[c,...c.all()]);}
   showModal(){this.open=true;}
   close(){this.open=false;this.fire('close');}
@@ -31,6 +33,7 @@ els['share-role'].value='view';els['share-expiry'].value='1d';els['share-protect
 const fallback=new El('textarea'),closeButton=new El('button'),dialog=new El('dialog'),opener=new El('button');
 fallback.hidden=true;
 Object.assign(els['share-create'],{querySelector:s=>({'[value="online"]':internet,'[value="network"]':network,'[value="local"]':local,'[name="share-reach"]:checked':[internet,network,local].find(i=>i.checked)})[s]||null,querySelectorAll:()=>[internet,network,local]});
+dialog.contains=el=>!!el&&[...Object.values(els),internet,network,local,closeButton,fallback].some(e=>e===el||e.all().includes(el));
 dialog.querySelector=s=>s.startsWith('#')?els[s.slice(1)]:s==='textarea'?fallback:s==='[data-close-sharing]'?closeButton:null;
 globalThis.document={getElementById:id=>id==='sharing-dialog'?dialog:id==='open-sharing'?opener:null,createElement:t=>new El(t)};
 globalThis.window={};
@@ -194,13 +197,15 @@ test('an invitation that is starting says so, reveals and copies nothing, and Ca
 
 test('creating shows Starting sharing link… at once, sends one request, and a second press while it runs does nothing',async()=>{
   const r=rig({invitations:[]});await r.open();const release=r.hold();
-  els['share-create'].fire('submit');await settle();
+  els['share-primary'].focus();els['share-create'].fire('submit');await settle();
+  assert.equal(document.activeElement,els['share-state'],'while it runs, keyboard focus waits on the status line instead of leaving the dialog');
   assert.match(els['share-state'].textContent,/Starting sharing link…/);assert.equal(els['share-primary'].textContent,'Starting sharing link…');assert.equal(els['share-primary'].disabled,true);
   els['share-create'].fire('submit');els['share-create'].fire('submit');await settle();
   assert.equal(r.calls.requests.filter(x=>x.method==='POST').length,1,'duplicate presses send nothing');
   release();await settle();
   const post=r.calls.requests.find(x=>x.method==='POST').body;assert.deepEqual(post,{role:'view',network:false,internet:true,newLink:true,expiry:'1d',protect:true},'one request with the chosen options');
-  assert.match(r.text(),/Starting sharing link…/,'the card takes over from the pending request');r.ui.destroy();
+  assert.match(r.text(),/Starting sharing link…/,'the card takes over from the pending request');
+  assert.equal(label(document.activeElement),'Cancel starting Invitation 1','then focus moves to the new invitation, not out of the dialog');r.ui.destroy();
 });
 
 test('a failed start is shown with its reason, offers Retry with the same options and Dismiss, and never offers to copy',async()=>{
