@@ -2,7 +2,7 @@ import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
 import {setupPresence} from './presence.js?v=2a7d7c240b0d';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
-import { setupSharing } from './sharing.js?v=a989571611a9';
+import { setupSharing } from './sharing.js?v=060e4e338159';
 import { createMotion } from './play.js?v=c0c7b10e35f4';
 import { IDENTITY, apply, parsePose, chainBasis, poseBasis } from './geometry.js?v=18dc3d2b4478';
 import { handoffProblem, directionProblem, withResource, withoutResource, withFields, HANDOFF_LIMITS } from './handoff-model.js?v=65d2e50b9d5f';
@@ -1612,7 +1612,8 @@ function showMenu(el, { at, trigger = null, keyboard = false }) {
   const w = el.offsetWidth, h = el.offsetHeight, p = at(w, h);
   Object.assign(el.style, { position: 'fixed', left: `${Math.round(bound(p.x, 8, innerWidth - w - 8))}px`, top: `${Math.round(bound(p.y, 8, innerHeight - h - 8))}px` });
   openMenuEl = el; menuTrigger = trigger; trigger?.setAttribute('aria-expanded', 'true');
-  if (keyboard) (el.querySelector('[aria-checked=true]') || menuItems(el)[0])?.focus();
+  // A menu that starts with a set of choices (a picker) opens on the current one; a menu of actions opens on its first action.
+  if (keyboard) { const items = menuItems(el); (items[0]?.getAttribute('role') === 'menuitemradio' && el.querySelector('[aria-checked=true]') || items[0])?.focus(); }
 }
 function closeMenu(refocus = false) {
   if (!openMenuEl) return;

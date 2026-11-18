@@ -61,7 +61,15 @@ export function setupSharing({paperId,access,closeMenu,getPaperName=()=>'Untitle
     const dismiss=button('Dismiss',()=>request('DELETE',{invitationId:f.id},'Dismissing…'),'Dismiss this message');dismiss.disabled=mutating;
     actions.append(retry,dismiss);row.append(message,actions);return row;
   }
+  // Rendering rebuilds the invitation rows. Keyboard focus that was in the dialog stays there: on the same control when it is
+  // still usable, otherwise on the status line while a change runs, then on the invitation's main action, the form or Close.
+  function keepFocus(had,key){
+    const a=document.activeElement;if(!had||dialog.contains(a)&&a!==status&&!a.disabled&&!(form.hidden&&form.contains(a)))return;
+    const usable=b=>b&&!b.disabled&&!b.hidden,buttons=[...list.querySelectorAll('button')];
+    (mutating?status:buttons.find(b=>b.getAttribute('aria-label')===key&&usable(b))||buttons.find(b=>b.classList.contains('share-primary-action')&&usable(b))||buttons.find(usable)||(!form.hidden&&!role.disabled?role:dialog.querySelector('[data-close-sharing]')))?.focus();
+  }
   function render(){
+    const active=document.activeElement,had=dialog.open&&dialog.contains(active),key=had?active.getAttribute?.('aria-label'):null;
     const links=invitations();list.replaceChildren();form.hidden=links.length>0;
     status.textContent=lastError||notice||(mutating&&busy)||(links.some(g=>g.state==='starting')?'Starting sharing link…':links.some(waiting)?'Connecting… the link works once it is ready.':links.length?'Sharing is on · Only these invitations grant access':'Only you have access');
     for(const f of failures())list.append(renderFailure(f));
@@ -79,7 +87,7 @@ export function setupSharing({paperId,access,closeMenu,getPaperName=()=>'Untitle
     for(const id of revealed.keys())if(!links.some(g=>g.id===id))revealed.delete(id);
     for(const id of failed.keys())if(!links.some(g=>g.id===id))failed.delete(id);
     for(const g of links)if(g.ready&&!revealed.has(g.id)&&!reading.has(g.id)&&!failed.has(g.id))void reveal(g);
-    schedule();
+    keepFocus(had,key);schedule();
   }
   async function reveal(g){const epoch=opened;failed.delete(g.id);reading.add(g.id);try{const link=await readLink(g,message=>{if(epoch===opened)failed.set(g.id,message);});if(link&&!closed&&epoch===opened)revealed.set(g.id,link);}finally{if(epoch===opened){reading.delete(g.id);if(!closed&&dialog.open)render();}}}
   async function request(method,body,doing=''){
@@ -107,6 +115,9 @@ export function setupSharing({paperId,access,closeMenu,getPaperName=()=>'Untitle
   form.addEventListener('submit',async event=>{event.preventDefault();if(mutating)return;const reachValue=form.querySelector('[name="share-reach"]:checked').value;await request('POST',{role:role.value,network:reachValue==='network',internet:reachValue==='online',newLink:true,expiry:expiry.value,protect:protect.checked},'Starting sharing link…');});
   dialog.querySelector('[data-close-sharing]').addEventListener('click',()=>dialog.close());
   dialog.addEventListener('cancel',()=>onCancel?.());
+  status.tabIndex=-1;
+  // Closing returns focus to the Share button that opened the menu, not to the menu item that is hidden by then.
+  dialog.addEventListener('close',()=>{const trigger=document.getElementById('export');if(trigger&&!trigger.hidden)setTimeout(()=>trigger.focus());});
   dialog.addEventListener('close',()=>{clearTimeout(timer);clearTimeout(noticeTimer);fallback.value='';fallback.hidden=true;revealed=new Map();reading.clear();failed.clear();notice='';opened++;});
   render();return {destroy(){closed=true;version++;clearTimeout(timer);clearTimeout(noticeTimer);}};
 }
