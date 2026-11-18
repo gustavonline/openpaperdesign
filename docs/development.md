@@ -30,13 +30,14 @@ checkout and are not moved with it.
 
 ### Evidence for visible changes
 
-Exercise the real affected flow (the entry points in AGENTS.md) with synthetic Papers
-and isolated storage. When screenshots help, capture the baseline and the changed state
-with the same data, theme, zoom and window size. Use a short browser clip when timing,
-motion or interaction matter. State what was exercised, on which revision and browser
-or host, and what was not. The T3 preview browser can be used where it is available.
-GitHub PR feedback reaches the chat carrying the change through T3's native PR watch.
-CI, source tests and native product proof are reported separately.
+Exercise the real affected flow with synthetic Papers and isolated storage. The entry
+points are listed in [AGENTS.md](../AGENTS.md#verification-and-delivery). When
+screenshots help, capture the baseline and the changed state with the same data, theme,
+zoom and window size. Use a short browser clip when timing, motion or interaction
+matter. State what was exercised, on which revision and browser or host, and what was
+not. The T3 preview browser can be used where it is available. When the PR is linked
+and watched in T3, GitHub feedback on it reaches the chat carrying the change. CI,
+source tests and native product proof are reported separately.
 
 The owner selects the model and effort for a task or delegates that choice. Provider
 login and model listings do not prove a useful task; access is proven by the task it

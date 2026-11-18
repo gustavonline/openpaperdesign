@@ -49,17 +49,18 @@ Provider choice and skill choice remain independent.
 
 ## Verification and delivery
 
-Name the entry points a change affects, exercise those, and say which were not exercised:
+Name the entry points a change affects. Exercise those, and say which were not exercised.
 
-- Owner editor and Home: the local server (`node server/server.mjs`) as described in
-  README.md "Use it"; editor behavior is in DESIGN.md.
-- Shared browser viewer and editor: `/join` and the scoped sharing listener with view
-  and edit invitations, code protection, expiry and revocation (DESIGN.md "Sharing",
-  skills/paper/references/sharing.md).
-- Agent/MCP: the stdio MCP tools, `paper_join` and the HTTP routes
-  (skills/paper/references/http-api.md).
-- Native Codex/Claude Code plugin: only when packaging, manifests, the native bundle or
-  host behavior is affected; follow docs/releases.md "Native install acceptance".
+- Owner editor and Home. Run the local server (`node server/server.mjs`) as in
+  [README.md "Use it"](README.md#use-it). Editor behavior is in [DESIGN.md](DESIGN.md).
+- Shared browser viewer and editor. This covers `/join` and the scoped sharing listener
+  with view and edit invitations, code protection, expiry and revocation. See
+  [DESIGN.md "Sharing"](DESIGN.md#sharing) and [sharing.md](skills/paper/references/sharing.md).
+- Agent/MCP. This covers the stdio MCP tools, `paper_join` and the HTTP routes in
+  [http-api.md](skills/paper/references/http-api.md).
+- Native Codex/Claude Code plugin. Check it only when packaging, manifests, the native
+  bundle or host behavior is affected. Follow
+  [Native install acceptance](docs/releases.md#native-install-acceptance).
 
 - Run npm run check and npm test for product changes, with relevant regression checks.
 - For built UI changes, follow the lockfiles and npm run verify:assets; refresh
