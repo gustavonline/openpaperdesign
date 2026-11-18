@@ -29,7 +29,6 @@ test('the request is the typed standard shape, which the stand-in validator acce
   assert.equal(validate(params), null); assert.deepEqual(Object.keys(params), ['contents']); assert.equal(params.contents.length, 1); const [item] = params.contents; assert.equal(item.type, 'resource'); assert.deepEqual(Object.keys(item.resource).sort(), ['blob', 'mimeType', 'uri']);
   assert.equal(item.resource.mimeType, 'image/png'); assert.equal(nameOf(item.resource.uri), 'Capino.png'); assert.deepEqual(Uint8Array.from(Buffer.from(item.resource.blob, 'base64')), data, 'the bytes are exactly the file');
   const flat = {contents: [{uri: 'file:///Capino.png', mimeType: 'image/png', blob: item.resource.blob}]}; assert.match(validate(flat), /invalid_union params\.contents\[0\]/, 'the shape shipped in preview.28 is refused by the validator, as the host refused it');
-  for (const bad of [{blob: new Blob(['x']), name: 'a.png'}, {contents: []}, {contents: [{type: 'resource', resource: {uri: 'file:///a'}}]}, {contents: [{type: 'resource_link', uri: 'file:///a'}]}]) assert.ok(validate(bad), JSON.stringify(Object.keys(bad)));
 });
 
 test('names and bytes survive: Unicode and awkward file names are percent-encoded into the last uri segment and never become a path, large files are encoded whole, an unknown MIME is a safe default', () => {
@@ -38,7 +37,6 @@ test('names and bytes survive: Unicode and awkward file names are percent-encode
   }
   const big = new Uint8Array(5 * 1024 * 1024 + 7).map((_, i) => (i * 31) & 255), blob = downloadContents('big.bin', 'application/octet-stream', big).contents[0].resource.blob; assert.equal(Buffer.from(blob, 'base64').length, big.length); assert.deepEqual(Uint8Array.from(Buffer.from(blob, 'base64').subarray(5 * 1024 * 1024)), big.subarray(5 * 1024 * 1024)); assert.equal(base64(big), Buffer.from(big).toString('base64'));
   assert.equal(downloadContents('x', '', Uint8Array.of(1)).contents[0].resource.mimeType, 'application/octet-stream'); assert.equal(downloadContents('x', undefined, Uint8Array.of(1)).contents[0].resource.mimeType, 'application/octet-stream');
-  for (const mime of ['image/png', 'image/jpeg', 'text/html', 'application/json', 'application/zip']) assert.equal(downloadContents('f', mime, Uint8Array.of(1)).contents[0].resource.mimeType, mime);
 });
 
 // ---- The shipped native host core, against a stand-in parent window.

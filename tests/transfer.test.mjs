@@ -13,9 +13,8 @@ import {readBody, bodyDeadline} from '../server/http.mjs';
 import {PaperLibrary} from '../server/library.mjs';
 import {createSharing} from '../server/sharing.mjs';
 import {createPresence} from '../server/presence.mjs';
-import {joinInvitation} from '../server/invitation.mjs';
 import {zipEntries} from '../server/bundle.mjs';
-import {attachResource, sha256} from '../server/handoff.mjs';
+import {sha256} from '../server/handoff.mjs';
 import {loadRuntime} from '../server/runtime.mjs';
 import {HANDOFF_LIMITS} from '../runtime/handoff-model.js';
 
@@ -72,18 +71,13 @@ test('on the shared listener a slow archive upload is accepted for an edit invit
   // An ordinary save body trickled just as slowly is refused by the ordinary bound.
   const doc = Buffer.from(JSON.stringify((await r.lib.read(r.made.id)).paper)), ordinary = await new Promise(resolve => { const req = http.request(`${r.base}/api/paper?paper=${r.made.id}`, {method: 'PUT', headers: {Authorization: 'Bearer ' + r.edit.token, 'X-Paper-Code': r.edit.code, Origin: r.base, 'Content-Type': 'application/json', 'If-Match': '"x"', 'Content-Length': doc.length}}, res => { res.resume(); res.on('end', () => resolve(res.statusCode)); }); req.on('error', () => resolve('closed')); (async () => { for (let i = 0; i < 6; i++) { if (req.destroyed) return; req.write(doc.subarray(Math.floor(i * doc.length / 6), Math.floor((i + 1) * doc.length / 6))); await sleep(100); } req.end(); })(); });
   assert.ok(ordinary === 'closed' || ordinary === 408, `an ordinary body at the same pace is cut off (${ordinary})`);
-  // A view invitation cannot attach however it is sent; a wrong digest never reaches disk; a revoked invitation mid-upload stores nothing.
-  const view = await trickleUpload(r.view, r.base, r.made.id, archive(500), {chunks: 3, gap: 20}); assert.equal(view.status, 403);
-  const stopped = await trickleUpload(r.edit, r.base, r.made.id, archive(30000, 9), {afterFirst: () => r.sharing.stop(r.made.id, r.edit.id)}); assert.ok([401, 'error'].includes(stopped.status), `a stopped invitation stores nothing (${stopped.status})`);
+  // A revoked invitation mid-upload stores nothing. (A view invitation's refusal on this route is handoff.test.mjs's.)
+  const stopped = await trickleUpload(r.edit, r.base, r.made.id, archive(30000, 9), {chunks: 2, gap: 20, afterFirst: () => r.sharing.stop(r.made.id, r.edit.id)}); assert.ok([401, 'error'].includes(stopped.status), `a stopped invitation stores nothing (${stopped.status})`);
   assert.deepEqual((await fs.readdir(path.join(await r.lib.folder(r.made.id), 'handoff'))).filter(n => /\.zip$/.test(n)), [`${original}.zip`], 'only the accepted archive is stored');
 });
 
-test('the plugin’s side moves an archive through the size-and-progress path in both directions, still proving it against the manifest and the invitation’s role', async t => {
-  const r = await rig(t), bytes = archive(60000), attached = await attachResource(r.lib, r.made.id, bytes, {name: 'plugin.zip'}), current = await r.lib.read(r.made.id), paper = JSON.parse(JSON.stringify(current.paper));
-  paper.handoff = {version: 1, selected: {id: 'x', label: 'X'}, resources: [attached.resource]}; await r.lib.save(r.made.id, Buffer.from(JSON.stringify(paper)), current.revision);
-  Object.assign(TIMING, {request: 150}); const viewer = await joinInvitation(r.view.url, r.view.code), editor = await joinInvitation(r.edit.url, r.edit.code);
-  const got = await viewer.handoffDownload(attached.resource.id); assert.deepEqual(got.bytes, bytes); const up = await editor.handoffAttach(archive(70000), 'second.zip'); assert.equal(up.resource.name, 'second.zip');
-  await assert.rejects(viewer.handoffAttach(archive(10), 'no.zip'), error => error.status === 403);
+test('the plugin’s side and the shared listener give archive transfers the size-and-progress budget (wiring; a loopback transfer is too fast to show it)', async () => {
+  // Moving an archive through the plugin in both directions, and its role checks, are handoff.test.mjs's; the slow upload above proves the listener's body deadline.
   const source = await fs.readFile(path.join(ROOT, 'server/invitation.mjs'), 'utf8'); assert.match(source, /transfer:resource\.bytes/); assert.match(source, /transfer:bytes\.length/); assert.match(source, /target\.pathname==='\/api\/handoff'\?\(method==='POST'/, 'the editor’s own downloads through the proxy get the same budget');
-  const http1 = await fs.readFile(path.join(ROOT, 'server/sharing.mjs'), 'utf8'); assert.match(http1, /requestTimeout=TIMING\.ceiling/); assert.match(http1, /readBody\(req,HANDOFF_LIMITS\.resourceBytes,\{deadlineMs:bodyDeadline\(HANDOFF_LIMITS\.resourceBytes\)\}\)/);
+  assert.match(await fs.readFile(path.join(ROOT, 'server/sharing.mjs'), 'utf8'), /requestTimeout=TIMING\.ceiling/);
 });

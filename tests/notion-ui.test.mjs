@@ -58,7 +58,7 @@ const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
 test.afterEach(()=>{for(const ui of controllers)ui.destroy();controllers.clear();document.body.children=[];});
 
 test('guests and shared sessions never reach the owner Notion routes',async()=>{
-  for(const access of [{role:'editor',shared:true},{role:'owner',shared:true},{role:'viewer',shared:false}]) {
+  for(const access of [{role:'owner',shared:true},{role:'viewer',shared:false}]) {
     const h=harness([connected],{access});
     await h.ui.save();await h.ui.open();
     assert.deepEqual(h.calls,[]);

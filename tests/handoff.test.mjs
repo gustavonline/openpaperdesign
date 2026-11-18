@@ -105,9 +105,11 @@ test('attach stores one archive by its digest next to the Paper; saving a manife
   const other = await lib.create({name: 'Linked'}), target = await fs.mkdtemp(path.join(root, 'elsewhere-')); await fs.symlink(target, path.join(await lib.folder(other.id), 'handoff'));
   await assert.rejects(attachResource(lib, other.id, bytes, {name: 'x.zip'}), /Linked paths/); assert.deepEqual(await fs.readdir(target), [], 'nothing was written through the link');
   // The stored total is bounded. (Collecting unreferenced archives after their grace period is the grace-period test's.)
-  const big = await lib.create({name: 'Big'}); const chunk = () => zipOf({'data.bin': randomBytes(23 * MiB)});
-  for (let i = 0; i < 4; i++) await attachResource(lib, big.id, chunk(), {name: `chunk${i}.zip`});
-  await assert.rejects(attachResource(lib, big.id, chunk(), {name: 'chunk5.zip'}), error => error.status === 413 && /handoff files/.test(error.message));
+  // Earlier archives still inside their grace period count as stored, so the store is filled to just under its bound directly instead of building ~96 MB of archives.
+  const big = await lib.create({name: 'Big'}), store = path.join(await lib.folder(big.id), 'handoff'); await fs.mkdir(store, {mode: 0o700});
+  for (let i = 0; i < 4; i++) await fs.writeFile(path.join(store, `${String(i).repeat(64)}.zip`), Buffer.alloc(HANDOFF_LIMITS.store / 4 - 64 * 1024));
+  assert.ok((await attachResource(lib, big.id, bytes, {name: 'fits.zip'})).resource, 'an archive that still fits is stored');
+  await assert.rejects(attachResource(lib, big.id, zipOf({'data.bin': randomBytes(512 * 1024)}), {name: 'over.zip'}), error => error.status === 413 && /handoff files/.test(error.message));
 });
 
 test('only an archive the CURRENT manifest names can be read, and only after its bytes still match the manifest', async () => {

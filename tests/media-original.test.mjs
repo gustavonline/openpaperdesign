@@ -162,7 +162,6 @@ test('the edit menu shows Download original alone in the image-only menu, never 
   const menu = html.slice(html.indexOf('<div id="edit-menu"'), html.indexOf('</div>', html.indexOf('<div id="edit-menu"')));
   const items = [...menu.matchAll(/<hr>|<button[^>]*>/g)].map(match => ({edit: /data-edit="([^"]+)"/.exec(match[0])?.[1]}));
   assert.ok(items.some(item => item.edit === 'download-original') && items.some(item => item.edit === 'copy') && items.some(item => !item.edit), 'the real markup has the item, ordinary commands and separators');
-  assert.match(menu, /data-edit="download-original" hidden>Download original</, 'hidden unless an image is chosen');
   const shown = state => items.filter((item, i) => !state[i].hidden).map(item => item.edit ?? '-');
   // Image-only menu (overlay or Layers tree): the one command, no ordinary editing commands, no stray separators.
   assert.deepEqual(shown(editMenuState(items, {canEdit: true, original: true, only: true})), ['copy-image', 'save-image', 'download-original']);

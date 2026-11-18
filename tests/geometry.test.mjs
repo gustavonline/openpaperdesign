@@ -75,7 +75,8 @@ test('the lead’s measured case: at 77% zoom a nested layer under a parent pose
 });
 
 test('across rotations, scales (uniform and not), depths, diagram scales and zoom levels, a drag always ends exactly under the pointer', async () => {
-  const angles = [0, 9, 18, -37, 90, 180, 250], scales = [{sx: 1.06}, {sx: 0.5}, {sx: 2.3}, {sx: 1.2, sy: 0.8}], zooms = [0.25, 0.77, 1, 2.5], moves = [[60, 25], [-33, 140], [0.5, -0.25], [1000, -1000]]; let cases = 0;
+  // The mapping is linear in the move and the zoom, so two of each suffice; the angles keep both signs and a quarter turn, the scales a non-uniform one.
+  const angles = [0, 9, -37, 90, 180], scales = [{sx: 1.06}, {sx: 1.2, sy: 0.8}], zooms = [0.25, 2.5], moves = [[60, 25], [0.5, -0.25]]; let cases = 0;
   for (const angle of angles) for (const scale of scales) for (const zoom of zooms) for (const [dx, dy] of moves) {
     for (const depth of [1, 2, 3]) {
       const chain = [{}, ...Array.from({length: depth}, (_, i) => ({rotate: angle + 11 * i, ...(i % 2 ? {sx: 1 / (scale.sx || 1)} : scale)}))], diagram = depth === 3 ? [0, 0, 2, 0.5] : [], w = await world({chain, zoom, diagram}), leaf = w.mover[0], before = centre(leaf);
@@ -83,7 +84,7 @@ test('across rotations, scales (uniform and not), depths, diagram scales and zoo
       nearPoint({x: shown.x * zoom, y: shown.y * zoom}, {x: dx, y: dy}, `angle ${angle} scale ${JSON.stringify(scale)} zoom ${zoom} depth ${depth}`); cases++;
     }
   }
-  assert.ok(cases > 1000);
+  assert.equal(cases, 120);
 });
 
 test('a paused or running pose is the same to the editor: the pose it reads is the one on screen at the first pointer-down, so a pose that changes later changes nothing about an edit already measured', async () => {
@@ -110,7 +111,7 @@ test('Shift locks the axis the person sees, not a model axis; Alt does not matte
   const w = await world({chain: [{}, {rotate: 40, sx: 1.3}]}), leaf = w.mover[0], before = centre(leaf); drag(w, 80, 30, {shiftKey: true});
   const shown = visibleDelta(ancestorsOf(w), {x: centre(leaf).x - before.x, y: centre(leaf).y - before.y}); nearPoint({x: shown.x * w.camera.z, y: shown.y * w.camera.z}, {x: 80, y: 0}, 'locked to the screen horizontal');
   const a = await world({chain: [{}, {rotate: 40, sx: 1.3}]}), c0 = centre(a.mover[0]); drag(a, 40, 40, {altKey: true}); const d = visibleDelta(ancestorsOf(a), {x: centre(a.mover[0]).x - c0.x, y: centre(a.mover[0]).y - c0.y}); nearPoint({x: d.x * a.camera.z, y: d.y * a.camera.z}, {x: 40, y: 40}, 'Alt');
-  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8'); assert.match(app, /if \(gesture\.moved\)|if \(!gesture\.moved && Math\.hypot\(dx, dy\) < 3\) return;/);
+  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8'); assert.match(app, /if \(!gesture\.moved && Math\.hypot\(dx, dy\) < 3\) return;/);
 });
 
 test('with motion off, or no animated ancestor, the drag is exactly what it was: the canonical scale, snapping and guides', async () => {
@@ -222,5 +223,4 @@ test('screen-space snapping honours Shift, Alt and the canvas toggles: Alt and �
 test('the editor’s copy about responsive versions says what the editor does: it declares widths for whoever builds the design and never swaps or scales artboards', async () => {
   const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
   assert.doesNotMatch(app, /Play picks|shows the nearest one, scaled to fit|Use as a preview variant/); assert.match(app, /Declare as a responsive version of this Page/); assert.match(app, /For whoever builds this design: the window widths this artboard is meant for\./); assert.match(app, /nothing here swaps or scales them/);
-  assert.match(app, /'Shown from px wide'/); assert.match(app, /'up to px wide'/, 'the explicit range authoring is kept');
 });

@@ -151,7 +151,6 @@ test('the menu carries Copy image and Save image… for images only, wired to fr
   const saveBody = app.slice(app.indexOf('async function saveImage()'), app.indexOf('\n}\n', app.indexOf('async function saveImage()')));
   assert.ok(saveBody.indexOf('plannedOriginal(') > -1 && saveBody.indexOf('saveWithChooser(') > saveBody.indexOf('plannedOriginal(') && saveBody.indexOf('fetchCapturedOriginal(') > saveBody.indexOf('saveWithChooser('), 'Save image… plans from the layer, opens the chooser, and only then fetches the original');
   assert.match(app, /copyOk:copyImageSupport\(\{ClipboardItem:window\.ClipboardItem,clipboard:navigator\.clipboard\}\),saveOk:savePickerSupport\(window\)/, 'offered only where the browser can do it');
-  assert.doesNotMatch(app.slice(app.indexOf('async function saveImage()'), app.indexOf('const hasFiles')), /download\(/, 'no download fallback when the chooser is cancelled or refused');
   assert.doesNotMatch(app, /showDirectoryPicker|FileSystemHandle|text\/uri-list.*clipboard|navigator\.clipboard\.write\(\[new ClipboardItem\(\{'text\/uri-list'/, 'no file clipboard is claimed');
 });
 

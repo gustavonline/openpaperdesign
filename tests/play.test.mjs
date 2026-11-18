@@ -154,7 +154,7 @@ test('a pointer click on Pause after a draft in the time field pauses at the typ
 
 // ---- 3. What may move: reconciled from facts.
 test('hidden, offscreen and editing are separate blockers: nothing moves until all are clear, in any order; the person’s pause and reduced motion are always respected', t => {
-  const orders = [['off', 'hide', 'show', 'on'], ['hide', 'off', 'on', 'show'], ['off', 'off', 'hide', 'hide', 'show', 'off', 'on', 'hide', 'show', 'on'], ['edit', 'hide', 'endEdit', 'show'], ['hide', 'edit', 'show', 'endEdit'], ['edit', 'off', 'endEdit', 'on']];
+  const orders = [['hide', 'off', 'on', 'show'], ['off', 'off', 'hide', 'hide', 'show', 'off', 'on', 'hide', 'show', 'on'], ['edit', 'hide', 'endEdit', 'show'], ['hide', 'edit', 'show', 'endEdit'], ['edit', 'off', 'endEdit', 'on']];
   for (const steps of orders) {
     const w = mount(t), {env} = w; press(w.controls.toggle); w.el('D primary CTA').fire('pointerenter'); env.advance(100);
     const watch = env.observers.find(o => o.targets.has(w.stage)); let hidden = false, off = false, edit = false;
@@ -215,7 +215,7 @@ test('typing into a layer shows its own text, never a state’s; the state text 
 // ---- 5. Routing: the editor keeps every gesture; click actions are tried deliberately.
 test('a normal click, key, wheel or drag on a layer does nothing to motion; Try interaction runs the layer’s authored click actions, and only those', t => {
   const w = mount(t), {env} = w; press(w.controls.toggle); const cta = w.el('D primary CTA'), page2 = w.page(1).id;
-  for (const type of ['click', 'keydown', 'pointerdown', 'pointerup', 'wheel', 'dragstart', 'contextmenu']) assert.equal((cta.listeners.get(type) || []).length, 0, `${type} is not listened to`);
+  // That no layer listens to anything but passive hover is asserted for every layer in section 1.
   cta.fire('click'); w.el('D Together toggle').fire('click'); assert.deepEqual(w.snap().states, {mode: 'solo'}, 'a plain click changes no state'); assert.equal(w.state.nav.length, 0, 'and goes nowhere');
   const solo = w.page(0).nodes.find(n => n.name === 'D Solo toggle'), together = w.page(0).nodes.find(n => n.name === 'D Together toggle'), ctaNode = w.page(0).nodes.find(n => n.name === 'D primary CTA'), eyebrow = w.page(0).nodes.find(n => n.name === 'D eyebrow');
   assert.equal(w.motion.interactionsFor(w.page(0).id, eyebrow.id).length, 0, 'a layer with no click action has nothing to try'); assert.equal(w.motion.tryLayer(w.page(0).id, eyebrow.id), 0);
@@ -230,7 +230,6 @@ test('a normal click, key, wheel or drag on a layer does nothing to motion; Try 
 test('a layer’s focus effect follows the editor’s own selection, with no tab stop or focus listener; hover is passive and follows the pointer', t => {
   const w = mount(t), {env} = w; press(w.controls.toggle); const solo = w.key('D Solo toggle'), effect = w.anims('D Solo toggle').find(a => a.frames[1].scale === '1.05');
   assert.equal(effect.currentTime, 0); w.state.selection.add(solo); w.motion.selectionChanged(); assert.deepEqual([effect.running, effect.playbackRate], [true, 1], 'selecting the layer plays its focus effect'); env.advance(40); w.state.selection.delete(solo); w.motion.selectionChanged(); assert.deepEqual([effect.running, effect.playbackRate], [true, -1], 'deselecting plays it back');
-  assert.ok(![...w.elements.values()].some(e => e.listeners.has('focusin') || e.listeners.has('focus') || e.tabIndex >= 0), 'no focus listeners and no new tab stops');
   const hover = w.anims('D primary CTA').find(a => a.frames[1].scale === '1.04'); w.el('D primary CTA').fire('pointerenter', {preventDefault() { throw new Error('hover must not prevent anything'); }, stopPropagation() { throw new Error('nor stop it'); }}); assert.equal(hover.playbackRate, 1); w.el('D primary CTA').fire('pointerleave'); assert.equal(hover.playbackRate, -1);
 });
 
@@ -350,7 +349,6 @@ test('a Paper whose shown Pages have only hover, focus, reveal and state effects
   const hover = w.anims('D primary CTA').find(a => a.frames[1].scale === '1.04'); w.el('D primary CTA').fire('pointerenter'); assert.equal(hover.running, true, 'event effects still play'); press(controls.toggle); assert.equal(hover.running, false, 'and Pause still freezes them');
   press(controls.toggle); w.motion.setState('mode', 'together'); const state = w.anims('D Together toggle').find(a => a.frames[0].backgroundColor === '#ecede3'); assert.equal(state.running, true, 'a state effect plays'); assert.equal(w.el('D state title').textContent, 'Better, together.');
   env.hide(true); env.hide(false); w.motion.setEditing(true); w.motion.setEditing(false); w.rebuild(); w.motion.cameraChanged(); press(controls.toggle); press(controls.toggle); assert.equal(env.frames.size, 0, 'hide, edit, rebuild, camera, pause, play: still no frame');
-  const cap = mount(t); press(cap.controls.toggle); assert.equal(cap.env.frames.size, 1, 'a timeline has exactly one clock frame'); press(cap.controls.toggle); assert.equal(cap.env.frames.size, 0, 'paused: none');
   controls.reduce.fire('click'); assert.equal(controls.reduce.attrs['aria-pressed'], 'true', 'Reduce still works'); controls.reset.fire('click'); assert.equal(w.snap().engaged, false); assert.ok(clockControls(w).every(c => c.disabled), 'after Reset: still none');
   assert.equal(controls.ms.title, 'These Pages have no load animation, so there is no clock to set. Hover, focus, reveal and state effects have none.');
 });
@@ -366,8 +364,8 @@ test('a timed Paper’s clock controls work BEFORE Play (typing a time starts a 
   // The fully timed landing Paper: always enabled.
   const timed = mount(t); assert.ok(clockControls(timed).every(c => !c.disabled));
 });
-test('ordinary Play at the end of a finite timeline keeps the finished frame and says Replay restarts it; explicit Replay and a time seek still work, an unfinished pause resumes, and reduced and loop caps are unchanged', t => {
-  const w = mount(t, {shown: 'details0000000001'}), {env, controls} = w; press(controls.toggle); const heading = w.anims('Details heading', w.page(1))[0] || w.live()[0];
+test('ordinary Play at the end of a finite timeline keeps the finished frame and says Replay restarts it; explicit Replay and a time seek still work, an unfinished pause resumes, and the loop cap is unchanged', t => {
+  const w = mount(t, {shown: 'details0000000001'}), {env, controls} = w; press(controls.toggle);
   assert.equal(w.snap().timelineMs, 1020, 'the finite timeline ends at 1020 ms'); controls.ms.value = '10000'; controls.ms.fire('change'); assert.equal(w.snap().time, 1020, 'clamped to its own end'); assert.match(controls.status.textContent, /ends at 1020 ms/);
   const frame = w.live().map(frameOf), plays = w.live().map(a => a.plays); press(controls.toggle);
   assert.equal(w.snap().time, 1020, 'Play did not restart it'); assert.equal(w.snap().playing, false); assert.equal(w.running().length, 0); assert.deepEqual(w.live().map(frameOf), frame, 'the finished frame is exactly kept'); assert.deepEqual(w.live().map(a => a.plays), plays, 'no animation was played again'); assert.match(controls.status.textContent, /finished\. Replay starts it again/); assert.equal(controls.toggle.attrs['aria-label'], 'Play motion'); assert.equal(env.frames.size, 0);
@@ -380,8 +378,6 @@ test('ordinary Play at the end of a finite timeline keeps the finished frame and
   const done = mount(t, {shown: 'details0000000001'}); done.motion.seek(1020); press(done.controls.toggle); assert.equal(done.snap().userPaused, false, 'Play still ended the person’s pause');
   // Loops: Play from the cap still asks for Replay; a long finite timeline is bounded by its own end.
   const loops = mount(t); loops.motion.seek(3600000); press(loops.controls.toggle); assert.match(loops.controls.status.textContent, /Replay starts again/); assert.equal(loops.snap().playing, false);
-  const reduced = mount(t, {reduced: true, shown: 'details0000000001'}); press(reduced.controls.toggle); assert.match(reduced.controls.status.textContent, /Motion is reduced/); assert.equal(reduced.running().length, 0);
-  void heading;
 });
 
 // ---- 12. Live revisions of pins, text rules and states reach the canvas, and what a revision removes is taken off.

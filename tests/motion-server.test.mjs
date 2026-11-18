@@ -32,16 +32,13 @@ test('a Paper with a preview model saves, reads back byte-for-byte, and one with
   const listed = await lib.list(); assert.ok(listed.some(p => p.id === id), 'it lists');
 });
 
-test('unsafe or unsupported preview models are refused on save, create and import, with the reason', async t => {
+test('an unsafe or newer preview model is refused on save with the reason, and the refused save changes nothing', async t => {
   const {lib, id, paper} = await withPaper(t), current = await lib.read(id);
   const attempt = mutate => { const next = clone(paper); mutate(next.preview, next); return lib.save(id, body(next), current.revision); };
   const refuse = async (mutate, pattern) => assert.rejects(attempt(mutate), error => error instanceof PaperError && error.status === 400 && pattern.test(error.message));
-  await refuse(p => { p.animations[0].css = 'x'; }, /unknown field “css”/); await refuse(p => { p.animations[0].node = 99999; }, /not on that Page/); await refuse(p => { p.animations[0].page = '../../x'; }, /Page that is not in this Paper/);
-  await refuse(p => { p.animations.find(a => a.keyframes[0].background).keyframes[0].background = 'red;x:url(//evil)'; }, /background/); await refuse(p => { p.interactions[0].actions = [{type: 'navigate', page: 'javascript:alert(1)'}]; }, /Page that is not in this Paper/);
-  await refuse(p => { p.version = 2; }, /version 2.*does not understand.*Update OpenPaperDesign/); await refuse(p => { delete p.version; }, /version/);
+  // Each rule of the model is pinned in preview-model.test.mjs; here the save path applies it and says why.
+  await refuse(p => { p.animations[0].css = 'x'; }, /unknown field “css”/); await refuse(p => { p.version = 2; }, /version 2.*does not understand.*Update OpenPaperDesign/); await refuse(p => { delete p.version; }, /version/);
   assert.deepEqual((await lib.read(id)).paper.preview, paper.preview, 'a refused save changed nothing');
-  // Import (JSON) and create-from-file take the same road.
-  const bad = clone(paper); bad.preview.version = 9; assert.throws(() => validatePaper(bad), /version 9/); assert.ok(validatePaper(bad, {read: true}), 'a reader accepts a newer model as opaque');
 });
 
 test('a newer-version preview already on disk still opens and lists, but cannot be saved over, and nothing newer is dropped', async t => {
@@ -57,7 +54,6 @@ test('.paper.zip keeps the motion and round-trips it exactly', async t => {
   const {lib, id, paper} = await withPaper(t), target = await library(t);
   const bundle = await exportBundle(lib, id), imported = await importBundle(target, bundle), back = await target.read(imported.id);
   assert.deepEqual(back.paper.preview, paper.preview, 'the motion survives the round trip'); assert.deepEqual(back.paper.pages, paper.pages);
-  const again = await importBundle(await library(t), await exportBundle(target, imported.id)); assert.ok(again.id, 'and again');
 });
 
 test('the same whole-Paper tools carry it for guests: edit guests save it, view guests cannot, and a bad model is refused with the Paper unchanged', async t => {

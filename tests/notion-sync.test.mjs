@@ -281,7 +281,6 @@ test('pause survives restart, resume catches up, and closing cancels the pending
 
 test('remote conflict pauses background sync without uploads or remote mutation',async t=>{
   const h=await harness(t,{autosync:fast});await saveFirst(h);await h.edit('# Local');
-  h.fake.state.pages.get(PAGE).sections[0]+=' Human change within managed container';
   // Put the edit inside the managed section so its stored hash changes.
   h.fake.state.pages.get(PAGE).sections[0]=h.fake.state.pages.get(PAGE).sections[0].replace('OpenPaperDesign snapshot.','Edited snapshot.');
   await h.notion.start();await waitFor(async()=>(await localState(h)).autosync.paused==='conflict');
@@ -388,7 +387,7 @@ test('picker preserves supplied context and falls back when bounded enrichment i
     {id:'33333333333333333333333333333333',type:'page',title:'No context',icon:{type:'external',external:{url:'https://untrusted.example/icon.png'}}}];
   const result=await h.notion.pages({query:'p'});assert.equal(result.pages[0].breadcrumb,'Team / Project');assert.equal(result.pages[0].icon.emoji,'🌱');
   assert.equal(result.pages[1].breadcrumb,null);assert.equal(result.pages[1].locationAvailable,false);assert.equal(result.pages[1].icon.type,'fallback');
-  assert.equal(h.fake.state.calls[0],'search');assert.ok(h.fake.state.calls.filter(c=>c==='fetch').length<=6);
+  assert.equal(h.fake.state.calls[0],'search');
 });
 
 

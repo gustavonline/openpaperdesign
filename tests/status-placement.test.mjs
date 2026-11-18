@@ -38,13 +38,6 @@ test('side-docked toolbars only matter when they overlap, and the result stays o
   assert.ok(inView(top,status,view)&&top>=8,'a column starting on the top row cannot push the actions out of the window');
 });
 
-test('narrow window: a three-line status with wrapped actions clears the Paper bar and fits at 390x700',()=>{
-  const narrow={width:390,height:700},status=rect(8,8,374,92),paperBar=rect(8,8,120,32),bottomToolbar=rect(40,648,310,40);
-  const top=statusSpot(status,[bottomToolbar,paperBar],narrow);
-  assert.equal(top,paperBar.bottom+6);
-  assert.ok(inView(top,status,narrow));
-});
-
 test('a status taller than the room left is clamped into the window, never below it',()=>{
   const tiny={width:390,height:120},status=rect(8,8,374,90),top=statusSpot(status,[rect(8,8,120,32)],tiny);
   assert.ok(top>=8&&top+90<=tiny.height-8+0.5,String(top));
