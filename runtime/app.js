@@ -696,6 +696,11 @@ async function recoverPaper() {
 // this browser as a backup; a conflict or failure stays visible with a download, and nothing is overwritten.
 const FEEDBACK_BACKUP = `openpaperdesign-${paperId}-feedback-backup`;
 const feedback = { workspace: null, revision: null, last: 'null', pendingBytes: null, saving: null, timer: 0, error: null, conflict: false };
+// The toolbar fills the page it is shown on with empty defaults and leaves other pages as {}. An owner and an edit guest
+// open on different page keys therefore produce different bytes for the same empty feedback; such a difference holds
+// nothing and is never sent, or each session's save would make the other reload and save again without end.
+const emptyValue = value => value == null || (Array.isArray(value) ? value.length === 0 : typeof value === 'object' && Object.keys(value).length === 0);
+const feedbackContent = workspace => JSON.stringify(workspace && { ...workspace, pages: Object.fromEntries(Object.entries(workspace.pages ?? {}).filter(([, page]) => !emptyValue(page) && !Object.values(page).every(emptyValue))) });
 const keepBackup = bytes => { try { bytes === null ? localStorage.removeItem(FEEDBACK_BACKUP) : localStorage.setItem(FEEDBACK_BACKUP, bytes); } catch { /* The visible status still says what is unsaved. */ } };
 async function loadFeedback() {
   const response = await fetch(feedbackUrl, { cache: 'no-store',signal:AbortSignal.timeout(15000) });
@@ -709,6 +714,7 @@ function queueFeedback(workspace) {
   feedback.workspace = workspace ?? null;
   const bytes = JSON.stringify(feedback.workspace);
   if (bytes === (feedback.pendingBytes ?? feedback.last)) return;
+  if (feedback.pendingBytes === null && !feedback.saving && feedbackContent(feedback.workspace) === feedbackContent(JSON.parse(feedback.last))) return;
   // While a PUT is in flight its outcome is unknown, so even a return to the saved bytes is sent after it.
   feedback.pendingBytes = bytes === feedback.last && !feedback.saving ? null : bytes;
   if (feedback.pendingBytes === null) { if (!feedback.error && !feedback.conflict) keepBackup(null); updateSaveState(); return; }
