@@ -49,6 +49,18 @@ Provider choice and skill choice remain independent.
 
 ## Verification and delivery
 
+Name the entry points a change affects, exercise those, and say which were not exercised:
+
+- Owner editor and Home: the local server (`node server/server.mjs`) as described in
+  README.md "Use it"; editor behavior is in DESIGN.md.
+- Shared browser viewer and editor: `/join` and the scoped sharing listener with view
+  and edit invitations, code protection, expiry and revocation (DESIGN.md "Sharing",
+  skills/paper/references/sharing.md).
+- Agent/MCP: the stdio MCP tools, `paper_join` and the HTTP routes
+  (skills/paper/references/http-api.md).
+- Native Codex/Claude Code plugin: only when packaging, manifests, the native bundle or
+  host behavior is affected; follow docs/releases.md "Native install acceptance".
+
 - Run npm run check and npm test for product changes, with relevant regression checks.
 - For built UI changes, follow the lockfiles and npm run verify:assets; refresh
   the inspection/native bundles as documented. Do not hand-edit generated bundles.
