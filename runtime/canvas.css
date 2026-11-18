@@ -49,6 +49,7 @@ body:not(.right-open) #right-bar{right:5px;width:auto;padding-right:4px}
 .menu-row label{flex:1}
 .menu-row .reset{width:auto!important;height:24px!important;padding:0 8px!important;color:var(--text-2)!important}
 .menu-label{padding:4px 8px 6px;max-width:240px;font-size:11px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu-label.menu-heading{padding-top:6px;font-weight:600;color:var(--text)}
 
 /* Design tools. Shown inside Inspection's native toolbar while Design is the current mode (sample-only
    slot), and on their own only while Inspection is minimised or unavailable. 32px buttons, 16px icons. */

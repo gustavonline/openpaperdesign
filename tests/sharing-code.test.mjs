@@ -21,7 +21,7 @@ const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'paper-shari
 test.after(()=>fs.rm(root,{recursive:true,force:true}));
 
 async function rig(t){
-  const dir=await fs.mkdtemp(path.join(root,'library-')),library=await PaperLibrary.open(dir),clock={value:Date.parse('2026-11-11T12:00:00Z')};
+  const dir=await fs.mkdtemp(path.join(root,'library-')),library=await PaperLibrary.open(dir),clock={value:Date.now()}; // The server's clock starts at real time: joinInvitation checks expiry against the real clock, so a fixed date would expire its invitations as the calendar passes it.
   const presence=createPresence({publish(){}}),sharing=createSharing({library,editor:await loadRuntime(RUNTIME),presence,now:()=>clock.value});
   library.onChange=(event,data)=>sharing.notify(event,data);
   t.after(async()=>{await sharing.close();presence.close();});
