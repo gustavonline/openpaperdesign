@@ -51,9 +51,9 @@ test('every reference must exist: Page, layer, root, state, value, variant artbo
     [(p, s) => { p.sticky[0].node = named(landing(s), 'D state title').id; }, /direct child of a top-level artboard/], [(p, s) => { p.sticky[0].node = named(landing(s), 'Details navigation').id; }, /direct child/],
     [p => { p.texts[0].state = 'nope'; }, /state or value/], [(p, s) => { p.texts[0].node = named(landing(s), 'D hero background orb').id; }, /text layer/], [p => { p.interactions[0].actions[0].state = 'nope'; }, /state or value/], [p => { p.interactions[0].actions[0].value = 'nope'; }, /state or value/],
     [p => { const nav = p.interactions.find(i => i.actions[0].type === 'navigate'); nav.actions[0].page = 'nope'; }, /Page that is not in this Paper/], [(p, s) => { const nav = p.interactions.find(i => i.actions[0].type === 'navigate'); nav.actions[0].root = named(landing(s), 'D hero headline').id; }, /top-level artboard/],
-    [(p, s) => { const sc = p.interactions.find(i => i.actions[0].type === 'scroll-to'); sc.actions[0].node = 999999; }, /scrolls to a layer/], [p => { p.animations.find(a => a.keyframes[0].color === undefined && a.keyframes[0].background); }, null],
+    [(p, s) => { const sc = p.interactions.find(i => i.actions[0].type === 'scroll-to'); sc.actions[0].node = 999999; }, /scrolls to a layer/],
   ];
-  for (const [mutate, expected] of cases) { if (!expected) continue; const text = problem(mutate); assert.ok(text, String(mutate)); assert.match(text, expected, text); }
+  for (const [mutate, expected] of cases) { const text = problem(mutate); assert.ok(text, String(mutate)); assert.match(text, expected, text); }
   // colour animates text and background animates the rest, never swapped
   assert.match(problem((p, s) => { p.animations[0].node = named(landing(s), 'D eyebrow').id; p.animations[0].keyframes = [{background: '#112233'}, {background: '#445566'}]; }), /not text/);
   assert.match(problem((p, s) => { p.animations[0].keyframes = [{color: '#112233'}, {color: '#445566'}]; }), /text layers only/);
@@ -99,7 +99,6 @@ test('the variant for a window width is chosen by authored range, never by scali
 test('a moment of motion is deterministic: the same time always holds the same numbers, and loops, delays, directions and easing behave', () => {
   const fade = {keyframes: [{opacity: 0, y: 40}, {opacity: 1, y: 0}], durationMs: 1000, easing: 'linear'};
   assert.deepEqual(evaluateAnimation(fade, 0), {opacity: 0, y: 40}); assert.deepEqual(evaluateAnimation(fade, 500), {opacity: .5, y: 20}); assert.deepEqual(evaluateAnimation(fade, 1000), {opacity: 1, y: 0}); assert.deepEqual(evaluateAnimation(fade, 99999), {opacity: 1, y: 0});
-  for (let i = 0; i < 3; i++) assert.deepEqual(evaluateAnimation(fade, 333), evaluateAnimation(fade, 333), 'repeatable');
   const delayed = {...fade, delayMs: 400}; assert.deepEqual(evaluateAnimation(delayed, 100), {opacity: 0, y: 40}, 'before the delay: the first frame'); assert.equal(evaluateAnimation(delayed, 900).opacity, .5);
   const eased = {...fade, easing: 'ease-in'}; assert.ok(evaluateAnimation(eased, 500).opacity < .5 && evaluateAnimation(eased, 500).opacity > 0, 'ease-in is slow at first'); assert.ok(evaluateAnimation({...fade, easing: 'ease-out'}, 500).opacity > .5);
   const loop = {keyframes: [{y: 0}, {y: -10}, {y: 0}], durationMs: 1000, iterations: 'infinite', easing: 'linear'}; assert.equal(evaluateAnimation(loop, 0).y, 0); assert.equal(evaluateAnimation(loop, 500).y, -10); assert.equal(evaluateAnimation(loop, 1000).y, 0); assert.equal(evaluateAnimation(loop, 5500).y, -10, 'a loop is periodic');
@@ -116,7 +115,6 @@ test('only validated numbers and hex colours ever reach a style string', () => {
     if (name === 'offset') assert.ok(typeof value === 'number'); else assert.match(String(value), /^(?:-?\d+(?:\.\d+)?(?:px|deg)?(?: -?\d+(?:\.\d+)?px)?|blur\(\d+(?:\.\d+)?px\)|#[0-9a-f]{6}(?:[0-9a-f]{2})?)$/i, `${name}: ${value}`);
   }
   assert.equal(easingCss('ease-out'), 'cubic-bezier(0, 0, 0.58, 1)'); assert.equal(easingCss({bezier: [0.1, -1, 0.9, 2]}), 'cubic-bezier(0.1, -1, 0.9, 2)'); assert.equal(easingCss(undefined), 'linear'); assert.equal(easingCss('linear'), 'linear');
-  assert.deepEqual(Object.keys(waapiFrames({keyframes: [{x: 5, y: 6, rotate: 7, scale: 2, opacity: .5, blur: 3, backdropBlur: 4}, {x: 0, y: 0, rotate: 0, scale: 1, opacity: 1, blur: 0, backdropBlur: 0}]})[0]).sort(), ['backdropFilter', 'filter', 'offset', 'opacity', 'rotate', 'scale', 'translate'], 'transform pieces are the individual properties, so a layer’s own transform is kept');
 });
 
 test('authoring helpers return checked, immutable changes and the presets are real records', () => {

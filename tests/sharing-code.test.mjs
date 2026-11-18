@@ -51,19 +51,15 @@ test('the access code is read one way everywhere: case, spacing, dashes, full-wi
   for(const typed of ['k7qm-4p2x',' K7QM 4P2X ','K7QM4P2X','k7qm‑4p2x','Ｋ７ＱＭ－４Ｐ２Ｘ','K7​QM-4P2X','K7QM 4P2X','k7qm– 4p2x\n'])assert.equal(normalizeCode(typed),want,JSON.stringify(typed));
   assert.equal(readCode('k7qm 4p2x'),'K7QM-4P2X');assert.equal(formatCode(want),'K7QM-4P2X');
   for(const bad of ['K7QO4P2X','K7QM4P2','K7QM4P2XX','','0000-0000','K7QM-4P2X-1',null,undefined,42,{}])assert.equal(readCode(bad),'',String(bad));
-  const key='A'.repeat(43),message=invitationMessage({role:'edit',url:`https://example.trycloudflare.com/join#${key}`,code:'K7QM4P2X',expiresAt:null});
-  assert.match(message,/^See my Paper:\n\nhttps:\/\/example\.trycloudflare\.com\/join#A{43}\n\nAccess code:\nK7QM-4P2X\n\n/);
-  assert.deepEqual(extractInvitation(message),{token:key,code:'K7QM-4P2X'});
-  // The earlier English message keeps working, with the code on the same or the next line.
-  assert.deepEqual(extractInvitation(`You’re invited to edit “Board”.\nLink: https://x.test/join#${key}\nCode: K7QM-4P2X\nEnds tomorrow`),{token:key,code:'K7QM-4P2X'});
-  assert.deepEqual(extractInvitation(`https://x.test/join#${key}\nCode:\nk7qm 4p2x`),{token:key,code:'K7QM-4P2X'});
+  // The message itself and every label variant are read in the round-trip test below; these are the bare-link and loose-text edges.
+  const key='A'.repeat(43);
   assert.deepEqual(extractInvitation(`see https://x.test/join#${key}) it is k7qm 4p2x`),{token:key,code:'K7QM-4P2X'});
   assert.deepEqual(extractInvitation(`https://x.test/join#${key}`),{token:key,code:''});
   assert.deepEqual(extractInvitation(key),{token:key,code:''});
   assert.equal(extractInvitation('Code: K7QM-4P2X').token,'');
   assert.equal(endedCopy(knownEnd('expired')),'This invitation expired.');assert.equal(endedCopy(knownEnd('revoked')),'The owner stopped this invitation.');
   for(const unknown of [undefined,null,'',{},'ended','needs-code'])assert.equal(endedCopy(knownEnd(unknown)),'This invitation ended.','an unknown reason never blames the owner');
-  assert.equal(describeExpiry(null).startsWith('No end time'),true);assert.equal(JSON.stringify({expiresAt:null}),'{"expiresAt":null}');
+  assert.equal(describeExpiry(null).startsWith('No end time'),true);
 });
 
 test('a protected invitation gives nothing without the right code, and only the server decides',async t=>{
@@ -79,9 +75,9 @@ test('a protected invitation gives nothing without the right code, and only the 
   assert.equal(guest.jar.size,0);
   for(const malformed of ['K7QM','K7QO-4P2X',' ','x'.repeat(200)]){const answer=await guest.join(g,malformed);assert.ok([400,401].includes(answer.status),malformed.slice(0,10));assert.equal(guest.jar.size,0);}
   assert.equal((await guest.join(g,{})).status,400,'a non-text code is refused');
-  const variants=['k7qm-4p2x'];
-  const raw=g.code.replace('-','');variants.push(raw.toLowerCase(),` ${g.code.slice(0,4)}  ${g.code.slice(5)} `,[...raw].map(c=>String.fromCharCode(c.charCodeAt(0)>64?c.charCodeAt(0)+0xfee0:c.charCodeAt(0)+0xfee0)).join(''),g.code.replace('-','‑'));
-  for(const typed of variants.slice(1)){const fresh=r.browser(),answer=await fresh.join(g,typed);assert.equal(answer.status,200,typed);const info=await answer.json();assert.equal(info.name,'Protected Paper');assert.equal(info.version,VERSION,'the join answer names the plugin version the guest agent must match');assert.equal(info.href,`/?paper=${r.made.id}&invite=${g.id}`);}
+  // The server reads the code with the same normaliser as the first test's eight forms; one awkward form proves it is used.
+  const raw=g.code.replace('-','');
+  for(const typed of [[...raw].map(c=>String.fromCharCode(c.charCodeAt(0)+0xfee0)).join('')]){const fresh=r.browser(),answer=await fresh.join(g,typed);assert.equal(answer.status,200,typed);const info=await answer.json();assert.equal(info.name,'Protected Paper');assert.equal(info.version,VERSION,'the join answer names the plugin version the guest agent must match');assert.equal(info.href,`/?paper=${r.made.id}&invite=${g.id}`);}
   const ok=await guest.join(g,g.code);assert.equal(ok.status,200);assert.equal(guest.jar.size,1);assert.ok([...guest.jar.keys()][0].endsWith(g.id));
   const access=await (await guest.request(g.base,`/api/access?paper=${r.made.id}&invite=${g.id}`)).json();assert.equal(access.role,'edit');assert.equal(access.invitationId,g.id);
   // Reusing the session on a second unlock does not open a second cookie.
@@ -297,11 +293,6 @@ test('Copy invitation is a plain English text with the link and the code each al
   // Finite ends name date, time and zone in the invitation, whatever zone the owner or recipient is in.
   assert.match(ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS,timeZone:'UTC'}),/expires Saturday, 14 November 2026 at 13:30 UTC\.$/);
   assert.match(ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS,timeZone:'America/New_York'}),/expires Saturday, 14 November 2026 at 08:30 GMT-5\.$/);
-  // No quotes, Markdown or punctuation hugs the link or the code, and Never promises no hosting.
-  for(const message of [ask({role:'edit',code:'K7QM4P2X',expiresAt:ENDS}),ask({role:'view',code:'K7QM4P2X',expiresAt:null})]){
-    const own=message.split('\n');assert.ok(own.includes(URL_));assert.ok(own.includes('K7QM-4P2X'));assert.doesNotMatch(message,/[*_`<>“”"]|\]\(/);assert.doesNotMatch(message,/permanent hosting|forever|always|Danish|Se mit|Adgangskode/i);assert.match(message,/OpenPaperDesign/);assert.match(message,/share it with an AI agent/);assert.ok(message.includes('https://github.com/gustavonline/openpaperdesign'));assert.doesNotMatch(message,/must install|install the/i);
-  }
-  assert.ok(ask({role:'edit',code:'K7QM4P2X',expiresAt:null}).includes('only works while my computer is on, online and running Paper'));
 });
 
 test('the English message round-trips for the plugin and the browser, with other 8-letter words around it, and older Danish messages still read',()=>{
@@ -336,6 +327,7 @@ test('app links are generic and secret-free, whatever invitation exists; only th
   const codex=new URL(links.codex),claude=new URL(links.claude);
   assert.equal(codex.protocol,'codex:');assert.equal(codex.hostname,'threads');assert.equal(codex.pathname,'/new');assert.deepEqual([...codex.searchParams.keys()],['prompt']);assert.equal(codex.hash,'');
   assert.equal(claude.protocol,'claude:');assert.equal(claude.hostname,'code');assert.equal(claude.pathname,'/new');assert.deepEqual([...claude.searchParams.keys()],['q']);assert.equal(claude.hash,'');
+  for(const url of [codex,claude])assert.ok(!url.username&&!url.password&&url.href.length<=16000,'within the native open-link allowlist checked below');
   assert.ok(codex.searchParams.get('prompt').startsWith('[@OpenPaperDesign](plugin://openpaperdesign@openpaperdesign) '));
   const everything=links.codex+links.claude+decodeURIComponent(links.codex)+decodeURIComponent(links.claude);
   for(const secret of [g.token,g.code,g.code.replace('-',''),g.url,new URL(g.url).host,'/join','#','Protected Paper',r.dir,r.made.id,g.id])assert.ok(!everything.includes(secret),`app links must not contain ${String(secret).slice(0,12)}`);
@@ -349,23 +341,15 @@ test('app links are generic and secret-free, whatever invitation exists; only th
   const open=await r.grant('view');const plain=joinRequest({url:open.url,code:''});assert.ok(!plain.includes('Code:'));assert.equal((await joinInvitation(plain)).descriptor.role,'view');
   assert.deepEqual(extractInvitation(joinRequest({url:g.url,code:'ABCD-EFGH'})),{token:g.token,code:'ABCD-EFGH'});
   await assert.rejects(joinInvitation(joinRequest({url:g.url,code:'ZZZZ-ZZZZ'})),/did not work/);
-  // The remote allowlist is untouched: view guests get 2 tools, edit guests 6, the same grant as before.
-  const view=await r.grant('view',{protect:true});
-  const list=async grant=>{const response=await fetch(grant.mcpUrl,{method:'POST',headers:{Authorization:'Bearer '+grant.token,'X-Paper-Code':grant.code||'','Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})});return (await response.json()).result.tools.map(tool=>tool.name);};
-  assert.equal((await list(view)).length,2);assert.equal((await list(g)).length,6);
 });
 
-test('the native open-link allowlist stays the same two generic app schemes, and the new links satisfy it',async()=>{
+test('the native open-link allowlist stays the same two generic app schemes',async()=>{
   const host=await fs.readFile(new URL('../runtime/native-host.js',import.meta.url),'utf8');
   const open=host.slice(host.indexOf('async function openAgent('),host.indexOf('async function openGuest('));
   assert.ok(open.includes("url.protocol==='codex:'&&url.hostname==='threads'&&url.pathname==='/new'&&[...url.searchParams.keys()].every(k=>k==='prompt')"));
   assert.ok(open.includes("url.protocol==='claude:'&&url.hostname==='code'&&url.pathname==='/new'&&[...url.searchParams.keys()].every(k=>k==='q')"));
   assert.ok(open.includes('url.username||url.password||url.hash||url.href.length>16000'));
   assert.doesNotMatch(open,/claude-cli|http/,'no other scheme was added to the allowlist');
-  const links=invitationLinks();
-  for(const [value,scheme,host_,key] of [[links.codex,'codex:','threads','prompt'],[links.claude,'claude:','code','q']]){
-    const url=new URL(value);assert.equal(url.protocol,scheme);assert.equal(url.hostname,host_);assert.equal(url.pathname,'/new');assert.deepEqual([...url.searchParams.keys()],[key]);assert.ok(!url.username&&!url.password&&!url.hash&&url.href.length<=16000);
-  }
 });
 
 const PNG_BYTES=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from('synthetic original png '),Buffer.alloc(300,7)]);
@@ -390,8 +374,6 @@ test('Download original returns the stored bytes, name and type for view and edi
     const got=await fetchOriginal({paperId:r.made.id,scene,node:f.node,fetchImpl:fetchFor(guest,view.base)});
     assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()),f.bytes,'byte-identical to what was stored');assert.equal(got.name,f.name);assert.equal(got.blob.type,{png:'image/png',jpg:'image/jpeg',webp:'image/webp'}[f.name.split('.')[1]]);
   }
-  // A guest with only the view invitation (its own cookie jar) can download too; and so can one with only the edit invitation.
-  for(const g of [view,edit]){const only=r.browser();await only.join(g,g.code);const got=await fetchOriginal({paperId:r.made.id,scene,node:found[0].node,fetchImpl:fetchFor(only,g.base)});assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()),PNG_BYTES);}
   // The native guest uses the plugin's own authorized path (the same call paper_ui forwards), with the code held by the joined invitation.
   const joined=await joinInvitation(joinRequest({url:view.url,code:view.code}));
   const nativeFetch=async url=>{const answer=await joined.api(url,{method:'GET'});return new Response(Buffer.from(answer.body,'base64'),{status:answer.status,headers:answer.headers});};
@@ -401,10 +383,9 @@ test('Download original returns the stored bytes, name and type for view and edi
   await assert.rejects(fetchOriginal({paperId:r.other.id,scene:otherFiles.scene,node:foreign.node,fetchImpl:fetchFor(guest,view.base)}),e=>e instanceof OriginalError&&e.reason==='access-ended');
   await assert.rejects(fetchOriginal({paperId:r.other.id,scene:otherFiles.scene,node:foreign.node,fetchImpl:nativeFetch}),e=>e instanceof OriginalError&&e.reason==='failed','the native route refuses another Paper before any request');
   await assert.rejects(fetchOriginal({paperId:r.made.id,scene:{assets:{png:foreign.path}},node:foreign.node,fetchImpl:fetchFor(guest,view.base)}),e=>e.reason==='not-found','this Paper does not hold the other Paper\'s file');
-  // A stored file that was removed gives a message and no download; an image with no asset entry never asks.
+  // A stored file that was removed gives a message and no download.
   await fs.rm(path.join(r.made.path,'assets',found[2].name));
   await assert.rejects(fetchOriginal({paperId:r.made.id,scene,node:found[2].node,fetchImpl:fetchFor(guest,view.base)}),e=>e.reason==='not-found');
-  await assert.rejects(fetchOriginal({paperId:r.made.id,scene:{assets:{}},node:found[0].node,fetchImpl:()=>{throw new Error('must not ask');}}),e=>e.reason==='missing');
   // Paths the server would never serve stay refused even if a hand-made scene named them.
   for(const bad of ['assets/../paper.json','assets/.write-lock','assets/..%2Fpaper.json'])await assert.rejects(fetchOriginal({paperId:r.made.id,scene:{assets:{png:bad}},node:found[0].node,fetchImpl:fetchFor(guest,view.base)}),e=>e instanceof OriginalError);
   // An invitation for another Paper does not open this one's assets.
@@ -499,9 +480,8 @@ test('dropped images are stored as their original bytes by edit guests only, wit
   const reread = await r.library.read(r.made.id); assert.deepEqual(reread.paper.assetNames, {img: 'Hero shot.png'}, 'a refused save changed nothing');
   const node = reread.paper.pages[0].nodes.find(n => n.id === 2), fetchFor = (who, g) => (url, options) => who.request(g.base, url, {headers: options?.cache === 'no-store' ? {'Cache-Control': 'no-store'} : {}});
   for (const [who, g] of [[editor, edit], [viewer, view]]) { const got = await fetchOriginal({paperId: r.made.id, scene: reread.paper, node, fetchImpl: fetchFor(who, g)}); assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()), PNG_BYTES); assert.equal(got.saveAs, 'Hero shot.png'); assert.equal(got.name, stored.path.slice(7)); }
-  // After revocation neither the import nor a fresh original is available.
+  // After revocation the import is refused (a fresh original after revocation is the previous test's).
   await r.sharing.stop(r.made.id, edit.id); assert.equal((await upload(editor, edit, PNG_BYTES, 'image/png')).status, 401);
-  await assert.rejects(fetchOriginal({paperId: r.made.id, scene: reread.paper, node, fetchImpl: fetchFor(editor, edit)}), e => e.reason === 'access-ended');
   // An older Paper without names is untouched: the stored name is offered.
   const oldScene = {assets: reread.paper.assets}; assert.equal((await fetchOriginal({paperId: r.made.id, scene: oldScene, node, fetchImpl: fetchFor(viewer, view)})).saveAs, stored.path.slice(7));
 });

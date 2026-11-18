@@ -45,7 +45,7 @@ Verify a download: `shasum -a 256 -c openpaperdesign-<version>.zip.sha256` (Linu
 
 Nothing publishes on ordinary pushes or pull requests, and no step creates a tag.
 
-The workflows pin every action to a full commit hash with its release tag in a comment. Update them deliberately: look up the tag with `gh api repos/<owner>/<action>/git/ref/tags/<tag>` (resolve annotated tags once more through `git/tags/<sha>`) and change hash and comment together. `tests/workflow-files.mjs` fails on an unpinned action.
+The workflows pin every action to a full commit hash with its release tag in a comment. Update them deliberately: look up the tag with `gh api repos/<owner>/<action>/git/ref/tags/<tag>` (resolve annotated tags once more through `git/tags/<sha>`) and change hash and comment together. `tests/workflow-files.test.mjs` fails on an unpinned action.
 
 ## Native install acceptance
 

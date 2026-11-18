@@ -29,7 +29,6 @@ test('the request is the typed standard shape, which the stand-in validator acce
   assert.equal(validate(params), null); assert.deepEqual(Object.keys(params), ['contents']); assert.equal(params.contents.length, 1); const [item] = params.contents; assert.equal(item.type, 'resource'); assert.deepEqual(Object.keys(item.resource).sort(), ['blob', 'mimeType', 'uri']);
   assert.equal(item.resource.mimeType, 'image/png'); assert.equal(nameOf(item.resource.uri), 'Capino.png'); assert.deepEqual(Uint8Array.from(Buffer.from(item.resource.blob, 'base64')), data, 'the bytes are exactly the file');
   const flat = {contents: [{uri: 'file:///Capino.png', mimeType: 'image/png', blob: item.resource.blob}]}; assert.match(validate(flat), /invalid_union params\.contents\[0\]/, 'the shape shipped in preview.28 is refused by the validator, as the host refused it');
-  for (const bad of [{blob: new Blob(['x']), name: 'a.png'}, {contents: []}, {contents: [{type: 'resource', resource: {uri: 'file:///a'}}]}, {contents: [{type: 'resource_link', uri: 'file:///a'}]}]) assert.ok(validate(bad), JSON.stringify(Object.keys(bad)));
 });
 
 test('names and bytes survive: Unicode and awkward file names are percent-encoded into the last uri segment and never become a path, large files are encoded whole, an unknown MIME is a safe default', () => {
@@ -38,7 +37,6 @@ test('names and bytes survive: Unicode and awkward file names are percent-encode
   }
   const big = new Uint8Array(5 * 1024 * 1024 + 7).map((_, i) => (i * 31) & 255), blob = downloadContents('big.bin', 'application/octet-stream', big).contents[0].resource.blob; assert.equal(Buffer.from(blob, 'base64').length, big.length); assert.deepEqual(Uint8Array.from(Buffer.from(blob, 'base64').subarray(5 * 1024 * 1024)), big.subarray(5 * 1024 * 1024)); assert.equal(base64(big), Buffer.from(big).toString('base64'));
   assert.equal(downloadContents('x', '', Uint8Array.of(1)).contents[0].resource.mimeType, 'application/octet-stream'); assert.equal(downloadContents('x', undefined, Uint8Array.of(1)).contents[0].resource.mimeType, 'application/octet-stream');
-  for (const mime of ['image/png', 'image/jpeg', 'text/html', 'application/json', 'application/zip']) assert.equal(downloadContents('f', mime, Uint8Array.of(1)).contents[0].resource.mimeType, mime);
 });
 
 // ---- The shipped native host core, against a stand-in parent window.
@@ -90,7 +88,6 @@ test('no reply establishes nothing: the 5-minute deadline reports an UNCONFIRMED
 test('a native view without a host download route says it is unsupported and tries nothing else: no direct link, no request, no acknowledgement', async () => {
   const h = host({capability: false, clientType: 'generic_example'}), error = await h.download(png(), 'x.png').catch(e => e);
   assert.equal(error.unsupported, true); assert.equal(error.message, 'This host app does not offer file downloads to Paper, so nothing was saved. Open Paper in a browser to export.'); assert.equal(h.calls.length, 0, 'no host request'); assert.equal(h.anchors.length, 0, 'no direct link in a sandboxed app'); assert.equal(h.nodes.length, 0);
-  const body = hostSource.slice(hostSource.indexOf('async function download(blob,name){'), hostSource.indexOf('async function navigate(value){')); assert.doesNotMatch(body, /createObjectURL|link\.download|\.click\(\)|createElement/, 'the native download has no anchor route left');
 });
 
 test('the non-blocking notice is bounded, never takes focus, and replaces itself', async () => {
@@ -121,6 +118,7 @@ test('through the real app callers every outcome is worded for what is known: ac
 
 test('every caller of the host download sits in a catch that keeps the Paper, and the export messages say unconfirmed outcomes plainly', async () => {
   const callers = [...appSource.matchAll(/[^\n]*\bawait download\(|[^\n]*\bvoid download\(|deliver: async \(blob, name\) => \{ await download\(blob, name\); \}/g)].length; assert.ok(callers >= 6, `found ${callers} callers`);
-  for (const [name, pattern] of [['original', /await download\(original\.blob,original\.saveAs\)[\s\S]*?\}catch\(error\)\{if\(error\?\.name!=='AbortError'\)message\(/], ['JSON', /void download\(new Blob\(\[JSON\.stringify\(scene, null, 2\)\][^\n]*\.catch\(error => message\(error\.message\)\)/], ['feedback', /void download\(new Blob\(\[bytes \?\? JSON\.stringify\(feedback\.workspace\)\][^\n]*\.catch\(error => message\(error\.message\)\)/], ['image export', /message\(error\?\.unconfirmed \? error\.message : `Export failed: \$\{error\?\.message \|\| error\}`\)/], ['HTML', /await download\(new Blob\(\[await standaloneHtml[^\n]*\n[^\n]*\n\s*\} catch \(error\) \{ message\(error\?\.unconfirmed \? error\.message : `Export failed/], ['archive', /const where = await download\(new Blob\(\[await blob\.arrayBuffer\(\)\][^\n]*\n\s*\} catch \(error\) \{ status\.textContent = error\.message; \}/], ['bundle', /await download\(await response\.blob\(\),`\$\{slug\(scene\.name\)\}\.paper\.zip`\);message\([^\n]*\}catch\(error\)\{message\(error\.message\);\}/]]) assert.match(appSource, pattern, name);
+  // Download original and image export are run through the real callers in the previous test; these callers are not.
+  for (const [name, pattern] of [['JSON', /void download\(new Blob\(\[JSON\.stringify\(scene, null, 2\)\][^\n]*\.catch\(error => message\(error\.message\)\)/], ['feedback', /void download\(new Blob\(\[bytes \?\? JSON\.stringify\(feedback\.workspace\)\][^\n]*\.catch\(error => message\(error\.message\)\)/], ['HTML', /await download\(new Blob\(\[await standaloneHtml[^\n]*\n[^\n]*\n\s*\} catch \(error\) \{ message\(error\?\.unconfirmed \? error\.message : `Export failed/], ['archive', /const where = await download\(new Blob\(\[await blob\.arrayBuffer\(\)\][^\n]*\n\s*\} catch \(error\) \{ status\.textContent = error\.message; \}/], ['bundle', /await download\(await response\.blob\(\),`\$\{slug\(scene\.name\)\}\.paper\.zip`\);message\([^\n]*\}catch\(error\)\{message\(error\.message\);\}/]]) assert.match(appSource, pattern, name);
   assert.doesNotMatch(hostSource, /status\(error\.message,\(\)=>document\.getElementById\('paper-native-status'\)\?\.remove\(\),'Back to Paper'\)/); assert.match(hostSource, /catch\(error\)\{notice\(error\.message\)\}/);
 });

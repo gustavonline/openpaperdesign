@@ -74,8 +74,7 @@ test('the other pages, assets and feedback are untouched by page changes, which 
   scene = clone(after.paper); applyPageAction(scene, record, true); saved = await library.save(made.id, Buffer.from(JSON.stringify(scene)), after.revision); assert.ok(saved.saved);
   const back = await library.read(made.id); assert.deepEqual(back.paper.pages[1], paper.pages[1], 'the restored page is exactly what was deleted'); assert.equal(back.paper.pages.length, 3);
   assert.equal(JSON.stringify((await library.read(made.id, 'feedback')).workspace ?? (await library.read(made.id, 'feedback'))), feedbackBefore, 'feedback is not touched');
-  // A stale revision is refused like any other save (another editor changed the Paper meanwhile).
-  scene = clone(back.paper); deletePageFrom(scene, 'third'); await assert.rejects(library.save(made.id, Buffer.from(JSON.stringify(scene)), first.revision), e => e.status === 409);
+  // A stale page save is refused like any other save (workflow-library's stale-save test); page content does not change that check.
   // The last page can never be saved away.
   scene = clone(back.paper); scene.pages = []; await assert.rejects(library.save(made.id, Buffer.from(JSON.stringify(scene)), back.revision), e => e.status === 400);
 });
