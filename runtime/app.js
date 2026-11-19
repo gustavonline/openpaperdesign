@@ -1,6 +1,6 @@
 import {setupSidebar} from './sidebar.js?v=d22a4109a9cf';
 import {surfaceReady,inPaperSurface,paperAsset,onSurfaceDispose,beforeSurfaceLeave,surfaceAlive,surfaceDownload} from './surface.js?v=da065f7b280e';
-import {setupPresence} from './presence.js?v=2a7d7c240b0d';
+import {setupPresence} from './presence.js?v=1fa0a14b5135';
 import { describeExpiry, endedStatus, knownEnd } from './invitation.js';
 import { setupSharing } from './sharing.js?v=060e4e338159';
 import { createMotion } from './play.js?v=c0c7b10e35f4';
@@ -2303,7 +2303,7 @@ async function start() {
       if (workspace === null || (typeof workspace === 'object' && !Array.isArray(workspace))) { feedback.workspace = workspace; feedback.pendingBytes = backup; feedback.conflict = true; }
     } else if (backup) keepBackup(null);
   } catch { /* An unreadable local backup never replaces the saved file. */ }
-  presenceUI=setupPresence({paperId,paperQuery,clientHeaders,stage,presenceIdentity:access.presenceIdentity,shared:access.shared,
+  presenceUI=setupPresence({paperId,paperQuery,clientHeaders,stage,presenceIdentity:access.presenceIdentity,shared:access.shared,chrome:[$('#left-bar'),$('#right-bar')],
     revision:()=>revision,view:()=>pageId,
     element:(id,node)=>dom.get(id+':'+node),
     visible(id,node){const el=dom.get(id+':'+node);if(!el)return false;if(el.checkVisibility){if(!el.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))return false;}else for(let p=el;p&&p!==world;p=p.parentElement){const s=window.getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}const r=this.bounds(id,node);return !!r&&r.x+r.w>0&&r.y+r.h>0&&r.x<stage.clientWidth&&r.y<stage.clientHeight;},
