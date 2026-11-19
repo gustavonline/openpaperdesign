@@ -47,3 +47,16 @@ test('the markup puts Zoom to fit beside the zoom control and both panels share 
   for (const rule of [/--panel-w:240px/, /body\.left-open\{--lw:var\(--panel-w\)\}body\.right-open\{--rw:var\(--panel-w\)\}/, /#left-panel\{left:0;width:var\(--panel-w\)/, /#right-panel\{right:0;width:var\(--panel-w\)/, /#left-bar\{left:0;width:var\(--panel-w\)/, /#right-bar\{right:0;width:var\(--panel-w\)/]) assert.match(css, rule);
   assert.doesNotMatch(css, /#right-panel\{[^}]*width:\d+px|#right-bar\{[^}]*width:\d+px|--rw:(?!0px)\d+px/, 'no separate hard-coded right width');
 });
+
+test('the toolbar is placed again when the panels swap below 1024 px, although the canvas keeps its size', async () => {
+  // Opening the Pages panel closes Properties: the canvas moves 240px right at the same width, so only the panels resize.
+  const app = await fs.readFile(new URL('../runtime/app.js', import.meta.url), 'utf8');
+  const source = app.slice(app.indexOf('  bounds: {'), app.indexOf('\n  ready()'));
+  const size = {stage: 660, '#left-panel': 0, '#right-panel': 240}, seen = new Map(), observers = [];
+  const ResizeObserver = class { constructor(callback) { this.callback = callback; this.els = []; observers.push(this); } observe(el) { this.els.push(el); seen.set(el, size[el]); } disconnect() { this.els = []; } };
+  const {bounds} = new Function('stage', '$', 'body', 'TOP_CHROME', 'ResizeObserver', `return {${source}}`)('stage', s => s, {}, 40, ResizeObserver);
+  let placed = 0; bounds.subscribe(() => placed++);
+  Object.assign(size, {'#left-panel': 240, '#right-panel': 0});
+  for (const o of observers) { const changed = o.els.filter(el => seen.get(el) !== size[el]); changed.forEach(el => seen.set(el, size[el])); if (changed.length) o.callback(changed); }
+  assert.equal(placed, 1, 'the swap re-places the toolbar');
+});
