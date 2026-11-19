@@ -2078,7 +2078,8 @@ const inspectionHost = {
       return { left: r.left, top: r.top + inset, width: r.width, height: Math.max(0, r.height - inset),
         topSpan: fitsTop ? { left: spanLeft, right: spanRight } : null, sideTop: fitsTop && (lb || rb) ? r.top + TOP_CHROME + 8 : null };
     },
-    subscribe(onChange) { const observer = new ResizeObserver(() => onChange()); observer.observe(stage); return () => observer.disconnect(); },
+    // The panels are observed too: below 1024 px opening one closes the other, which moves the stage without resizing it.
+    subscribe(onChange) { const observer = new ResizeObserver(() => onChange()); for (const el of [stage, $('#left-panel'), $('#right-panel')]) observer.observe(el); return () => observer.disconnect(); },
   },
   ready() {
     body.classList.add('paper-inspection-ready'); toolbarStatusObserver?.disconnect();
