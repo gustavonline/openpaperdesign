@@ -1,10 +1,14 @@
 import {transitionAgent,changedArtwork,EFFECT_MS,REVEAL_MS} from './agent-motion.js?v=3b1734f2e2bd';
 // Badge placement. A badge nobody has moved sits in a centred strip along the top of the canvas; a moved badge keeps a position of its own,
 // kept only as a local preference per participant identity (never in the Paper), clamped into the visible canvas whenever it is placed.
+// A badge that would sit under a floating corner bar (Share and zoom, or the Paper title) is moved down to just below it, so it never hides.
 // A moved badge stays in the strip's layout (so its slot is kept and the others never shift) and is only offset from that slot.
 const BADGE_GAP = 8, BADGE_LIMIT = 24, BADGE_ID = /^[\w:.@-]{1,100}$/;
-export function clampBadge(position, size, area, gap = BADGE_GAP) {
-  return {x: Math.round(Math.max(gap, Math.min(position.x, area.width - size.w - gap))), y: Math.round(Math.max(gap, Math.min(position.y, area.height - size.h - gap)))};
+export function clampBadge(position, size, area, gap = BADGE_GAP, avoid = []) {
+  const x = Math.round(Math.max(gap, Math.min(position.x, area.width - size.w - gap)));
+  let y = Math.round(Math.max(gap, Math.min(position.y, area.height - size.h - gap)));
+  for (const bar of avoid) if (x < bar.right && x + size.w > bar.left && y < bar.bottom && y + size.h > bar.top) y = Math.round(Math.max(gap, Math.min(bar.bottom + gap, area.height - size.h - gap)));
+  return {x, y};
 }
 export function badgeKeyMove(position, key, big = false) {
   const step = big ? 40 : 10, delta = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]}[key];
@@ -24,17 +28,19 @@ export function setupPresence(host){
   try{positions=readBadgePositions(localStorage.getItem(positionKey));}catch{}
   const hint='Drag to move · Arrow keys to move · Double-click or Home to reset';
   function remember(){try{localStorage.setItem(positionKey,writeBadgePositions(positions))}catch{}}
+  // The floating corner bars in canvas coordinates; a bar docked over its open panel lies outside the canvas and is never in the way.
+  const bars=r=>(host.chrome||[]).map(el=>el.getBoundingClientRect()).filter(b=>b.width&&b.height).map(b=>({left:b.left-r.left,top:b.top-r.top,right:b.right-r.left,bottom:b.bottom-r.top}));
   function place(){
-    const r=host.stage.getBoundingClientRect(),area={width:r.width,height:r.height},slots=new Map();
+    const r=host.stage.getBoundingClientRect(),area={width:r.width,height:r.height},avoid=bars(r),slots=new Map();
     // Measure every slot with no offsets applied, so a badge's own offset never feeds back into where its slot is.
     for(const chip of chips.values())chip.style.left=chip.style.top='';
     for(const [identity,chip] of chips){const c=chip.getBoundingClientRect();slots.set(identity,{x:c.left-r.left,y:c.top-r.top});}
     for(const [identity,chip] of chips){const saved=positions.get(identity);chip.classList.toggle('moved',!!saved);
       if(!saved)continue;
-      const p=clampBadge(saved,{w:chip.offsetWidth,h:chip.offsetHeight},area),slot=slots.get(identity);chip.style.left=Math.round(p.x-slot.x)+'px';chip.style.top=Math.round(p.y-slot.y)+'px';}
+      const p=clampBadge(saved,{w:chip.offsetWidth,h:chip.offsetHeight},area,undefined,avoid),slot=slots.get(identity);chip.style.left=Math.round(p.x-slot.x)+'px';chip.style.top=Math.round(p.y-slot.y)+'px';}
   }
   const where=chip=>{const r=chip.getBoundingClientRect(),s=host.stage.getBoundingClientRect();return {x:r.left-s.left,y:r.top-s.top};};
-  function moveTo(identity,chip,position){const r=host.stage.getBoundingClientRect();positions.delete(identity);positions.set(identity,clampBadge(position,{w:chip.offsetWidth,h:chip.offsetHeight},{width:r.width,height:r.height}));place();}
+  function moveTo(identity,chip,position){const r=host.stage.getBoundingClientRect();positions.delete(identity);positions.set(identity,clampBadge(position,{w:chip.offsetWidth,h:chip.offsetHeight},{width:r.width,height:r.height},undefined,bars(r)));place();}
   function reset(identity){positions.delete(identity);remember();place();}
   function wire(identity,chip){
     chip.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.stopPropagation();const start=where(chip);drag={id:event.pointerId,identity,chip,x:event.clientX,y:event.clientY,start,moved:false};try{chip.setPointerCapture(event.pointerId)}catch{}});
@@ -48,7 +54,8 @@ export function setupPresence(host){
       event.preventDefault();event.stopPropagation();moveTo(identity,chip,next);remember();
     });
   }
-  const sizeObserver=new ResizeObserver(place);sizeObserver.observe(host.stage);
+  // The bars change size when a panel opens, closes or takes the other's place, which can leave the canvas the same size.
+  const sizeObserver=new ResizeObserver(place);for(const el of [host.stage,...host.chrome||[]])sizeObserver.observe(el);
   const delay=window.__paperNative?500:100,lifetime=new AbortController();
   const peers=new Map(),marks=new Map(),animations=new Set(),seenRevisions=new Set([host.revision()]);
   const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');let commits=[],effectTimer=null,view=host.view(),updates=0,connection=0;

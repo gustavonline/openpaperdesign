@@ -21,7 +21,7 @@ class El {
 }
 const doc=ids=>({pages:[{id:'page',nodes:ids.map(id=>({id,type:'rect',rect:{x:id*20,y:10,w:100,h:60}}))}]});
 const peer={id:'agent',kind:'agent',name:'Quiet Owl',avatar:'✦',color:'#487c70',ttl:300000,status:'Drawing',pageId:'page',nodeId:1};
-function harness(t,{reduced=false,presenceIdentity,shared=false,storage}={}){
+function harness(t,{reduced=false,presenceIdentity,shared=false,storage,chrome}={}){
  t.mock.timers.enable({apis:['Date','setTimeout','setInterval'],now:100000});
  const document=new El('document'),window=new El('window'),media=new El('media'),stage=new El('stage'),elements=new Map(),animations=[],observers=[];
  document.hidden=false;document.hasFocus=()=>true;document.createElement=tag=>new El(tag);document.body=stage;media.matches=reduced;window.matchMedia=()=>media;window.getComputedStyle=el=>({opacity:el.style.opacity||'1'});
@@ -29,7 +29,7 @@ function harness(t,{reduced=false,presenceIdentity,shared=false,storage}={}){
  for(const [k,v] of Object.entries(globals)){saved[k]=globalThis[k];globalThis[k]=v;}
  let view='page',offset=0;
  function element(page,id){const key=page+':'+id;if(!elements.has(key)){const el=new El();el.animate=(frames,options)=>{const a={frames,options,cancelled:false,cancel(){this.cancelled=true;}};animations.push(a);return a;};elements.set(key,el);}return elements.get(key);}
- const host={stage,presenceIdentity,shared,paperId:'paper',paperQuery:'?paper=paper',clientHeaders:{},revision:()=> 'r0',view:()=>view,local:()=>({}),toPage:p=>p,hit:()=>null,element,visible:(p,id)=>p===view&&id!==99,bounds:(p,id)=>p===view?{x:id*20+offset,y:10,w:100,h:60}:null,pageBounds:p=>p===view?{x:offset,y:10,w:500,h:300}:null,screen:(p,r)=>p===view?{...r,x:r.x+offset}:null};
+ const host={stage,presenceIdentity,shared,paperId:'paper',paperQuery:'?paper=paper',clientHeaders:{},revision:()=> 'r0',view:()=>view,local:()=>({}),toPage:p=>p,hit:()=>null,element,visible:(p,id)=>p===view&&id!==99,bounds:(p,id)=>p===view?{x:id*20+offset,y:10,w:100,h:60}:null,pageBounds:p=>p===view?{x:offset,y:10,w:500,h:300}:null,screen:(p,r)=>p===view?{...r,x:r.x+offset}:null,chrome};
  const ui=setupPresence(host),layer=stage.children[0],roster=stage.children[1];
  t.after(()=>{ui.stop();for(const [k,v] of Object.entries(saved)){if(v===undefined)delete globalThis[k];else globalThis[k]=v;}});
  function receive(base='r0',revision='r1',actor=peer,peers=[peer]){ui.receive({paperId:'paper',peers,commits:[{baseRevision:base,revision,actor,ttl:15000}]});}
@@ -195,6 +195,21 @@ test('badges are clamped into the visible canvas on resize, including narrow lay
  assert.equal(a.style.left, '152px'); assert.equal(a.style.top, '440px'); assert.ok(Number.parseInt(a.style.left) >= 8 && Number.parseInt(a.style.left) + a.offsetWidth <= 320 - 8);
  h.host.stage.rect = {left: 0, top: 0, width: 100, height: 60}; h.observers[0].callback(); assert.equal(a.style.left, '8px', 'a stage too small keeps the badge at the edge instead of off screen'); assert.equal(a.style.top, '20px');
  assert.equal(chips(h).length, 2);
+});
+test('a moved badge never hides under a floating corner bar: it sits just below, keeps its own x and its saved place, and the other badge stays put', t => {
+ const writes = new Map(), bar = new El(), h = harness(t, {storage: {getItem: k => writes.get(k) ?? null, setItem: (k, v) => writes.set(k, v), removeItem: k => writes.delete(k)}, chrome: [bar]});
+ bar.rect = {left: 700, top: 2, right: 940, bottom: 38, width: 240, height: 36};   // Share and zoom, floating at the top right
+ h.ui.receive({paperId: 'paper', peers: two()}); const [a, b] = chips(h);
+ drag(a, 800, 10); assert.equal(a.style.left, '800px'); assert.equal(a.style.top, '46px', 'dropped on the bar, it lands 8px below it'); assert.deepEqual(JSON.parse(writes.get(KEY)).alice, {x: 800, y: 46});
+ assert.equal(b.style.left ?? '', '', 'the other badge did not move');
+ drag(a, 100, 10); assert.equal(a.style.left, '100px'); assert.equal(a.style.top, '10px', 'beside the bar it goes where it was put');
+ // A narrow window: the bar now spans the top of the canvas. The badge is shown below it; its saved place is unchanged and returns with the room.
+ h.host.stage.rect = {left: 0, top: 0, width: 320, height: 480}; bar.rect = {left: 9, top: 2, right: 315, bottom: 38, width: 306, height: 36}; h.observers[0].callback();
+ assert.equal(a.style.left, '100px'); assert.equal(a.style.top, '46px'); assert.deepEqual(JSON.parse(writes.get(KEY)).alice, {x: 100, y: 10});
+ h.host.stage.rect = {left: 0, top: 0, width: 1000, height: 700}; bar.rect = {left: 700, top: 2, right: 940, bottom: 38, width: 240, height: 36}; h.observers[0].callback(); assert.equal(a.style.top, '10px');
+ // A bar docked over its open panel has no size here, or lies outside the canvas: it is never in the way.
+ bar.rect = {left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0}; drag(a, 700, 10); assert.equal(a.style.top, '10px');
+ a.fire('keydown', {key: 'Home'}); assert.equal(a.style.left, '', 'Home still puts it back');
 });
 test('a badge can be moved and put back with the keyboard, and other keys are left alone', t => {
  const writes = new Map(), h = harness(t, {storage: {getItem: k => writes.get(k) ?? null, setItem: (k, v) => writes.set(k, v), removeItem: k => writes.delete(k)}});
