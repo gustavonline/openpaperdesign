@@ -376,7 +376,9 @@ export async function serveStdio() {
         result={contents:[{...await homeResource(editor,uiKey),uri:request.params.uri}]};
       }
       else if(request.method==='tools/call'){
-        const execute=async()=>{try{const value=await call(request.params?.name,request.params?.arguments);return ['paper_home','paper_join'].includes(request.params?.name)?{_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI},structuredContent:value,content:[{type:'text',text:JSON.stringify({...value,papers:value.papers?.map(({thumbnail,...p})=>p)})}]}:request.params?.name==='paper_ui'?{structuredContent:value,content:[]}:{content:[{type:'text',text:JSON.stringify(value)}]};}catch(error){return {content:[{type:'text',text:error.message}],isError:true};}};
+        // A view's tool result carries no thumbnails, in either form: the view reads them through paper_ui, and hosts count the whole result against their output limits.
+        const shown=value=>value?.papers?{...value,papers:value.papers.map(({thumbnail,...p})=>p)}:value;
+        const execute=async()=>{try{const value=await call(request.params?.name,request.params?.arguments);return ['paper_home','paper_join'].includes(request.params?.name)?{_meta:{ui:{resourceUri:HOME_URI},'openai/outputTemplate':HOME_URI},structuredContent:shown(value),content:[{type:'text',text:JSON.stringify(shown(value))}]}:request.params?.name==='paper_ui'?{structuredContent:value,content:[]}:{content:[{type:'text',text:JSON.stringify(value)}]};}catch(error){return {content:[{type:'text',text:error.message}],isError:true};}};
         const operation=request.params?.name==='paper_ui'?execute():(agentCalls=agentCalls.then(execute,execute));
         const task=operation.then(result=>respond({jsonrpc:'2.0',id:request.id,result:complete(request,result,SERVER_INFO)}));
         uiCalls.add(task);void task.finally(()=>uiCalls.delete(task));continue;

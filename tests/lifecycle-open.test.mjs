@@ -73,6 +73,9 @@ test('only paper_home and paper_join display a view; repeated saves of one Paper
   const listing = await raw('paper_home', {});
   assert.ok(hasView(listing), 'an explicit Home call carries the view');
   const workspaceId = listing.structuredContent.projects.find(project => project.kind === 'project').id;
+  // The view loads thumbnails itself (paper_ui); the result a host stores and measures carries none, and both forms say the same.
+  assert.ok(listing.structuredContent.papers.length >= 2 && listing.structuredContent.papers.every(paper => !('thumbnail' in paper)), 'no thumbnails in the tool result');
+  assert.deepEqual(JSON.parse(listing.content[0].text), listing.structuredContent);
   const first = await raw('paper_home', {action: 'open', workspaceId, paperId: a.id});
   assert.ok(first._meta.ui.resourceUri && new URL(first.structuredContent.url).searchParams.get('paper') === a.id);
 

@@ -122,7 +122,7 @@ export function createHome(open,{notionFactory}={}){
           catch(error){server={state:'unavailable',message:error.message};}
           projects.push({id:entry.id,name:entry.name,kind:entry.id==='personal'?'personal':'project',storageRoot:library.root,count:found.length,server});
           for(const paper of found.slice(0,200)){
-            // The data URI stays in `thumbnail`, which model-facing output strips; `preview` is small metadata.
+            // The data URI stays in `thumbnail` for the Home view (/api/home); tool results strip it; `preview` is small metadata.
             let thumbnail=null,preview={state:'unavailable',revision:null};
             if(!paper.error)try{const made=await paperPreview(library,paper.id,previewBudget);previewBudget-=made.cost;thumbnail=made.src;preview=made.preview;}catch{/* Unavailable stays honest, never blank. */}
             const {href,...info}=paper;papers.push({...info,thumbnail,preview,notion:notionById.get(paper.id)||null,notionUnavailable:linked.unavailable||false,workspaceId:entry.id,workspaceName:entry.name,workspace:entry.root,folder:path.join(library.root,paper.id)});

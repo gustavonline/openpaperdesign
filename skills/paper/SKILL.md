@@ -15,7 +15,7 @@ In Codex, open Paper as the plugin's embedded app in the side panel. Call `paper
 
 Use `openpaperdesign_workspace` MCP tools for the work: `paper_read`, factual `paper_activity`, `paper_add_asset`, revision-checked `paper_save`, and the note/feedback tools. When a Paper has a source handoff (`handoff` in `paper_read`; see [handoff.md](references/handoff.md)), `paper_handoff` downloads the author's source archive for rebuilding in your own project (never extracted or run for you). Locally generating JSON or a sourceFile is fine; commit it through `paper_save` rather than direct file writes, raw HTTP or browser automation. MCP saves preserve agent attribution and drive real work/arrival effects. Save useful completed changes, without artificial delays or fabricated activity.
 
-Discover deferred plugin tools before declaring them unavailable. If the host cannot expose the app or MCP, report that limitation instead of silently switching to browser/CLI authoring. Use the standalone browser/CLI route only when the person explicitly chooses it. Read-only file lookup can help diagnose missing tools, but does not prove the native app or agent animations worked.
+Discover deferred plugin tools before declaring them unavailable. If the host cannot expose the app or MCP, report that limitation instead of silently switching to browser/CLI authoring. Use the standalone browser/CLI route only when the person explicitly chooses it. Claude Code's embedded view does not render the canvas yet (issue #40); there, offer the `url` from `paper_home` for the person to open in their own browser and keep using the tools. Read-only file lookup can help diagnose missing tools, but does not prove the native app or agent animations worked.
 
 ## Find and open
 
