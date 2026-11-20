@@ -21,7 +21,15 @@ So the handshake and the tool round trip work in a host that follows the publish
 
 Claude documents that a view whose tool result exceeds about 150,000 characters never hydrates while the code-execution sandbox is active, and that Claude Code applies a 25,000-token default output limit (`MAX_MCP_OUTPUT_TOKENS`); see [Claude's MCP Apps troubleshooting page](https://claude.com/docs/connectors/building/mcp-apps/troubleshooting). The control's tool result was tiny, so the earlier probes did not test this.
 
-`paper_home` returned each Paper's thumbnail data URL in `structuredContent`, although the text form already left it out and the widget never reads it from the tool result. Home loads its thumbnails through `paper_ui`. Measured with synthetic Papers of 30 rectangles each:
+`paper_home` returned each Paper's thumbnail data URL in `structuredContent`, although the text form already left it out and the widget never reads it from the tool result.
+
+**Where the widget reads data:**
+- `runtime/native-host.js:93` (`applyInvocation`) reads only the error text and `structuredContent.guest`, `.stopped` and `.url` from the tool result.
+- `runtime/native.js` contains no `window.openai.toolOutput` read.
+- Its four `thumbnail` reads are all in the Home cards (`runtime/home.js:43-65`). Those cards get their list from `/api/home`, which the native transport sends through `paper_ui` (`runtime/native-host.js:10,63` and `server/ui.mjs:17-21`); `paper_ui` results are not stripped.
+- `tests/lifecycle-open.test.mjs` checks both sides. The view tool result carries no thumbnails, and the same listing through `paper_ui` carries one for every Paper.
+
+Measured with synthetic Papers of 30 rectangles each:
 
 | Papers | Whole result on `main` | This branch |
 | --- | --- | --- |
@@ -29,7 +37,7 @@ Claude documents that a view whose tool result exceeds about 150,000 characters 
 | 25 | 115,770 | 41,045 |
 | 75 | 344,620 | 120,445 |
 
-This branch returns the same thumbnail-free value in both forms. Whether that is what holds Claude's view at "Rendering widget" is still to be shown on the Mac. A larger personal library on `main` is well past both documented limits.
+This branch returns the same thumbnail-free value in both forms. The result is smaller, not bounded: about 1,600 characters per Paper remain, sent twice (as text and as `structuredContent`). Whether size is what holds Claude's view at "Rendering widget" is not shown; that needs the Mac.
 
 ## Interim workflow: MCP plus the browser canvas
 
@@ -37,6 +45,10 @@ The stdio server opened a synthetic Paper with `paper_home` `action:"open"`. The
 
 ## For the Mac test
 
-1. On `main`, with an empty `PAPER_HOME` (one synthetic Paper), open Home in Claude Code. If the canvas renders, then with 75 synthetic Papers it should not. Raising `MAX_MCP_OUTPUT_TOKENS` is a further check.
-2. Repeat on this branch with the larger library.
-3. If the canvas renders, check editing, saving and dragging a badge. Then check Codex again.
+Use synthetic Papers in an isolated `PAPER_HOME`, and record the Claude Code and plugin versions. Token counts below are estimates at about 4 characters per token.
+
+1. **One Paper on `main`.** If Claude's canvas still stays at "Rendering widget", size is not the cause.
+2. **25 Papers.** `main` gives 115,770 characters, under the 150,000-character hydration limit but likely over Claude Code's 25,000-token default. This branch gives 41,045 characters, likely under both. A difference between the two points at the token limit; raising `MAX_MCP_OUTPUT_TOKENS` on `main` checks the same thing.
+3. **75 Papers.** `main` gives 344,620 characters, over both limits. This branch gives 120,445, under the character limit but likely still over the token limit, so a failure here alone does not say which limit applied.
+4. If the canvas appears but Home stalls, the next suspect is `paper_ui`. It returns the thumbnails to the view (up to about 1 MB of previews), and it is not known whether Claude Code applies its output limit to calls made by the app.
+5. If the canvas renders, check editing, saving and dragging a badge in Claude, then check Codex again.
