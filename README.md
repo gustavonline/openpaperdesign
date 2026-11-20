@@ -34,7 +34,7 @@ Home, Papers and the Notion picker use the same plugin window. Use the Paper men
 /openpaperdesign:home
 ```
 
-The Home command requests the plugin app. Hosts without embedded app support can use the standalone browser route when explicitly chosen.
+The Home command requests the plugin app. Claude Code can use every Paper tool, but its embedded canvas may stay at “Rendering widget” ([#40](https://github.com/gustavonline/openpaperdesign/issues/40)). If it does, keep working through the tools and open the canvas yourself in your own browser: the agent can give you the `url` that opening or creating a Paper with `paper_home` returns (an address on this computer, `http://127.0.0.1:…`, valid while that session's Paper server runs). It is the same live editor and shows the agent's saves as they happen. Other hosts without embedded app support can use the same browser route when you choose it.
 
 ## Use it
 
